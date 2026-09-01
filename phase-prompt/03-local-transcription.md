@@ -112,6 +112,10 @@ Transcript는 이 제품의 두 번째 핵심 산출물이며, Phase 4(AI Note)�
 - §14.4의 값은 2026-09-01 기준이다. 도입 시점에 재확인한다. 추측으로 CLI 플래그나
   JSON 필드명을 쓰지 않는다 — 실제 출력으로 확인한다.
 - 전사가 느리다는 이유로 정확도가 낮은 모델을 조용히 강제하지 않는다. 선택은 사용자 설정이다.
+- **Git commit / push는 이 Phase의 작업이 아니다.** Phase commit은 Phase가 완료되고
+  검증된 뒤 운영자가 한다 (`docs/GIT-WORKFLOW.md`). Worker가 commit하면 HEAD가 바뀌어
+  Gate·Verifier가 묶여 있는 subject fingerprint가 실행 도중에 흔들린다.
+  저장소에 파일을 만들고 고치는 것까지가 Task의 일이다.
 
 ## Out of Scope
 

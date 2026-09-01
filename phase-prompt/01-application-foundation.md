@@ -104,6 +104,10 @@ Bootstrap이 만든 것은 **빈 앱 셸과 동작하는 개발 baseline**일 �
 - 외부 라이브러리를 도입할 때 버전과 실제 지원 범위를 확인한다. 추측으로 API를 쓰지 않는다.
   확인할 수 없으면 UNVERIFIED로 남기고 그 사실을 드러낸다.
 - 지금 필요하지 않은 미래 의존성(whisper · Ollama client · AI SDK · Notion SDK)을 설치하지 않는다.
+- **Git commit / push는 이 Phase의 작업이 아니다.** Phase commit은 Phase가 완료되고
+  검증된 뒤 운영자가 한다 (`docs/GIT-WORKFLOW.md`). Worker가 commit하면 HEAD가 바뀌어
+  Gate·Verifier가 묶여 있는 subject fingerprint가 실행 도중에 흔들린다.
+  저장소에 파일을 만들고 고치는 것까지가 Task의 일이다.
 
 ## Out of Scope
 

@@ -140,6 +140,11 @@ Phase 경계에서 생긴 것들을 정리한다.
 Phase 1~6에서 완료되지 않은 것이 있다면 그것을 여기서 구현하는 것이 아니라,
 완료되지 않았다는 사실을 드러낸다.
 
+## Git
+
+이 Goal이 완료되면 운영자가 최종 commit을 만든다 (`docs/GIT-WORKFLOW.md`).
+**Worker는 commit하지 않는다.**
+
 ## Source of Truth
 
 `docs/PRODUCT-SPEC.md` 전체. 특히 §2.1(불변 규칙 INV-1~INV-10) · §3(플랫폼) ·

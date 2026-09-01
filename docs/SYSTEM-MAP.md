@@ -183,6 +183,7 @@ Human Review 중 제품 요구사항이 바뀌어 Product Spec을 rev 2로 갱�
 | `docs/PRODUCT-SPEC.md` | 제품 사양 (source of truth). §14에 2026-09-01 기준 검증된 외부 사실 |
 | `phase-prompt/01~06-*.md` | Phase Goal |
 | `phase-prompt/Goal.md` | 최종 통합 Goal |
+| `docs/GIT-WORKFLOW.md` | Git/GitHub 운영 정책 — Phase 단위 commit · public 저장소 안전 규칙 |
 | `docs/LOOP-RUNTIME-FIELD-NOTES.md` | Runtime 운용 관찰 기록 |
 | `CLAUDE.local.md` | 대화형 세션 운영 지침 |
 
