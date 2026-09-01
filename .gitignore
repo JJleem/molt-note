@@ -1,0 +1,81 @@
+# Loop Runtime 실행 산출물 (runs / leases / staging). 디렉터리 자체는 .gitkeep으로 유지한다.
+/.loop-local/*
+!/.loop-local/.gitkeep
+!/.loop-local/runs/
+!/.loop-local/leases/
+!/.loop-local/staging/
+!/.loop-local/plans/
+/.loop-local/runs/*
+!/.loop-local/runs/.gitkeep
+/.loop-local/leases/*
+!/.loop-local/leases/.gitkeep
+/.loop-local/staging/*
+!/.loop-local/staging/.gitkeep
+/.loop-local/plans/*
+!/.loop-local/plans/.gitkeep
+
+# ─────────────────────────────────────────────
+# Molt Note — project
+# 경로를 루트에 고정(/)한 규칙이 여럿이다. 의도적이다:
+#   models/ · recordings/ 같은 이름은 제품 소스 디렉터리로도 흔히 쓰인다
+#   (예: src/models/recording.ts). 무앵커 규칙은 그런 소스를 조용히 삼킨다.
+# ─────────────────────────────────────────────
+
+# Environment / secrets — INV-7
+.env
+.env.*
+!.env.example
+
+# Node
+node_modules/
+dist/
+dist-ssr/
+*.local
+logs
+*.log
+npm-debug.log*
+
+# Rust / Tauri
+/target/
+/src-tauri/target/
+/src-tauri/gen/schemas
+
+# Editor
+.vscode/*
+!.vscode/extensions.json
+.idea
+*.sw?
+
+# OS metadata — Finder가 계속 만들어내며 Runtime subject fingerprint를 흔든다
+# (docs/LOOP-RUNTIME-FIELD-NOTES.md OBS-003)
+.DS_Store
+Thumbs.db
+
+# Local application data — 사용자의 로컬 DB. 절대 공개 저장소에 들어가면 안 된다.
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# 사용자 생성 콘텐츠 — 실제 회의/스터디 녹음과 그 파생물
+/recordings/
+/transcripts/
+/exports/
+
+# Audio — 어디에 있든 제외한다.
+# 향후 테스트에 작은 media fixture가 필요하면 여기서 명시적으로 allowlist한다.
+# 그 경우 실제 개인 녹음이 아니라 synthetic fixture만 허용한다. 예:
+#   !/tests/fixtures/synthetic-tone.wav
+*.wav
+*.mp3
+*.m4a
+*.aac
+*.flac
+*.webm
+*.ogg
+
+# Local models — whisper ggml / LLM 가중치. 수백 MB ~ 수 GB.
+/models/
+*.gguf
+*.bin
