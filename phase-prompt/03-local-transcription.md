@@ -82,8 +82,23 @@ Transcript는 이 제품의 두 번째 핵심 산출물이며, Phase 4(AI Note)�
    whisper JSON 출력(§14.4의 `transcription[]` · `offsets`는 밀리초 단위)을 파싱해서
    이 모델로 변환하는 로직이 있어야 한다.
 
-5. **Transcript는 immutable로 취급된다 (INV-2).** 재전사는 기존 것을 덮어쓰는 것이 아니라
-   새 Transcript를 만드는 행위로 설계한다. 어느 쪽 정책을 택하든 **기록한다.**
+5. **Transcript는 immutable · versioned다 (INV-2 · §7.1) — 이것은 확정된 규칙이다.**
+   재전사는 기존 Transcript를 `UPDATE`하지 않고 **새 Transcript를 추가**한다.
+   Phase 1이 만든 `Recording 1:N Transcript` 스키마가 여기서 실제로 쓰인다.
+
+   **`Recording.currentTranscriptId`를 이 Phase가 갱신한다** (§7.2):
+   전사가 성공하면 새 Transcript를 current로 올리고,
+   **재전사가 실패하면 기존 current를 그대로 유지한다.**
+
+   ```text
+   Transcript A = success / current
+           ↓
+   re-transcription attempt  →  failed
+           ↓
+   currentTranscript = Transcript A        (그대로)
+   ```
+
+   **실패한 시도 때문에 이미 유효한 Transcript를 잃지 않는다.** 이것은 테스트로 확인한다.
 
 6. **Recording Detail의 Transcript 탭에서 timestamp와 함께 볼 수 있다.**
 

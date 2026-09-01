@@ -12,6 +12,9 @@
 > - 2026-09-01 (rev 2) Requirements Delta 반영 — Windows를 지원 대상 플랫폼으로 추가,
 >   AI를 vendor 중립 Provider 추상화로 전환하고 core requirement에서 제외,
 >   §14.7의 근거 없는 VERIFIED 표기 정정
+> - 2026-09-01 (rev 3) Transcript cardinality 확정 — `Recording 1:N Transcript`.
+>   rev 1~2의 §7 `1:1` 표기는 §8과 모순이었으므로 **잘못된 명세로 정정했다.**
+>   `Recording.currentTranscriptId`와 `AINote.transcriptId`를 도입 (§7.1 ~ §7.3)
 
 ---
 
@@ -52,7 +55,7 @@
 | ID | 규칙 |
 | --- | --- |
 | **INV-1** | AI는 원본 audio 파일을 수정하거나 삭제하지 않는다. |
-| **INV-2** | AI는 Raw Transcript를 덮어쓰지 않는다. AI 산출물은 항상 별도 레코드다. |
+| **INV-2** | AI는 Raw Transcript를 덮어쓰지 않는다. AI 산출물은 항상 별도 레코드다. **Transcript는 immutable이며 재전사는 기존 것을 수정하지 않고 새 version을 만든다** (§7.1). |
 | **INV-3** | 후처리(전사·AI·Notion) 실패는 원본 audio와 Recording 레코드에 영향을 주지 않는다. |
 | **INV-4** | 사용자가 명시적으로 삭제하기 전까지 original audio를 자동 삭제하지 않는다. |
 | **INV-5** | 외부로 나가는 데이터는 사용자가 그 사실을 UI에서 알 수 있어야 한다. |
@@ -261,6 +264,8 @@ testability                maintenance cost
 ## 7. Local Data Model
 
 개념 모델이다. 구현 중 합리적인 변경은 가능하되, **변경 이유를 기록한다.**
+단 §7.1의 cardinality와 §7.2의 current Transcript semantics는 **확정된 domain 규칙이며**
+구현 편의를 이유로 바꾸지 않는다.
 
 ```text
 Recording
@@ -268,9 +273,11 @@ Recording
   duration
   audioPath · audioFormat
   microphone
+  currentTranscriptId?          ← 현재 사용 중인 성공한 Transcript (§7.2)
   transcriptionStatus · aiStatus · notionStatus
 
-Transcript                      (immutable · Recording 1:1)
+Transcript                      (immutable · versioned · Recording 1:N)
+  id                            ← 독립적인 identity
   recordingId
   language
   segments[] { start · end · text }
@@ -278,8 +285,10 @@ Transcript                      (immutable · Recording 1:1)
   createdAt
   engine · model
 
-AINote                          (derived · 재생성 가능 · Recording 1:N)
+AINote                          (derived · 재생성 가능 · Transcript 1:N)
+  id
   recordingId
+  transcriptId                  ← 어떤 Transcript version을 입력으로 썼는가 (§7.3)
   type            (meeting | study | summary)
   content         (§9.3의 provider 중립 structured note)
   provider        ← provenance
@@ -297,8 +306,81 @@ NotionSync
 
 **Transcript와 AINote는 서로 다른 테이블/레코드다.** INV-2에 의해 하나가 다른 하나를 덮어쓰지 않는다.
 
-`Recording`은 **source data**, `AINote`는 **derived data**다. 이 구분이 INV-1~INV-3의 근거다.
+`Recording`과 `Transcript`는 **source data**, `AINote`는 **derived data**다.
+이 구분이 INV-1~INV-3의 근거다.
 AI Provider는 `Recording`의 AI 상태 필드 외에 recording metadata를 변경하지 않는다.
+
+### 7.1 Cardinality — 확정
+
+```text
+Recording  1:N  Transcript      (immutable · versioned)
+Transcript 1:N  AINote          (derived · regeneratable)
+```
+
+전체 관계:
+
+```text
+Recording
+    │
+    ├── Transcript A            (immutable)
+    │       ├── AI Note A1      (derived)
+    │       └── AI Note A2
+    │
+    └── Transcript B            (immutable)
+            └── AI Note B1
+```
+
+**Transcript는 독립적인 identity를 가진 immutable entity다.**
+기존 Transcript row를 재전사 결과로 `UPDATE`하지 않는다.
+재전사는 기존 Transcript를 남긴 채 **새 Transcript를 추가**하는 행위다.
+
+```text
+Existing Transcript   +   New Transcript
+```
+
+> **개정 기록**: rev 1~2는 §7에서 `Transcript = Recording 1:1`로 적었으나
+> §8은 재전사가 새 Transcript를 만든다고 적어 서로 모순이었다.
+> 1:1은 재전사 시 overwrite를 강제하므로 INV-2(immutable source)와 양립할 수 없다.
+> **1:1 쪽을 잘못된 명세로 판단하여 rev 3에서 1:N으로 확정했다.**
+
+### 7.2 Current Transcript
+
+Recording은 **현재 사용되는 성공한 Transcript**를 명시적으로 식별할 수 있어야 한다.
+
+```text
+currentTranscriptId
+  = 현재 Recording에서 기본적으로 표시하고,
+    후속 작업(AI Note 생성 · Export · Notion 전송)의 기본 입력으로 사용하는
+    성공한 Transcript
+```
+
+**새로운 transcription attempt가 실패하면 기존 current Transcript를 유지한다.**
+
+```text
+Transcript A = success / current
+        ↓
+re-transcription attempt  →  failed
+        ↓
+currentTranscript = Transcript A        (그대로)
+```
+
+**실패한 후처리 때문에 이미 유효한 Transcript를 잃지 않는다.** 이것은 INV-3의 직접적인 귀결이다.
+실패한 시도는 current를 바꾸지 않으며, current가 없는 상태(`none`)도 정상 상태다.
+
+정확한 SQL FK와 migration 구현은 Phase 1의 architecture에 맞게 설계할 수 있다.
+**고정된 것은 위의 domain semantics이지 특정 스키마 형태가 아니다.**
+
+### 7.3 AI Note Provenance
+
+Transcript가 1:N이 되면서 `recordingId`만으로는 provenance가 불충분하다.
+같은 Recording에 Transcript가 여럿 있을 때, 어떤 AI Note가 어떤 Transcript에서
+나왔는지 구분할 수 없기 때문이다.
+
+**`transcriptId`는 AI Note provenance의 일부다.**
+`provider` · `model` · `promptVersion` · `generatedAt`과 함께 기록된다 (§9.6).
+
+AI Note가 재생성되어도 **audio · Transcript A · Transcript B 중 어느 것도 덮어쓰지 않는다**
+(INV-1 · INV-2).
 
 ---
 
@@ -319,7 +401,9 @@ Segment timestamp를 보존한다.
 ```
 
 Transcript는 immutable source로 취급한다. 재전사는 새 Transcript를 만드는 행위이며,
-기존 것을 몰래 수정하는 행위가 아니다.
+기존 것을 몰래 수정하는 행위가 아니다 (§7.1 — 확정된 규칙이다).
+
+재전사가 실패해도 기존 current Transcript는 그대로 유지된다 (§7.2).
 
 whisper 통합 방식(sidecar / 바인딩), 모델 관리, 입력 포맷 변환 책임, 그리고
 **macOS와 Windows 양쪽의 binary 확보 전략**은 §14.4의 확인된 사실을 근거로
@@ -435,8 +519,9 @@ Provider abstraction을 실제로 검증하는 데 필요한 최소 범위만 �
 
 - AI 실패는 transcript와 recording에 어떤 영향도 주지 않는다 (INV-3).
 - AI 결과는 항상 재생성 가능하다. 재생성이 원본을 훼손하지 않는다 (INV-2).
-- **provenance를 남긴다** — `provider` · `model` · `promptVersion` · `generatedAt` (§7).
-  나중에 "이 노트가 무엇으로 언제 만들어졌는지" 알 수 있어야 한다.
+- **provenance를 남긴다** — `transcriptId` · `provider` · `model` · `promptVersion` ·
+  `generatedAt` (§7.3). 나중에 "이 노트가 **어떤 Transcript version에서** 무엇으로 언제
+  만들어졌는지" 알 수 있어야 한다.
 - Audio는 전송하지 않는다 (INV-6). 전송되는 것은 transcript 텍스트뿐이다.
 - **Provider 부재·미설정·실패가 core pipeline을 막지 않는다 (INV-8).**
 

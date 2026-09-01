@@ -8,7 +8,9 @@
 > 골격이다. Phase 1이 끝나면 실제 architecture로 채운다.
 >
 > **2026-09-01 갱신** — Requirements Delta로 제품 경계가 바뀌어 §1 · §4 · §5 · §7 · §9를
-> 갱신했다. 구현 상태는 **바뀌지 않았다** (여전히 Bootstrap만 DONE).
+> 갱신했다. 이어서 Product Spec rev 3에서 Transcript cardinality를
+> `Recording 1:N Transcript`로 확정하고 §9에 기록했다.
+> 구현 상태는 **바뀌지 않았다** (여전히 Bootstrap만 DONE).
 > 바뀐 것은 계획된 경계이지 구현이 아니다.
 
 ---
@@ -73,7 +75,7 @@ Linux와 모바일은 범위 밖이다 (`PRODUCT-SPEC.md` §3).
 | Tauri v2 앱 셸 (`src-tauri/`) | macOS 데스크톱 런타임 · Rust backend 진입점 | **DONE** (셸만) |
 | React + Vite frontend (`src/`) | UI | **DONE** (scaffold 기본 화면만) |
 | Bootstrap baseline test (`tests/`) | 설정 정합성 검사 | **DONE** |
-| 로컬 영속성 계층 | Recording · Transcript · AINote · NotionSync 저장 | **PLANNED** (Phase 1) |
+| 로컬 영속성 계층 | Recording · Transcript · AINote · NotionSync 저장 (`Recording 1:N Transcript 1:N AINote`) | **PLANNED** (Phase 1) |
 | `AppDataDirectory` 경계 | 플랫폼별 앱 데이터 경로 결정을 한 곳에 가둔다 | **PLANNED** (Phase 1) |
 | Recording engine | 마이크 캡처 · pause/resume · 파일 생성 | **PLANNED** (Phase 2) |
 | Transcription 엔진 통합 | whisper 실행 · JSON 파싱 | **PLANNED** (Phase 3) |
@@ -203,6 +205,9 @@ Human Review 중 제품 요구사항이 바뀌어 Product Spec을 rev 2로 갱�
 | 2026-09-01 (delta) | 첫 provider를 로컬 Ollama로, Cloud는 DEFERRED | V1 성공 조건(§17.1)이 AI 없이 성립하므로 cloud provider는 V1 최소 범위가 아니다. 다만 구현이 하나뿐인 추상화는 검증된 것이 아니므로 Phase 4가 test double로 계약을 함께 검증한다 | 채택 |
 | 2026-09-01 (delta) | Ollama를 Rust backend에서 호출하는 방향 유력 | Ollama 기본 CORS 허용 origin에 Tauri webview origin이 없다. 프론트엔드 직접 호출은 사용자에게 환경변수 설정을 요구하게 된다 (§14.5) | 검토 중 (Phase 4 확정) |
 | 2026-09-01 (delta) | persistence를 Rust 내부(`rusqlite` 계열)로 두는 방향 유력 | frontend가 임의 SQL executor가 되는 것을 막고 domain/repository 및 secret 경계(INV-7)와 일관되게 한다. Ollama 호출 방향과도 일관된다 | 검토 중 (Phase 1 확정) |
+| 2026-09-01 (rev 3) | **Transcript cardinality를 `Recording 1:N Transcript`로 확정** | rev 1~2의 §7은 `1:1`, §8은 "재전사가 새 Transcript를 만든다"로 서로 모순이었다. 1:1은 재전사 시 overwrite를 강제하므로 INV-2(immutable source)와 양립할 수 없다. **1:1을 잘못된 명세로 판단해 정정했다** | 채택 (`PRODUCT-SPEC.md` §7.1) |
+| 2026-09-01 (rev 3) | `Recording.currentTranscriptId` 도입 | 여러 Transcript version 중 무엇을 표시하고 후속 작업의 기본 입력으로 쓸지 명시해야 한다. 재전사 실패 시 기존 current를 유지해 유효한 Transcript를 잃지 않는다 (INV-3의 귀결) | 채택 (§7.2) |
+| 2026-09-01 (rev 3) | `AINote.transcriptId`를 provenance에 추가 | Transcript가 1:N이 되면서 `recordingId`만으로는 어떤 version에서 나온 노트인지 구분할 수 없다 | 채택 (§7.3) |
 
 ---
 

@@ -89,8 +89,12 @@ Molt Note domain   ≠   특정 AI 벤더의 domain      (INV-9)
 
 ### D. 데이터와 실패
 
-11. **AINote가 §7 모델대로 저장**된다 — `recordingId` · `type` · `content` ·
+11. **AINote가 §7 모델대로 저장**된다 — `id` · `recordingId` · **`transcriptId`** ·
+    `type` · `content` ·
     **provenance(`provider` · `model` · `promptVersion` · `generatedAt`)**.
+    **`transcriptId`는 provenance의 일부다 (§7.3)** — 한 Recording에 Transcript가
+    여럿일 수 있으므로(§7.1), 어떤 version에서 나온 노트인지 식별 가능해야 한다.
+    기본 입력은 `Recording.currentTranscriptId`가 가리키는 Transcript다 (§7.2).
     **Transcript와는 별개의 레코드다 (INV-2).**
     AI 생성이 Raw Transcript를 덮어쓰지 않는다는 것이 테스트로 확인되어야 한다.
     AI Provider는 recording metadata 중 AI 상태 필드 외의 것을 변경하지 않는다.
@@ -153,6 +157,8 @@ Molt Note domain   ≠   특정 AI 벤더의 domain      (INV-9)
 
 - Transcript로부터 세 가지 mode의 structured note가 생성되어 저장되고 화면에 보인다.
 - **AI Note 생성 전후로 Raw Transcript가 바이트 단위로 동일하다** — 테스트로 확인된다.
+  Transcript가 여럿인 Recording에서도 **어느 Transcript도 변경되지 않는다** (§7.1).
+- 서로 다른 Transcript에서 생성된 AI Note가 `transcriptId`로 구분된다 (§7.3).
 - AI Note와 Transcript가 서로 다른 레코드로 저장되고, provenance가 기록된다.
 - **provider가 하나도 설정되지 않은 상태에서 녹음 · 전사 · 열람이 정상 동작한다** —
   테스트로 확인된다 (INV-8). 이것이 이 Phase의 가장 중요한 검증 항목 중 하나다.

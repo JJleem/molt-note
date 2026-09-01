@@ -49,9 +49,23 @@ Bootstrap이 만든 것은 **빈 앱 셸과 동작하는 개발 baseline**일 �
    `Recording` · `Transcript` · `AINote` · `NotionSync`.
    - `Transcript`와 `AINote`는 **서로 다른 레코드**여야 한다 (INV-2).
    - 상태 필드는 `none · pending · running · done · failed`를 구분할 수 있어야 한다.
-   - **`AINote`는 provenance를 담을 수 있어야 한다** — `provider` · `model` ·
-     `promptVersion` · `generatedAt`. 이 Phase에서 AI를 호출하지는 않지만,
-     스키마가 벤더 중립 provenance를 표현할 수 있어야 한다 (INV-9).
+   - **cardinality는 §7.1에서 확정됐다 — 구현 편의로 바꾸지 않는다:**
+
+     ```text
+     Recording  1:N  Transcript      (immutable · versioned)
+     Transcript 1:N  AINote          (derived · regeneratable)
+     ```
+
+     `Transcript`는 자체 `id`를 가진 독립 entity다. 한 Recording에 여러 Transcript가
+     저장될 수 있어야 하고, **기존 Transcript row를 UPDATE하는 경로가 없어야 한다.**
+   - **`Recording.currentTranscriptId`** — 현재 사용 중인 성공한 Transcript를 식별한다 (§7.2).
+     값이 없는 상태(아직 전사 없음)도 정상 상태다.
+     FK와 migration의 구체적 형태는 이 Phase의 architecture에 맞게 설계해도 되지만,
+     **§7.2의 domain semantics는 고정이다.**
+   - **`AINote`는 provenance를 담을 수 있어야 한다** — **`transcriptId`** ·
+     `provider` · `model` · `promptVersion` · `generatedAt` (§7.3).
+     이 Phase에서 AI를 호출하지는 않지만, 스키마가 **어떤 Transcript version에서 나온
+     노트인지**와 벤더 중립 provenance를 표현할 수 있어야 한다 (INV-9).
      `provider`는 특정 벤더를 전제하지 않는 자유 식별자다.
 
 4. **Recording 레코드에 대한 영속성 계층(repository)** 이 존재한다 —
@@ -120,6 +134,10 @@ Bootstrap이 만든 것은 **빈 앱 셸과 동작하는 개발 baseline**일 �
 - **AI Provider 일체** — provider 추상화 구현 · Ollama · Claude · Gemini · Groq
   (§7의 AINote 스키마가 provenance를 담을 수 있게 하는 것까지가 이 Phase다.
   provider 인터페이스나 adapter를 만드는 것은 Phase 4다.)
+- **재전사 workflow · transcript version 선택 UI · transcript history UI**
+  (스키마가 §7.1의 cardinality를 표현할 수 있게 하는 것까지가 이 Phase다.
+  version을 실제로 만들고 고르는 흐름은 Phase 3이다.)
+- `currentTranscriptId`를 실제로 갱신하는 전사 파이프라인 (Phase 3)
 - Notion 연동, Markdown export
 - Secret 저장소 구현 (API key · integration token 입력 및 보관)
 - **Windows 환경 구축 · Windows E2E · Windows packaging · Windows 권한 로직**
@@ -138,8 +156,12 @@ Settings 화면에 Transcription / AI Provider / Notion **섹션의 자리**를 
 - 영속성 계층과 duration 포맷 로직에 대한 자동 테스트가 존재하고 통과한다.
 - `Transcript`와 `AINote`가 서로 다른 레코드로 저장 가능하며, 하나를 쓰는 것이
   다른 하나를 덮어쓰지 않는다는 것이 테스트로 확인된다.
-- `AINote` 스키마가 벤더 중립 provenance(`provider` · `model` · `promptVersion` ·
-  `generatedAt`)를 저장·복원할 수 있다.
+- **한 Recording에 Transcript를 둘 이상 저장해도 앞의 것이 남아 있다** — 테스트로 확인된다 (§7.1).
+- **`Recording.currentTranscriptId`가 성공한 Transcript를 가리키고, 값이 없는 상태도
+  표현 가능하다** (§7.2).
+- **서로 다른 Transcript에 각각 AINote를 붙였을 때 `transcriptId`로 출처가 구분된다** (§7.3).
+- `AINote` 스키마가 벤더 중립 provenance(`transcriptId` · `provider` · `model` ·
+  `promptVersion` · `generatedAt`)를 저장·복원할 수 있다.
 - 앱 데이터 디렉터리 결정이 단일 모듈에 갇혀 있고, 그 밖의 코드에 OS별 경로 규약이 없다.
 - `NSMicrophoneUsageDescription`이 macOS 번들 설정에 실제로 존재하며,
   문서가 이를 macOS 요구사항으로(범용 구현이 아니라) 기술한다.
