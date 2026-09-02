@@ -12,6 +12,8 @@
 > - 2026-09-01 (rev 2) Requirements Delta 반영 — Windows를 지원 대상 플랫폼으로 추가,
 >   AI를 vendor 중립 Provider 추상화로 전환하고 core requirement에서 제외,
 >   §14.7의 근거 없는 VERIFIED 표기 정정
+> - 2026-09-02 (rev 4) Recording engine 결정을 2단계로 분리 (§6.1 · §21) —
+>   실제 장치 증거를 production 구현보다 앞에 둔다
 > - 2026-09-01 (rev 3) Transcript cardinality 확정 — `Recording 1:N Transcript`.
 >   rev 1~2의 §7 `1:1` 표기는 §8과 모순이었으므로 **잘못된 명세로 정정했다.**
 >   `Recording.currentTranscriptId`와 `AINote.transcriptId`를 도입 (§7.1 ~ §7.3)
@@ -256,7 +258,26 @@ testability                maintenance cost
 특히 **transcription compatibility**(§8의 whisper 입력 포맷), **Windows compatibility**(§3),
 **data-loss behavior**(R-005)가 결정적이다.
 
-이 결정은 **Phase 2에서 실제 검증과 함께 내리고 ADR로 기록한다.**
+이 결정은 **두 단계로 내린다.** 결정을 좌우하는 사실 중 일부(실제 권한 프롬프트 ·
+실제 컨테이너/코덱 · 실제 음질)는 **자동으로 확인할 수 없고 사람이 앱을 실행해야만**
+알 수 있기 때문이다.
+
+```text
+Phase 2A  후보 비교 → 잠정 선택 → 최소 spike        (자동 검증 + 저장소 근거)
+    ↓
+Human Review  실제 장치에서 짧은 smoke recording     (사람만 알 수 있는 것)
+    ↓
+확정          ADR-0003이 확정 상태가 된다
+    ↓
+Phase 2B  production recording 구현
+```
+
+**실제 장치 증거 없이 engine을 확정한 뒤 전체를 구현하지 않는다** — 가정이 틀렸을 때
+되돌릴 것이 너무 많아지기 때문이다.
+
+평가의 비대칭에 주의한다: native 경로의 핵심 근거는 자동 검증 가능하고 webview 경로의
+핵심 미지수는 그렇지 않다. **"검증하기 쉬운 쪽"이 그 이유만으로 선택되면 근거가 아니라 편향이다.**
+
 후보와 현재까지 확인된 사실은 §14.3에 있다.
 
 ---
@@ -1120,7 +1141,8 @@ Windows에서도 같은 디자인 방향을 유지하되, 플랫폼별 UI 분기
 | --- | --- | --- | --- |
 | Bootstrap | (`prompts/PROJECT-BOOTSTRAP.md`) | 실행 가능한 개발 baseline과 실제 Gate 확보 | **DONE** (2026-09-01) |
 | 1 | `01-application-foundation.md` | 앱 셸 · 로컬 저장소 · 데이터 영속성 · 플랫폼 경계 · 마이크 권한 선언 | PLANNED |
-| 2 | `02-reliable-recording.md` | 실제 녹음 → 파일 → 재생, 재시작 후에도 살아남는다 | PLANNED |
+| 2A | `02a-recording-engine-validation.md` | engine 잠정 선택 + 최소 spike → **사람의 실제 장치 검증** | PLANNED |
+| 2B | `02-reliable-recording.md` | 확정된 engine으로 실제 녹음 → 파일 → 재생, 재시작 후에도 살아남는다 | PLANNED |
 | 3 | `03-local-transcription.md` | 로컬 whisper로 timestamped transcript 생성 | PLANNED |
 | 4 | `04-ai-provider-system.md` | **Provider 추상화 + Local AI(Ollama) → Structured Note** | PLANNED |
 | 5 | `05-notion-and-export.md` | Notion 전송 · Markdown export | PLANNED |
@@ -1133,6 +1155,7 @@ Windows에서도 같은 디자인 방향을 유지하되, 플랫폼별 UI 분기
 - Phase 1은 **가장 작은 유용한 기반**이다. 녹음 파이프라인 전체를 욕심내지 않는다.
 - Phase 2에서 **처음으로 진짜 end-to-end 능력**(녹음→파일→재생)이 증명된다.
   이것이 제품의 핵심이며 AI보다 먼저 온다.
+  **2A/2B로 나눈 이유는 §6.1에 있다** — engine 확정에 필요한 증거의 일부는 사람만 만들 수 있다.
 - Phase 3~5는 각각 이전 Phase가 증명한 산출물 위에서만 동작한다.
   Transcript 없이 AI Note를 만들 수 없고, structured note 없이 Notion 렌더러를 만들 수 없다.
 - Phase 6은 Windows가 **지원 대상 플랫폼**(§3)이므로 V1 범위 안에 있다.

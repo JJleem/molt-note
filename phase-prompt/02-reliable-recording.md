@@ -1,6 +1,23 @@
-# Phase 2 — Reliable Recording
+# Phase 2B — Reliable Recording
 
-Implement Phase 2 of `docs/PRODUCT-SPEC.md`.
+Implement the production stage of Phase 2 of `docs/PRODUCT-SPEC.md`.
+
+> **Phase 2는 두 단계로 나뉜다.**
+>
+> ```text
+> Phase 2A  engine 잠정 선택 + 최소 spike     phase-prompt/02a-recording-engine-validation.md
+>     ↓
+> Human Review — 실제 장치 증거              (여기서 engine이 확정된다)
+>     ↓
+> Phase 2B  production recording             이 문서
+> ```
+>
+> **이 문서는 두 번째 단계다.** engine은 여기서 결정하지 않는다 — 이미 확정된 것을 쓴다.
+> 나눈 이유: 실제 마이크 권한 프롬프트 · 실제 코덱 · 실제 음질은 자동으로 확인할 수 없고,
+> 그 증거 없이 engine을 확정한 뒤 전체를 구현하면 가정이 틀렸을 때 되돌릴 것이 너무 많다.
+>
+> **Preconditions** — Phase 2A가 DONE이고, `docs/ADR-0003-recording-engine.md`가
+> 사람의 장치 검증 결과를 반영해 확정 상태여야 한다. 그렇지 않다면 이 단계를 시작하지 않는다.
 
 ## Goal
 
@@ -22,51 +39,34 @@ Phase 1이 만든 저장소와 데이터 모델은 아직 아무것도 담고 �
 Phase 3 이후(전사 · AI · Notion)는 전부 "여기서 만들어진 audio 파일"을 입력으로 받는다.
 이 Phase가 부실하면 그 위의 모든 것이 부실하다.
 
-## The Architecture Decision This Phase Must Make
+## The Engine Decision Is Already Made
 
-**이 Phase는 recording engine을 선택하고 그 근거를 ADR로 기록해야 한다.**
-`docs/PRODUCT-SPEC.md` §6.1이 평가 기준을, §14.3이 2026-09-01 기준 확인된 사실을 담고 있다.
+**이 단계는 recording engine을 다시 고르지 않는다.**
 
-평가 대상은 최소한 다음 둘이다.
+Phase 2A가 후보를 §6.1 기준으로 비교하고, 최소 spike를 만들고, 사람이 실제 장치에서
+확인했다. 그 결과가 `docs/ADR-0003-recording-engine.md`에 있다.
 
-```text
-WebView / MediaRecorder      vs      Rust/native audio path (예: cpal)
-```
-
-ADR은 §6.1의 기준 전체를 다뤄야 한다.
+시작하기 전에 그 ADR을 읽고 다음을 확인한다.
 
 ```text
-recording reliability      microphone enumeration     microphone selection
-pause/resume               file finalization          data-loss behavior
-audio format               transcription compatibility
-macOS permission behavior  Windows compatibility
-Tauri integration          packaging
-testability                maintenance cost
+확정된 engine
+사람의 장치 검증에서 실제로 관찰된 것
+아직 UNVERIFIED로 남은 것
+알려진 한계
+Windows 함의
+Phase 3 포맷 함의 (§14.4의 16-bit WAV 요구)
 ```
 
-**"macOS에서 가장 쉬운 구현"이 아니라 "Molt Note 요구사항에 가장 적합한 구현"을 선택한다.**
+**ADR을 근거 없이 뒤집지 않는다.** 구현 중에 ADR의 전제와 어긋나는 사실을 발견하면
+조용히 다른 선택을 하지 말고, 그 사실과 영향을 기록하고 드러낸다 — 그것은 사람이
+판단할 사항이다.
 
-특히 결정적인 것 넷:
+Phase 2A가 만든 임시 spike 표면은 **이 단계가 production 구현으로 대체한다.**
+임시 표면을 그대로 남겨 두지 않는다.
 
-1. **transcription compatibility** — Phase 3의 whisper는 **16-bit WAV만** 받는다 (§14.4).
-   녹음 단계에서 그 포맷을 직접 만들 수 있는지, 변환 단계가 필요한지가 전체 파이프라인의
-   복잡도를 바꾼다.
-2. **Windows compatibility** — Windows는 지원 대상 플랫폼이다 (§3).
-   §14.3에 확인된 사실: webview 후보는 macOS(WKWebView)와 Windows(WebView2, Chromium)에서
-   **코덱과 동작이 다를 수 있다.** cpal은 두 플랫폼(CoreAudio / WASAPI)에서 같은 PCM을 준다.
-   **여기서 Windows를 무시하고 고르면 Phase 6에서 엔진을 다시 고르게 된다.**
-3. **data-loss behavior (R-005)** — 앱이 예기치 않게 종료되어도 이미 녹음된 부분이
-   얼마나 살아남는가.
-4. **testability** — 상태 기계를 하드웨어 없이 검증할 수 있는가 (§18).
+### Windows에 대해 이 단계가 하는 일 / 하지 않는 일
 
-§14.3의 **UNVERIFIED 항목은 이 Phase에서 실제로 확인한다.** 문서만 읽고 결정하지 않는다 —
-이 기기에서 동작을 확인한 뒤 결정한다.
-확인 결과와 채택된 결정, 그리고 **탈락한 후보와 탈락 이유**를 저장소에 기록한다.
-
-### Windows에 대해 이 Phase가 하는 일 / 하지 않는 일
-
-**한다**: 엔진 선택 시 Windows 실현 가능성을 근거와 함께 평가하고 ADR에 남긴다.
-플랫폼이 실제로 갈리는 지점에만 경계를 둔다 (§3.1의 `RecordingBackend`).
+**한다**: 플랫폼이 실제로 갈리는 지점에만 경계를 둔다 (§3.1의 `RecordingBackend`).
 
 **하지 않는다**: Windows 환경 구축 · Windows 빌드 · Windows 실행 검증 · Windows 권한 로직.
 전부 Phase 6이다. **추상화를 선입금하지 않는다 (§20.6)** — 구현이 하나뿐인 인터페이스를
@@ -74,11 +74,14 @@ testability                maintenance cost
 
 ## Required Outcome
 
-1. **Recording engine이 선택되고, 그 근거와 실제 검증 결과가 문서로 남는다.**
-   UNVERIFIED였던 항목이 이 기기에서 어떻게 나왔는지가 포함되어야 한다.
+1. **Phase 2A의 임시 spike 표면이 production 구현으로 대체된다.**
+   확정된 engine(`ADR-0003`)을 그대로 쓰고, 임시 표면은 남기지 않는다.
 
 2. **Microphone 열거와 선택** — 사용 가능한 입력 장치 목록을 보여주고 사용자가 고를 수 있다.
-   Settings의 default microphone 값이 실제로 사용된다.
+   Settings의 default microphone 값이 영속화되고 **실제 녹음에 사용된다.**
+
+   **저장된 default 장치가 더 이상 없는 경우를 다룬다.** 조용히 첫 번째 장치로 바꿔치기해서
+   실패를 숨기지 않는다 — 사용자가 장치가 바뀌었다는 사실을 알 수 있어야 한다.
 
 3. **macOS microphone 권한 흐름** — 권한을 요청하고, 거부된 상태를 감지하며,
    거부되었을 때 사용자가 무엇을 해야 하는지 화면에서 알 수 있다 (§13).
@@ -88,9 +91,27 @@ testability                maintenance cost
    Pause 구간은 duration에 포함되지 않아야 한다.
    Recording 화면은 §5-B와 §19를 따른다 — 녹음 상태와 시간이 가장 명확해야 한다.
 
-5. **Stop 시 결과 파일이 filesystem에 실제로 생성된 것이 확인된다 (R-002).**
-   "저장했다"는 서술이 아니라, 파일 존재와 크기가 확인되어야 한다.
+5. **Stop 성공은 API 호출이 resolve된 것이 아니라 파일이 확정된 것을 뜻한다 (R-002).**
+   최소한 다음이 모두 성립해야 Stop이 성공이다.
+
+   ```text
+   filesystem 경로가 존재한다
+   파일 크기가 유효 최소치를 넘는다
+   포맷을 알고 있다
+   Recording 메타데이터가 영속화됐다
+   ```
+
    확인에 실패하면 그것은 사용자에게 보이는 실패다.
+
+   **파일 생성과 DB 저장의 순서·보상 정책을 명시적으로 정하고 기록한다.**
+   아래 두 어긋난 상태를 각각 어떻게 다룰지 정해야 한다.
+
+   ```text
+   audio는 있는데 DB row가 없다
+   DB row는 있는데 audio가 없다
+   ```
+
+   **어느 쪽도 기존 audio를 자동 삭제해서 숨기지 않는다 (INV-4).**
 
 6. **Recording 레코드가 저장된다** — Phase 1의 영속성 계층을 통해 title · duration ·
    audioPath · audioFormat · microphone · createdAt이 기록된다.
@@ -107,7 +128,15 @@ testability                maintenance cost
    microphone disconnected · initialization failure · write failure · disk write failure.
    최소한 permission denied와 초기화 실패는 실제로 UI에 표현되어야 한다.
 
-10. **R-001** — 화면을 이동하거나 UI state가 바뀌어도 진행 중인 녹음이 유실되지 않는다.
+10. **R-001 — 녹음 session의 소유권이 화면 컴포넌트에 있지 않다.**
+    다음 구조는 명시적으로 피한다.
+
+    ```text
+    RecordingScreen mount → 녹음 전체를 소유 → 화면 이동 → unmount → 녹음 유실
+    ```
+
+    사용자가 화면을 이동하거나 UI state가 바뀌어도 진행 중인 session이 사라지지 않아야 한다.
+    소유권을 어디에 둘지는 선택된 engine과 Tauri architecture에 맞게 결정하고 기록한다.
 
 11. build · lint · test Gate가 전부 통과한다.
 
@@ -153,7 +182,10 @@ Phase 3이 쓸 수 있도록 audio 파일 경로와 포맷을 레코드에 정�
 ### Human Review 항목
 
 - 실제 녹음된 오디오의 음질이 사람이 알아들을 수준인가
-- 1시간 규모의 긴 녹음에서 안정적인가 (§17의 실사용 시나리오)
+- **장시간 녹음 안정성** — 짧은 자동 테스트로 대체할 수 없는 것만 여기서 본다:
+  장시간 누적에서의 메모리·디스크 증가, duration drift, 파일 확정.
+  **Worker나 Verifier가 매번 1시간 녹음을 수행하도록 계획하지 않는다.**
+  자동 검증은 짧고 결정론적으로 유지하고, 장시간 확인은 사람이 한 번 수행한다.
 - 녹음 중 UI가 §19의 방향에 맞게 상태를 분명히 보여주는가
 - macOS 권한 프롬프트가 실제로 뜨는가 — dev 실행과 번들된 `.app` 양쪽에서
   (Spec §14.3에 이것이 알려진 위험으로 기록되어 있다)

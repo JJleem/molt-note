@@ -193,7 +193,12 @@ Human Review 중 제품 요구사항이 바뀌어 Product Spec을 rev 2로 갱�
 
 **구현은 하나도 바뀌지 않았다.** 여전히 Bootstrap만 DONE이다.
 
-### Phase 2 — Reliable Recording · **PLANNED**
+### Phase 2A — Recording Engine Validation · **PLANNED**
+### Phase 2B — Reliable Recording · **PLANNED**
+
+> Phase 2는 두 단계다. engine 확정에 필요한 증거 일부(실제 권한 프롬프트 · 실제 코덱 ·
+> 실제 음질)는 자동 검증이 불가능해 사람이 앱을 실행해야 한다. 그래서 잠정 선택 + 최소
+> spike(2A) → 사람의 장치 검증 → production 구현(2B) 순서로 나눴다 (`PRODUCT-SPEC.md` §6.1).
 ### Phase 3 — Local Transcription · **PLANNED**
 ### Phase 4 — AI Provider System + Local AI · **PLANNED**
 ### Phase 5 — Notion & Markdown Export · **PLANNED**
@@ -243,7 +248,7 @@ Human Review 중 제품 요구사항이 바뀌어 Product Spec을 rev 2로 갱�
 | 문서 | 무엇이 들어 있는가 |
 | --- | --- |
 | `docs/PRODUCT-SPEC.md` | 제품 사양 (source of truth). §14에 2026-09-01 기준 검증된 외부 사실 |
-| `phase-prompt/01~06-*.md` | Phase Goal |
+| `phase-prompt/01~06-*.md` | Phase Goal (Phase 2는 `02a` → `02` 두 단계) |
 | `phase-prompt/Goal.md` | 최종 통합 Goal |
 | `docs/ADR-0001-local-persistence.md` | persistence 엔진 선택 근거 · crate 확인 상태 · migration 모델 |
 | `docs/ADR-0002-macos-microphone-usage-description.md` | 마이크 권한 선언의 위치와 성격 · 구현하지 않은 것의 경계 |
