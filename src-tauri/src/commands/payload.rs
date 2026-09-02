@@ -10,6 +10,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::audio::{CaptureReport, InputDevice};
 use crate::domain::{ProcessingStatus, Recording, RecordingId, RecordingView, Settings};
 
 /// 조회된 녹음 하나. 목록 화면과 상세 화면이 그대로 쓴다 (§5 A · C).
@@ -95,6 +96,73 @@ impl NewRecording {
             transcription_status: ProcessingStatus::None,
             ai_status: ProcessingStatus::None,
             notion_status: ProcessingStatus::None,
+        }
+    }
+}
+
+/// 고를 수 있는 입력 장치 하나.
+///
+/// `key`는 고를 때 쓰는 불투명한 값이고 `label`은 사람이 읽는 이름이다 —
+/// 이름이 같은 장치가 둘 있을 수 있으므로 둘을 나눠서 보낸다
+/// ([`crate::audio::devices`]).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InputDevicePayload {
+    pub key: String,
+    pub label: String,
+    /// 시스템 기본 입력 장치인가. 기본 장치가 없는 목록도 정상이다.
+    pub is_default: bool,
+}
+
+impl From<InputDevice> for InputDevicePayload {
+    fn from(device: InputDevice) -> Self {
+        Self {
+            key: device.key,
+            label: device.label,
+            is_default: device.is_default,
+        }
+    }
+}
+
+/// 정지한 캡처 하나의 보고 값 (Phase 2A spike).
+///
+/// **Phase 2A의 성공 기준이 그대로 필드다** —
+/// 장치 이름 · 출력 경로 · 포맷 · 파일 크기(byte).
+/// 사람이 이 값을 보고 잠정 결정을 지지할지 반박할지 판단한다 (ADR-0003 §12).
+///
+/// `format`은 사람이 읽는 한 문장이고, 그 문장을 이루는 값도 따로 보낸다 — 화면이 문자열을
+/// 다시 뜯어보지 않아도 되게 하기 위해서다 ([`RecordingPayload::duration_label`]과 같은 이유).
+///
+/// **이것은 저장된 Recording이 아니다.** 캡처 결과를 DB에 남기는 것은 Phase 2B의 일이며,
+/// 이 값은 어떤 레코드도 만들지 않는다.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CaptureReportPayload {
+    /// 실제로 열린 장치의 이름.
+    pub device_label: String,
+    /// 확정된 파일의 경로.
+    pub output_path: String,
+    /// 사람이 읽는 형식 문장(샘플레이트 · 채널 수 · 비트 심도 · 컨테이너).
+    pub format: String,
+    pub sample_rate_hz: u32,
+    pub channels: u16,
+    pub bits_per_sample: u16,
+    pub container: String,
+    /// 파일시스템에서 읽은 파일 크기(byte).
+    pub byte_size: u64,
+}
+
+impl From<CaptureReport> for CaptureReportPayload {
+    fn from(report: CaptureReport) -> Self {
+        Self {
+            device_label: report.device_label,
+            output_path: report.output_path.display().to_string(),
+            format: report.format.describe(),
+            sample_rate_hz: report.format.sample_rate_hz,
+            channels: report.format.channels,
+            bits_per_sample: report.format.bits_per_sample,
+            container: report.format.container().to_string(),
+            byte_size: report.byte_size,
         }
     }
 }

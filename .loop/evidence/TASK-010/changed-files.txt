@@ -1,0 +1,28 @@
+TASK-010 변경 파일 목록 (2026-09-02)
+
+프로젝트 트리에서 이 Run이 만든/바꾼 파일:
+
+  docs/ADR-0003-recording-engine.md        (신규)
+
+소스 · 매니페스트 · 설정 변경 없음. 구체적으로 다음은 건드리지 않았다:
+
+  src-tauri/Cargo.toml                     변경 없음 (cpal · hound 추가하지 않았다)
+  src-tauri/Cargo.lock                     변경 없음
+  package.json                             변경 없음
+  package-lock.json                        변경 없음
+  src-tauri/tauri.conf.json                변경 없음
+  src-tauri/Info.plist                     변경 없음
+  src-tauri/src/**                         변경 없음
+  src/**                                   변경 없음
+  tests/** · src-tauri/tests/**            변경 없음
+  .loop/project.yaml · .loop/KERNEL.md     변경 없음
+  .loop/tasks/**                           변경 없음
+  docs/PRODUCT-SPEC.md                     변경 없음 (§14.3을 인용만 했고 수정하지 않았다)
+  docs/SYSTEM-MAP.md                       변경 없음 (Phase가 DONE에 도달하지 않았다)
+
+Runtime evidence 디렉터리(.loop/evidence/TASK-010/)에 만든 artifact:
+
+  criteria-coverage.md                     §6.1 기준 14개 ↔ ADR 절 대조표
+  unverified-preservation.md               §14.3 UNVERIFIED 항목의 표기 유지 대조표
+  self-check.log                           build · lint · test 실행 결과 (advisory)
+  changed-files.txt                        이 파일

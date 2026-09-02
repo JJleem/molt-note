@@ -11,11 +11,11 @@
 /**
  * 실패의 종류.
  *
- * `storage`와 `invalidInput`은 Rust의 `FailureKind`와 1:1이다.
+ * `storage` · `invalidInput` · `audioDevice`는 Rust의 `FailureKind`와 1:1이다.
  * `unexpected`는 **frontend 경계에서만 만들어진다** — command가 계약과 다른 값으로 거절했을 때
  * (예: 없는 command 이름, IPC 자체의 오류) 그 사실을 삼키지 않기 위해서다.
  */
-export type FailureKind = 'storage' | 'invalidInput' | 'unexpected';
+export type FailureKind = 'storage' | 'invalidInput' | 'audioDevice' | 'unexpected';
 
 export interface Failure {
   readonly kind: FailureKind;

@@ -1,0 +1,26 @@
+TASK-011이 실제로 만든/고친 파일 (git status --short 기준 · 2026-09-02)
+git commit은 하지 않았다 (Phase Goal · docs/GIT-WORKFLOW.md).
+
+새로 만든 것
+  src-tauri/src/audio/mod.rs              오디오 입력 경계 모듈
+  src-tauri/src/audio/devices.rs          순수 로직(선택 키 · 표시 이름 · 정렬) + 경계 trait + 단위 테스트
+  src-tauri/src/audio/system_devices.rs   cpal을 아는 유일한 파일 (자동 테스트가 실행하지 않는다)
+  src-tauri/tests/input_devices.rs        command 경계 통합 테스트 (대체 구현 주입 · 마이크 불필요)
+
+고친 것
+  src-tauri/Cargo.toml                    cpal = "0.18" 추가 (hound은 추가하지 않았다)
+  src-tauri/Cargo.lock                    cpal 0.18.2로 해석됨 (+ 전이 의존성)
+  src-tauri/src/lib.rs                    audio 모듈 선언 · AudioDevices 상태 등록 · list_input_devices 등록
+  src-tauri/src/commands/mod.rs           AudioDevices (경계 주입 가능) · list_input_devices command
+  src-tauri/src/commands/payload.rs       InputDevicePayload (key · label · isDefault)
+  src-tauri/src/domain/failure.rs         FailureKind::AudioDevice 추가 + 문자열 대응 테스트 보강
+  src/ipc/types.ts                        InputDevice 타입
+  src/ipc/commands.ts                     listInputDevices() (invoke는 여전히 이 파일에만 있다)
+  src/ipc/failure.ts                      FailureKind union에 'audioDevice' 추가 (Rust와 1:1)
+  tests/ipc-boundary.test.ts              등록 command 허용 목록에 list_input_devices 추가
+  docs/ADR-0003-recording-engine.md       §4.2(해석된 버전 · 컴파일로 확인한 API) · §5.2 갱신 · §9 한계 갱신
+
+만들지 않은 것 (범위 밖)
+  UI · 화면 · 장치 선택 상태          → TASK-013
+  캡처 · 정지 · 파일 확정 · hound     → TASK-012
+  번들 실행 절차 문서 · ADR 자동검증 절 전체 갱신 → TASK-014

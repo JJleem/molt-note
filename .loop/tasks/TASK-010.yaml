@@ -1,0 +1,57 @@
+# ADR-0003 — recording engine 잠정 결정 문서
+# Runtime이 PLAN-20260902T061156Z 승인 시점에 생성했다 (proposal P1). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-010
+status: DONE
+
+request: |-
+  `docs/ADR-0003-recording-engine.md`를 새로 쓴다. 코드 · `Cargo.toml` · `package.json` · 설정 파일은 건드리지 않는다 (문서 전용 Task다). 내용: (1) 후보를 최소한 Webview/MediaRecorder · Rust/native 오디오 경로(예: cpal + hound) · 커뮤니티 Tauri 플러그인으로 두고, `docs/PRODUCT-SPEC.md` §6.1의 평가 기준 전체(recording reliability · microphone enumeration · microphone selection · pause/resume · file finalization · data-loss behavior · audio format · transcription compatibility · macOS permission behavior · Windows compatibility · Tauri integration · packaging · testability · maintenance cost)를 하나도 빠뜨리지 않고 비교한다. (2) 근거를 세 종류로 **구분해서** 적는다 — 저장소 근거(§14.3에 이미 조사된 사실. 재조사하지 않고 인용한다) · 이 저장소에서 컴파일/테스트로 자동 검증 가능한 것 · 실행 중인 앱과 실제 하드웨어가 있어야만 알 수 있는 Human Review 항목. §14.3에서 UNVERIFIED인 것은 UNVERIFIED로 유지한다. (3) 문서 상태를 최종 확정이 아니라 `Status: PROVISIONAL — pending human device validation`으로 표기한다. (4) 잠정 선택 · 탈락 후보와 이유를 적되, 탈락 사유가 *확인된 사실* 때문인지 *확인하지 못해서*인지 구분한다. (5) 평가의 비대칭을 명시한다 — native 경로의 핵심 근거는 자동 검증 가능하고 webview 경로의 핵심 미지수는 그렇지 않으며, '검증하기 쉬운 쪽'이 그 이유만으로 선택되면 근거가 아니라 편향이라는 점을 문서가 스스로 말하게 한다. (6) 알려진 한계 · Windows 함의(§3.1 · §14.3, Windows 구현은 하지 않고 평가 근거로만 다룬다) · Phase 3 포맷 함의(§14.4의 whisper 16-bit WAV 입력 요구와의 대조)를 적는다. (7) 사람이 실제 장치에서 확인해야 할 8개 항목(권한 프롬프트 · 선택한 물리 마이크 사용 · 장치 열기 · 10~20초 녹음 성공 · 출력 파일 존재 · 음성 가청성 · 실제 컨테이너/코덱/PCM 포맷 · Stop 확정의 무손상)을 체크리스트로 남기고, 이 목록이 다음 단계 진행 여부를 결정한다고 적는다. 문서 형식과 한국어 서술 톤은 `docs/ADR-0001-local-persistence.md` · `docs/ADR-0002-macos-microphone-usage-description.md`를 따른다. 사람이 확인해야만 아는 것을 이미 확인된 것처럼 쓰지 않는다. git commit은 하지 않는다.
+
+execution:
+  role: impl
+
+stop_condition:
+  gates: []
+  requires_verifier: true
+  max_consecutive_failures: 2
+
+acceptance_criteria:
+  - id: AC1
+    description: |-
+      `docs/ADR-0003-recording-engine.md`가 존재하고, 상태가 최종 확정이 아니라 사람의 장치 검증 대기(PROVISIONAL)로 표기되어 있다.
+    verification:
+      type: verifier
+      instruction: |-
+        파일 존재와 상태 표기를 확인한다. 'Accepted' 같은 확정 표기가 쓰였으면 실패다.
+  - id: AC2
+    description: |-
+      PRODUCT-SPEC §6.1의 평가 기준 14개가 모두 후보 비교에서 다뤄진다.
+    verification:
+      type: verifier
+      instruction: |-
+        §6.1의 기준 목록과 ADR의 비교 항목을 하나씩 대조한다. 누락된 기준이 있으면 실패다.
+  - id: AC3
+    description: |-
+      저장소 근거(§14.3 인용) · 자동 검증 가능 근거 · Human Review 항목이 서로 구분되어 있고, 사람만 알 수 있는 것이 자동 검증된 것처럼 적혀 있지 않다. §14.3의 UNVERIFIED 항목이 VERIFIED로 승격되지 않았다.
+    verification:
+      type: verifier
+      instruction: |-
+        세 근거 구분이 문서 구조로 드러나는지 확인하고, §14.3과 대조해 UNVERIFIED 항목이 확인된 사실로 바뀌지 않았는지 본다.
+  - id: AC4
+    description: |-
+      잠정 선택 · 탈락 후보가 적혀 있고, 탈락 사유가 '확인된 사실'인지 '확인하지 못함'인지 구분된다. 평가의 비대칭이 명시되어 있다.
+    verification:
+      type: verifier
+      instruction: |-
+        탈락 사유 각각의 근거 유형이 구분되는지, 검증 용이성이 곧 근거가 아니라는 비대칭 서술이 있는지 확인한다.
+  - id: AC5
+    description: |-
+      사람이 실제 장치에서 확인할 8개 항목이 체크리스트로 있고, 이 Task는 문서만 변경했다(소스 · 매니페스트 · 설정 변경 없음).
+    verification:
+      type: verifier
+      instruction: |-
+        체크리스트 8항목 존재를 확인하고, 변경된 파일이 docs/ 아래 문서뿐인지 확인한다.
+
+evidence: []
+
+failure_memo: []

@@ -1,0 +1,65 @@
+# 캡처 → 정지 → 파일 확정과 결과 보고
+# Runtime이 PLAN-20260902T061156Z 승인 시점에 생성했다 (proposal P3). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-012
+status: DONE
+
+request: |-
+  선택된 장치 하나를 열어 캡처를 시작하고, 정지하면 로컬 오디오 파일을 확정하고, **장치 이름 · 출력 경로 · 포맷 · 파일 크기(byte)** 를 담은 보고 값을 돌려주는 경로를 만든다. start / stop 한 쌍까지만이다 — pause/resume · 재시작 영속성 · 재생 · Recording DB 행 생성은 만들지 않는다. 규칙: (a) 출력 파일은 `AppDataDirectory`에서 파생된 경로에 둔다. 새 경로 결정 로직을 별도로 만들지 않고 기존 경계를 재사용하며, 사용자 데이터를 지우는 경로를 만들지 않는다. (b) 실제 장치에서 샘플을 받는 부분을 경계 뒤에 가두고, 그 경계 바깥의 **순수 로직을 하드웨어 없이 테스트한다**: 출력 경로 결정(같은 입력이면 결정론적, 기존 파일을 덮어쓰지 않음) · 포맷 기술 문자열(샘플레이트 · 채널 수 · 비트 심도 · 컨테이너) · 보고 값 조립(장치명 · 경로 · 포맷 · 크기) · 임시 디렉터리에 실제로 쓴 파일의 크기 읽기. 가짜 샘플 소스로 파일 확정 경로 전체를 테스트한다. (c) 실패는 `domain::Failure`로 표현한다 — 장치를 열지 못함 · 캡처 중단 · 파일 쓰기 실패가 사용자가 읽을 수 있는 문장으로 도달해야 하고, 원본 데이터 안전 여부와 재시도 가능 여부를 기존 계약대로 채운다. panic으로 앱을 죽이지 않는다. (d) 프론트엔드가 부르는 표면은 기존 Tauri command 경계를 따른다. (e) 실제로 만들어지는 포맷을 문서/주석에 적을 때는 확인된 것만 적고, 확인하지 못한 것(예: 실제 코덱이 whisper 입력 요구와 맞는지)은 UNVERIFIED로 남긴다 — 그 판정은 사람의 장치 검증 몫이다. build · lint · test Gate가 전부 green이어야 하고 기존 테스트가 깨지지 않아야 한다. git commit은 하지 않는다.
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-011
+
+stop_condition:
+  gates: [build, lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 3
+
+acceptance_criteria:
+  - id: AC1
+    description: |-
+      `npm run build`가 통과한다.
+    verification:
+      type: gate
+      ref: build
+  - id: AC2
+    description: |-
+      `npm run lint`가 통과한다.
+    verification:
+      type: gate
+      ref: lint
+  - id: AC3
+    description: |-
+      `npm run test`가 통과하고 기존 테스트가 깨지지 않는다.
+    verification:
+      type: gate
+      ref: test
+  - id: AC4
+    description: |-
+      출력 경로 결정 · 포맷 기술 · 보고 값 조립 · 파일 크기 읽기가 실제 마이크 없이 자동 테스트된다(가짜 샘플 소스 + 임시 디렉터리).
+    verification:
+      type: verifier
+      instruction: |-
+        테스트가 하드웨어 없이 파일 확정 경로 전체를 지나는지 확인한다. 경로 결정이 기존 파일을 덮어쓰지 않는 성질이 테스트되는지 본다.
+  - id: AC5
+    description: |-
+      보고 값이 장치 이름 · 출력 경로 · 포맷 · 파일 크기를 모두 포함하고, 실패는 기존 `Failure` 계약으로 표현되며 panic 경로가 없다.
+    verification:
+      type: verifier
+      instruction: |-
+        보고 타입의 필드와 실패 경로를 읽는다. unwrap/expect/panic!이 캡처·파일 확정 경로에 있으면 실패다.
+  - id: AC6
+    description: |-
+      범위를 넘지 않았다 — pause/resume · 재생 · 재시작 영속성 · Recording DB 행 생성 · 완성된 Recording UX가 구현되지 않았고, 출력 경로는 `AppDataDirectory`에서 파생된다.
+    verification:
+      type: verifier
+      instruction: |-
+        Out of Scope 목록과 변경 내용을 대조하고, 앱 데이터 경로 결정이 한 모듈에만 있는지 확인한다.
+
+evidence: []
+
+failure_memo: []

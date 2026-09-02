@@ -4,8 +4,11 @@
 //! 저장소를 아는 코드는 [`crate::db`] 안에만 있고, 프론트엔드는 그 존재를 알지 않는다
 //! (`docs/ADR-0001-local-persistence.md` · PRODUCT-SPEC §12).
 //!
-//! Phase 1의 표면은 두 가지뿐이다 — **recording CRUD**와 **settings**.
-//! 녹음 · 전사 · AI · Notion을 위한 command는 그 기능이 존재하는 Phase가 함께 추가한다.
+//! Phase 1의 표면은 두 가지였다 — **recording CRUD**와 **settings**.
+//! 여기에 Phase 2A가 **입력 장치 열거**와 **캡처 시작 / 정지 한 쌍**을 더한다.
+//! ADR-0003이 아직 `PROVISIONAL`이므로 그 검증에 필요한 만큼만 만든다 —
+//! pause/resume · 재시작 영속성 · 재생 · 캡처 결과의 DB 영속화는 여기에 없다 (Phase 2B).
+//! 전사 · AI · Notion을 위한 command도 그 기능이 존재하는 Phase가 함께 추가한다.
 //!
 //! ## 저장소 초기화 실패는 앱을 죽이지 않는다
 //!
@@ -16,15 +19,20 @@
 pub mod payload;
 
 use std::sync::{Mutex, MutexGuard};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::Connection;
 use tauri::{Manager, State};
 
+use crate::audio::capture::{self, ActiveCapture};
+use crate::audio::{catalog, InputDeviceSource, SampleSource, SystemInputDevices, SystemSampleSource};
 use crate::db::{self, settings, store};
 use crate::domain::{Failure, FailureKind, RecordingId, RecordingView};
 use crate::platform::app_data_dir::AppDataDirectory;
 
-pub use payload::{NewRecording, RecordingPayload, SettingsPayload};
+pub use payload::{
+    CaptureReportPayload, InputDevicePayload, NewRecording, RecordingPayload, SettingsPayload,
+};
 
 /// 앱이 들고 있는 로컬 저장소.
 ///
@@ -145,6 +153,149 @@ impl Storage {
     }
 }
 
+/// 앱이 들고 있는 입력 장치 열거 경로.
+///
+/// 실제 장치를 묻는 부분은 [`InputDeviceSource`] 뒤에 있고, 앱은 시스템 구현을 쓴다
+/// ([`Self::system`]). 테스트는 자신의 구현을 넣어 **마이크 없이** 이 경로를 그대로 지난다
+/// ([`Self::with_source`]).
+///
+/// [`Storage`]와 달리 시작할 때 여는 것이 없다 — 목록은 물어볼 때마다 새로 얻는다.
+/// 장치는 언제든 꽂히고 빠지므로 앱이 시작 시점의 목록을 들고 있으면 그것이 곧 거짓말이 된다.
+pub struct AudioDevices {
+    source: Box<dyn InputDeviceSource + Send + Sync>,
+}
+
+impl AudioDevices {
+    /// 이 기기의 실제 입력 장치를 묻는다 (ADR-0003의 잠정 선택 경로).
+    pub fn system() -> Self {
+        Self::with_source(SystemInputDevices)
+    }
+
+    /// 주어진 경계 구현에 묻는다.
+    pub fn with_source(source: impl InputDeviceSource + Send + Sync + 'static) -> Self {
+        Self {
+            source: Box::new(source),
+        }
+    }
+
+    /// 고를 수 있는 입력 장치를 표시 순서로 돌려준다.
+    ///
+    /// 하나도 없으면 빈 목록이다 — **오류가 아니다.** 마이크를 뽑아 둔 상태는 정상 상태이며,
+    /// 그것을 실패로 만들면 화면이 사용자에게 없는 문제를 알리게 된다.
+    pub fn list(&self) -> Result<Vec<InputDevicePayload>, Failure> {
+        let observed = self.source.observe()?;
+        Ok(catalog(observed)
+            .into_iter()
+            .map(InputDevicePayload::from)
+            .collect())
+    }
+}
+
+/// 앱이 들고 있는 캡처 경로 (Phase 2A spike).
+///
+/// [`AudioDevices`]와 같은 방식으로 갈라져 있다 — 실제 장치에서 샘플을 받는 부분은
+/// [`SampleSource`] 뒤에 있고, 테스트는 자신의 구현을 넣어 **마이크 없이** 이 경로를
+/// 그대로 지난다 ([`Self::with_source`]).
+///
+/// [`Storage`]처럼 **앱 데이터 디렉터리를 얻지 못한 실패도 값으로 들고 있다.** 그 실패는
+/// 녹음을 시작하려 할 때 사용자에게 그대로 전달된다 — 시작 시점에 죽지 않는다 (§13).
+///
+/// **한 번에 하나만 녹음한다.** 진행 중인 캡처가 있는지가 이 값의 상태 전부이며,
+/// pause/resume 같은 세 번째 상태는 없다 (Phase 2B).
+pub struct Capture {
+    source: Box<dyn SampleSource + Send + Sync>,
+    /// 출력 파일이 놓일 자리. 얻지 못했다면 그 실패를 들고 있다.
+    app_data_dir: Result<AppDataDirectory, Failure>,
+    active: Mutex<Option<ActiveCapture>>,
+}
+
+impl Capture {
+    /// Tauri가 결정한 앱 데이터 디렉터리에 이 기기의 실제 입력 장치로 녹음한다 (INV-10).
+    pub fn open_for<R, M>(manager: &M) -> Self
+    where
+        R: tauri::Runtime,
+        M: Manager<R>,
+    {
+        Self {
+            source: Box::new(SystemSampleSource),
+            app_data_dir: AppDataDirectory::from_manager(manager).map_err(Into::into),
+            active: Mutex::new(None),
+        }
+    }
+
+    /// 주어진 디렉터리에 주어진 경계 구현으로 녹음한다.
+    pub fn with_source(
+        app_data_dir: AppDataDirectory,
+        source: impl SampleSource + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            source: Box::new(source),
+            app_data_dir: Ok(app_data_dir),
+            active: Mutex::new(None),
+        }
+    }
+
+    /// 고른 장치를 열고 캡처를 시작한다.
+    ///
+    /// 이미 녹음 중이면 시작하지 않는다 — **진행 중인 녹음을 조용히 버리지 않는다.**
+    pub fn start(&self, device_key: &str) -> Result<(), Failure> {
+        let app_data_dir = self.app_data_dir.as_ref().map_err(Clone::clone)?;
+        let mut active = self.active()?;
+        if active.is_some() {
+            return Err(Failure::permanent(
+                FailureKind::InvalidInput,
+                "이미 녹음 중이다. 먼저 정지해야 한다.",
+            ));
+        }
+
+        // 파일이 놓일 자리는 앱 데이터 디렉터리가 정한다. 이 함수는 경로를 만들지 않는다.
+        let directory = app_data_dir.ensure_recordings_dir()?;
+        let stem = capture::file_stem(unix_seconds());
+
+        *active = Some(capture::start(
+            self.source.as_ref(),
+            device_key,
+            &directory,
+            &stem,
+        )?);
+        Ok(())
+    }
+
+    /// 캡처를 정지하고 파일을 확정한 뒤 보고 값을 돌려준다.
+    ///
+    /// 성공이든 실패든 **이 호출로 캡처 하나가 끝난다.** 실패한 캡처를 다시 정지할 수는 없다.
+    pub fn stop(&self) -> Result<CaptureReportPayload, Failure> {
+        let mut active = self.active()?;
+        let capture = active.take().ok_or_else(|| {
+            Failure::permanent(FailureKind::InvalidInput, "녹음 중이 아니다.")
+        })?;
+        drop(active);
+
+        Ok(CaptureReportPayload::from(capture.stop()?))
+    }
+
+    /// 진행 중인 캡처 자리를 빌린다. 이전 호출이 쥔 채 죽었다면 그 사실을 그대로 알린다.
+    fn active(&self) -> Result<MutexGuard<'_, Option<ActiveCapture>>, Failure> {
+        self.active.lock().map_err(|_| {
+            Failure::permanent(
+                FailureKind::AudioDevice,
+                "녹음 상태를 더 이상 알 수 없다. 앱을 다시 시작해야 한다.",
+            )
+        })
+    }
+}
+
+/// 1970년 이후 흐른 초. 출력 파일 이름의 뿌리가 된다.
+///
+/// 시계가 그보다 앞을 가리켜도 죽지 않는다 — 이름을 정하는 일이 앱을 멈추게 할 이유는 없다.
+/// 그래서 이 값이 겹쳐도 파일은 덮어써지지 않는다 ([`capture::output_path`]).
+fn unix_seconds() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs())
+        .unwrap_or(0)
+}
+
 /// 저장소를 실제로 연다. 디렉터리 준비와 스키마 갱신이 모두 성공해야 한다.
 ///
 /// 두 단계의 오류는 각자의 모듈이 domain 공통 실패로 옮긴다 (`?`가 그 변환을 부른다).
@@ -176,8 +327,9 @@ fn validated(recording: NewRecording) -> Result<NewRecording, Failure> {
 
 // --- Tauri command 표면 -------------------------------------------------------------
 //
-// 아래 여섯 개가 frontend가 부를 수 있는 전부다. 각 함수는 [`Storage`]의 같은 이름 동작을
-// 그대로 부른다 — 로직을 여기에 두지 않으므로, 실제 동작은 Tauri 없이 테스트할 수 있다.
+// 아래 아홉 개가 frontend가 부를 수 있는 전부다. 각 함수는 [`Storage`] · [`AudioDevices`] ·
+// [`Capture`]의 같은 이름 동작을 그대로 부른다 — 로직을 여기에 두지 않으므로, 실제 동작은
+// Tauri 없이 테스트할 수 있다.
 
 #[tauri::command]
 pub fn list_recordings(storage: State<'_, Storage>) -> Result<Vec<RecordingPayload>, Failure> {
@@ -216,4 +368,21 @@ pub fn update_settings(
     settings: SettingsPayload,
 ) -> Result<SettingsPayload, Failure> {
     storage.update_settings(settings)
+}
+
+#[tauri::command]
+pub fn list_input_devices(
+    devices: State<'_, AudioDevices>,
+) -> Result<Vec<InputDevicePayload>, Failure> {
+    devices.list()
+}
+
+#[tauri::command]
+pub fn start_capture(capture: State<'_, Capture>, device_key: String) -> Result<(), Failure> {
+    capture.start(&device_key)
+}
+
+#[tauri::command]
+pub fn stop_capture(capture: State<'_, Capture>) -> Result<CaptureReportPayload, Failure> {
+    capture.stop()
 }

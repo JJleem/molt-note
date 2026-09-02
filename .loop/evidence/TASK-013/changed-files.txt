@@ -1,0 +1,21 @@
+# TASK-013이 이 Run에서 바꾼 파일 (git commit 없음)
+
+A  src/screens/captureSpikeView.ts        (새 파일 — 순수 상태 모듈)
+A  src/screens/captureSpikeView.test.ts   (새 파일 — vitest 테스트)
+M  src/screens/RecordingScreen.tsx        (임시 spike 패널 렌더링)
+M  src/App.css                            (.spike-notice · .spike-result 추가)
+
+# 건드리지 않은 것
+src/navigation/routes.ts     — 변경 없음 (라우트 4개 그대로)
+src/screens/registry.ts      — 변경 없음 (화면 4개 그대로)
+src/screens/types.ts         — 변경 없음 (ScreenProps 규약 그대로)
+src/ipc/**                   — 이 Run에서 변경 없음
+src-tauri/**                 — 이 Run에서 변경 없음
+tests/**                     — 이 Run에서 변경 없음 (기존 테스트 삭제·skip·약화 없음)
+
+# 작업 트리에 남아 있는 다른 미커밋 변경 (이 Run의 것이 아니다)
+src/ipc/commands.ts · src/ipc/types.ts · src/ipc/failure.ts · tests/ipc-boundary.test.ts ·
+src-tauri/** · docs/ADR-0003-recording-engine.md — TASK-010 ~ TASK-012이 남긴 상태다.
+
+# 확인 명령 (Runtime이 독립적으로 재실행한다)
+node tools/loop-runtime/loopctl.mjs self-check build lint test

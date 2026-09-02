@@ -31,6 +31,11 @@ pub enum FailureKind {
     Storage,
     /// 들어온 값이 규칙에 맞지 않아 아무것도 하지 않았다.
     InvalidInput,
+    /// 오디오 입력 장치를 다루지 못했다. 지금은 장치 목록을 읽지 못한 경우가 여기 속한다.
+    ///
+    /// 저장소 실패와 구분한다 — 사용자가 할 수 있는 일이 다르다. 저장소는 앱을 다시 시작하는
+    /// 문제이고, 이쪽은 장치 연결이나 마이크 권한의 문제다.
+    AudioDevice,
 }
 
 impl FailureKind {
@@ -41,6 +46,7 @@ impl FailureKind {
         match self {
             Self::Storage => "storage",
             Self::InvalidInput => "invalidInput",
+            Self::AudioDevice => "audioDevice",
         }
     }
 }
@@ -103,6 +109,18 @@ impl Failure {
             ..self
         }
     }
+
+    /// 이 실패가 **원본 데이터를 온전한 상태로 남기지 못했다**고 표시한다 ([`Self::source_data_safe`]).
+    ///
+    /// 기본값은 "안전하다"이며, 그 값을 실패마다 다시 주장하지 않는다. 원본을 훼손할 수 있는
+    /// 실패가 실제로 생기는 경로에서만 이 표시를 붙인다 — 지금은 **녹음 파일을 확정하지 못한
+    /// 경우**가 그것이다. 그때 사용자는 방금 녹음한 것을 신뢰할 수 없다.
+    pub fn with_source_data_at_risk(self) -> Self {
+        Self {
+            source_data_safe: false,
+            ..self
+        }
+    }
 }
 
 impl fmt::Display for Failure {
@@ -142,10 +160,42 @@ mod tests {
     }
 
     #[test]
+    fn a_failure_can_say_the_source_data_is_not_intact() {
+        // 기본값은 "안전하다"이고, 그렇지 않은 경로에서만 표시가 붙는다.
+        let safe = Failure::permanent(FailureKind::Storage, "녹음 파일을 확정하지 못했다");
+        assert!(safe.source_data_safe);
+
+        let at_risk = safe.clone().with_source_data_at_risk();
+
+        assert!(!at_risk.source_data_safe);
+        assert_eq!(at_risk.message, safe.message, "문장을 바꾸지 않는다");
+        assert_eq!(at_risk.retryable, safe.retryable);
+        assert_eq!(
+            serde_json::to_value(&at_risk).expect("직렬화할 수 있어야 한다")["sourceDataSafe"],
+            false,
+            "화면이 읽는 필드에 그대로 도달한다"
+        );
+    }
+
+    #[test]
     fn every_kind_has_a_distinct_stable_string() {
         assert_eq!(FailureKind::Storage.as_str(), "storage");
         assert_eq!(FailureKind::InvalidInput.as_str(), "invalidInput");
-        assert_ne!(FailureKind::Storage.as_str(), FailureKind::InvalidInput.as_str());
+        assert_eq!(FailureKind::AudioDevice.as_str(), "audioDevice");
+
+        // 이 문자열들은 `src/ipc/failure.ts`의 union과 1:1이다. 겹치면 화면이 두 실패를
+        // 구분하지 못한다.
+        let kinds = [
+            FailureKind::Storage,
+            FailureKind::InvalidInput,
+            FailureKind::AudioDevice,
+        ];
+        let mut seen = Vec::new();
+        for kind in kinds {
+            let text = kind.as_str();
+            assert!(!seen.contains(&text), "실패 종류 문자열이 겹친다: {text}");
+            seen.push(text);
+        }
     }
 
     #[test]

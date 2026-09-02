@@ -1,0 +1,65 @@
+# 임시 spike 표면 — 장치 선택 · 시작/정지 · 결과 표시
+# Runtime이 PLAN-20260902T061156Z 승인 시점에 생성했다 (proposal P4). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-013
+status: DONE
+
+request: |-
+  사람이 앱에서 직접 실행할 수 있도록 **임시 spike 표면**을 만든다. 동작: 입력 장치 목록을 보여주고 → 하나를 선택하고 → 시작하고 → 정지하면 → 결과(장치 이름 · 출력 경로 · 포맷 · 파일 크기)를 화면에 그대로 보여준다. 규칙: (a) 이 표면이 **임시임이 화면에서 명확해야 한다** — Phase 2A spike임을 눈에 보이게 표기하고, 최종 Recording 화면처럼 꾸미지 않는다. Phase 2B가 이것을 production UI로 대체한다. (b) 기존 4화면 navigation 구조를 재설계하지 않는다. 기본 형태는 `src/screens/RecordingScreen.tsx` 안의 임시 패널이며, 라우트를 새로 추가해야 한다면 `src/navigation/routes.ts`와 `src/screens/registry.ts`의 타입 규약을 그대로 지킨다. (c) backend 접근은 `src/ipc/commands.ts`의 타입 있는 client 규약을 따라 추가한다 — `invoke`를 화면에서 직접 부르지 않는다. 실패 표시는 기존 `failureView` / `FailureNotice` 규약을 재사용하고 새 실패 표현을 만들지 않는다. (d) 화면 로직 중 순수한 부분을 `src/screens/*View.ts` 스타일의 순수 모듈로 분리하고 DOM · 하드웨어 없이 테스트한다: 장치 목록이 비었을 때의 상태 · 선택 상태 전이(idle → recording → finished) · 결과 표시용 포맷팅(파일 크기 · 포맷 문자열) · 실패 상태. (e) 자동 테스트는 실제 마이크나 권한을 전제하지 않는다. build · lint · test Gate가 전부 green이어야 하고 기존 테스트가 깨지지 않아야 한다. git commit은 하지 않는다.
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-012
+
+stop_condition:
+  gates: [build, lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 3
+
+acceptance_criteria:
+  - id: AC1
+    description: |-
+      `npm run build`가 통과한다.
+    verification:
+      type: gate
+      ref: build
+  - id: AC2
+    description: |-
+      `npm run lint`가 통과한다.
+    verification:
+      type: gate
+      ref: lint
+  - id: AC3
+    description: |-
+      `npm run test`가 통과하고 기존 테스트가 깨지지 않는다.
+    verification:
+      type: gate
+      ref: test
+  - id: AC4
+    description: |-
+      표면에서 장치 목록 · 선택 · 시작/정지 · 결과(장치명 · 경로 · 포맷 · 크기)가 모두 사람에게 보인다.
+    verification:
+      type: verifier
+      instruction: |-
+        화면 컴포넌트와 view 모듈을 읽고 네 값이 모두 표시 경로에 도달하는지 확인한다.
+  - id: AC5
+    description: |-
+      표면이 임시임이 화면에서 명확하고, 최종 Recording UX로 만들어지지 않았다. 기존 4화면 navigation 구조가 재설계되지 않았다.
+    verification:
+      type: verifier
+      instruction: |-
+        임시 표기가 실제 렌더 경로에 있는지(주석뿐이면 실패), routes/registry 타입 규약이 유지되는지 확인한다.
+  - id: AC6
+    description: |-
+      화면의 순수 로직이 DOM · 하드웨어 없이 테스트되고, backend 접근과 실패 표시가 기존 `src/ipc` · `failureView` 규약을 재사용한다.
+    verification:
+      type: verifier
+      instruction: |-
+        새 테스트가 순수 모듈을 대상으로 하는지 확인하고, 화면에서 invoke를 직접 부르거나 새 실패 표현을 만들지 않았는지 본다.
+
+evidence: []
+
+failure_memo: []

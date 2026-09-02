@@ -246,6 +246,36 @@ input {
   letter-spacing: 0.01em;
 }
 
+/*
+ * Phase 2A spike 패널 (docs/ADR-0003-recording-engine.md §12).
+ * 임시 표면이므로 꾸미지 않는다 — 점선 하나로 "여기는 최종 화면이 아니다"만 말한다.
+ * Phase 2B가 이 자리를 대체할 때 함께 사라진다.
+ */
+
+.spike-notice {
+  max-width: 520px;
+  margin: 0 0 20px;
+  padding: 8px 10px;
+  border: 1px dashed var(--hairline);
+  border-radius: 5px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.spike-result {
+  margin: 0;
+}
+
+.spike-result dt {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.spike-result dd {
+  margin: 0 0 8px;
+  word-break: break-word;
+}
+
 /* recording detail */
 
 .tabs {

@@ -98,6 +98,29 @@ Phase 경계에서 생긴 것들을 정리한다.
   **어느 쪽이 옳은지 결정하고 문서를 맞춘다**
 - Phase 진행 중 UNVERIFIED로 남은 항목 중 아직 확인되지 않은 것
 
+## ⚠️ Hard Human Gate — 연기된 장치 검증 (2026-09-02)
+
+**이 Goal의 Human Review는 선택사항이 아니다.**
+
+Phase 2A의 recording engine 장치 검증이 여기로 연기됐다 (`docs/ADR-0003-recording-engine.md`
+§12 · §12.A). 즉 **V1 전체가 `ASSUMPTION A-REC-001` 위에 쌓여 있고, 그 가정은 아직
+실제 장치로 확인된 적이 없다.**
+
+따라서 아래를 실제 target Mac에서 수행하기 전에는 V1 완료를 선언하지 않는다.
+
+```text
+Molt Note.app 실행 → 마이크 권한 → 마이크 선택
+  → Record → Pause → Resume → Stop
+  → audio playback
+  → 앱 종료 → 재실행 → 녹음이 남아 있다 → 재생된다
+  → local transcription → AI Note → Markdown export → Notion sync
+```
+
+짧은 E2E가 성공한 뒤 **30~60분 녹음 안정성 테스트를 한 번** 수행한다.
+그것이 성공해야 `ADR-0003`이 `PROVISIONAL → CONFIRMED`가 된다.
+
+**실패하면 최종 완료를 선언하지 않는다.** 어떤 자동 Gate도 이 항목들을 대신 판정하지 않는다.
+
 ## Final Verification
 
 `docs/PRODUCT-SPEC.md` §17의 V1 성공 기준을 acceptance target으로 쓴다.

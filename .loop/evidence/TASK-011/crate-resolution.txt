@@ -1,0 +1,40 @@
+TASK-011 — 도입한 의존성의 실제 해석 결과 (추측이 아니라 lock 파일과 컴파일 결과)
+
+요청 (src-tauri/Cargo.toml):
+    cpal = "0.18"
+
+해석된 버전 (src-tauri/Cargo.lock):
+    $ grep -n -A 3 'name = "cpal"' src-tauri/Cargo.lock
+    421:name = "cpal"
+    422-version = "0.18.2"
+    423-source = "registry+https://github.com/rust-lang/crates.io-index"
+    424-checksum = "6f02e8d0327b42d3e2e4ab2119af397344eb9fc54a34bf0ddeaa1277af8681f1"
+
+    $ git diff --stat src-tauri/Cargo.lock
+    src-tauri/Cargo.lock | 277 +++++++++++++++++++++++++++++++++---
+    1 file changed, 261 insertions(+), 16 deletions(-)     (cpal + 전이 의존성)
+
+→ PRODUCT-SPEC §14.3이 조사한 값(cpal 0.18.2)과 일치한다. 이 사실을
+  docs/ADR-0003-recording-engine.md §4.2에 기록했다.
+
+hound: 추가하지 않았다. 이 Task는 열거만 만들고 WAV writer를 쓰는 코드가 없다.
+       파일을 만드는 Task(TASK-012)가 함께 추가한다.
+
+cpal 0.18.2의 API 중 **컴파일로 확인한 것** (§14.3에도 ADR에도 서명 수준의 기록이 없어
+이 저장소가 직접 확인했다):
+
+    cpal::default_host()                → Host
+    HostTrait::default_input_device()   → Option<Device>
+    HostTrait::input_devices()          → Result<_, cpal::Error>  (Device iterator)
+    DeviceTrait::description()          → Result<DeviceDescription, cpal::Error>
+    DeviceDescription::name()           → &str
+    DeviceTrait::id()                   → Result<DeviceId, cpal::Error>   (쓰지 않았다)
+
+  주의: 0.18.2의 장치 이름은 `Device::name()`이 아니라 `description().name()`이다.
+  이것은 컴파일러 오류로 확인한 사실이며 추정이 아니다.
+
+  `DeviceId`는 선택 키로 쓰지 않았다 — 앱 실행 사이에서 안정적인지 UNVERIFIED이기 때문이다.
+
+**컴파일은 "장치가 열린다"는 뜻이 아니다.** 실제 열거 결과 · macOS TCC 프롬프트 ·
+열거된 이름과 물리 마이크의 대응은 사람이 확인한다 (ADR-0003 §12). 이 Task는 그것을
+확인하지 않았고 확인했다고 적지도 않았다.

@@ -1,0 +1,38 @@
+TASK-014 — 이 Run이 수정한 파일 (문서 전용)
+
+수정한 파일: 1개
+
+  docs/ADR-0003-recording-engine.md
+
+이것이 전부다. 소스 · 매니페스트 · 설정 · docs/SYSTEM-MAP.md 는 건드리지 않았다 (AC5).
+
+
+## `git status --porcelain` 의 나머지 항목에 대하여
+
+git status에는 이 Run이 만들지 않은 변경이 함께 보인다. 이 Phase의 앞선 Task들
+(TASK-011 · TASK-012 · TASK-013)이 만든 것이며, git commit을 하지 않는 것이 Task 지시이므로
+working tree에 그대로 남아 있다.
+
+  M src-tauri/Cargo.lock            ← TASK-011 (cpal) · TASK-012 (hound)
+  M src-tauri/Cargo.toml            ← TASK-011 · TASK-012
+  M src-tauri/src/commands/mod.rs   ← TASK-011 · TASK-012
+  M src-tauri/src/commands/payload.rs
+  M src-tauri/src/domain/failure.rs ← TASK-011 (FailureKind::AudioDevice)
+  M src-tauri/src/lib.rs
+  M src-tauri/src/platform/app_data_dir.rs
+  M src/App.css                     ← TASK-013
+  M src/ipc/commands.ts
+  M src/ipc/failure.ts
+  M src/ipc/types.ts
+  M src/screens/RecordingScreen.tsx ← TASK-013 (spike 표면)
+  M tests/ipc-boundary.test.ts
+  ?? src-tauri/src/audio/           ← TASK-011 · TASK-012
+  ?? src-tauri/tests/capture.rs     ← TASK-012
+  ?? src-tauri/tests/input_devices.rs ← TASK-011
+  ?? src/screens/captureSpikeView.ts / .test.ts ← TASK-013
+
+docs/ADR-0003-recording-engine.md 자체는 TASK-010이 만든 뒤 commit되지 않았으므로
+git이 `??`(untracked)로 표시한다. `M`이 아니라 `??`인 것은 그 이유이며,
+이 Run이 그 파일을 새로 만들었다는 뜻이 아니다.
+
+git commit은 하지 않았다 (Task 지시).

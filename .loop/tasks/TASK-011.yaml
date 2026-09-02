@@ -1,0 +1,65 @@
+# 입력 장치 열거 경계와 하드웨어 없는 정규화 로직
+# Runtime이 PLAN-20260902T061156Z 승인 시점에 생성했다 (proposal P2). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-011
+status: DONE
+
+request: |-
+  ADR-0003이 잠정 선택한 engine 경로로 **입력 장치 열거**만 구현한다. 캡처는 이 Task가 아니다. (a) 선택이 native 경로면 §14.3에 기재된 crate를 `src-tauri/Cargo.toml`에 추가하고, 실제로 해석된 버전을 빌드 결과로 확인해 ADR-0003의 자동 검증 절에 적는다(추측한 버전을 적지 않는다). 선택이 webview 경로면 열거는 프론트엔드에 두되 아래 성질은 동일하게 만족시킨다. (b) 실제 장치를 묻는 호출을 **얇은 경계 뒤에 가둔다** — 테스트가 대체 구현을 주입할 수 있어야 하고, 자동 테스트는 실제 마이크나 마이크 권한의 존재를 절대 전제하지 않는다. (c) 경계 바깥의 **순수 로직을 테스트한다**: 빈 목록(오류가 아니라 정상 상태) · 이름이 중복된 장치 · 이름이 비어 있는 장치 · 안정적인 선택 키(같은 입력이면 같은 키) · 기본 장치 표시 · 표시용 목록 정렬. (d) 프론트엔드가 목록을 얻는 경로는 기존 Tauri command 경계(`src-tauri/src/commands/`)를 그대로 따르고, 실패는 `domain::Failure`로 표현한다 — 새 병렬 오류 타입을 만들지 않는다. 새 `FailureKind` 변형이 정말 필요하면 `src/ipc/failure.ts`의 매핑과 1:1로 유지한다. (e) `AppDataDirectory` · 기존 command 등록 방식 · 주석 톤 등 Phase 1의 규약을 그대로 재사용한다. UI는 이 Task에서 만들지 않는다. build · lint · test Gate가 전부 green이어야 하고 기존 테스트가 깨지지 않아야 한다. git commit은 하지 않는다.
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-010
+
+stop_condition:
+  gates: [build, lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 3
+
+acceptance_criteria:
+  - id: AC1
+    description: |-
+      `npm run build`가 통과한다.
+    verification:
+      type: gate
+      ref: build
+  - id: AC2
+    description: |-
+      `npm run lint`가 통과한다 (clippy `-D warnings` 포함).
+    verification:
+      type: gate
+      ref: lint
+  - id: AC3
+    description: |-
+      `npm run test`가 통과하고 기존 테스트가 하나도 깨지지 않는다.
+    verification:
+      type: gate
+      ref: test
+  - id: AC4
+    description: |-
+      장치 열거의 순수 로직(빈 목록 · 중복 이름 · 이름 없는 장치 · 안정적 선택 키)이 자동 테스트되고, 어떤 테스트도 실제 마이크나 마이크 권한의 존재를 전제하지 않는다.
+    verification:
+      type: verifier
+      instruction: |-
+        새 테스트를 읽고 하드웨어 접근 경로가 테스트에서 대체 가능한지 확인한다. 장치가 하나 이상 존재해야만 통과하는 단언이 있으면 실패다.
+  - id: AC5
+    description: |-
+      열거 결과가 기존 Tauri command 경계를 통해 노출되고 실패는 기존 `Failure` 계약으로 표현된다. 병렬 오류 타입이나 중복된 앱 데이터 경로 결정이 새로 생기지 않았다.
+    verification:
+      type: verifier
+      instruction: |-
+        commands 모듈 · domain::Failure · src/ipc의 기존 규약과 대조한다. 새 FailureKind가 있다면 프론트엔드 매핑과 1:1인지 확인한다.
+  - id: AC6
+    description: |-
+      ADR-0003이 잠정 선택한 engine 경로로 구현되었고, 도입된 의존성의 실제 해석 버전이 ADR의 자동 검증 근거로 기록되었다(해당되는 경우). 상태는 여전히 PROVISIONAL이다.
+    verification:
+      type: verifier
+      instruction: |-
+        ADR의 잠정 선택과 실제 구현 경로가 일치하는지, 기록된 버전이 매니페스트/락 파일과 맞는지, 상태 표기가 확정으로 바뀌지 않았는지 확인한다.
+
+evidence: []
+
+failure_memo: []

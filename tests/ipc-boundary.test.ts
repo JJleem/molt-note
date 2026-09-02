@@ -31,14 +31,26 @@ const failureTypeSource = readText('../src/ipc/failure.ts');
 const libSource = readText('../src-tauri/src/lib.rs');
 const rustFailureSource = readText('../src-tauri/src/domain/failure.rs');
 
-/** Phase 1이 노출하기로 한 command. 이 목록이 늘어나는 것은 Phase 범위가 넘친다는 뜻이다. */
-const PHASE_1_COMMANDS = [
+/**
+ * 지금까지 노출하기로 한 command 전부.
+ *
+ * 앞의 여섯은 Phase 1(recording CRUD · settings)이고, 나머지 셋은 Phase 2A가 engine 검증을
+ * 위해 더한 spike 표면이다 — **입력 장치 열거**와 **캡처 시작 / 정지 한 쌍**
+ * (docs/ADR-0003-recording-engine.md §12).
+ *
+ * 이 목록에 없는 이름이 등록되면 그것은 Phase 범위가 넘쳤다는 뜻이다 — 그래서 이 검사는
+ * 부분집합이 아니라 **정확히 같은 집합**을 요구한다.
+ */
+const REGISTERED_COMMANDS = [
   'list_recordings',
   'get_recording',
   'create_recording',
   'delete_recording',
   'get_settings',
   'update_settings',
+  'list_input_devices',
+  'start_capture',
+  'stop_capture',
 ];
 
 /** lib.rs의 generate_handler![...]에 등록된 command 이름. */
@@ -78,13 +90,17 @@ describe('frontend는 저장소를 알지 않는다', () => {
 });
 
 describe('command 표면', () => {
-  it('Phase 1 범위의 여섯 개만 등록되어 있다', () => {
-    expect(registeredCommands().sort()).toEqual([...PHASE_1_COMMANDS].sort());
+  it('허용된 목록과 정확히 같은 command만 등록되어 있다', () => {
+    expect(registeredCommands().sort()).toEqual([...REGISTERED_COMMANDS].sort());
   });
 
   it('아직 만들지 않은 기능의 command가 등록되어 있지 않다', () => {
-    // 녹음 · 전사 · AI · Notion은 각각 Phase 2 · 3 · 4 · 5의 일이다.
-    const outOfScope = /(start|stop|pause|resume)_recording|transcri|whisper|\bai_|notion|ollama|export/i;
+    // Phase 2A가 만드는 것은 **start / stop 한 쌍의 spike 캡처**까지다.
+    // pause/resume · 재생 · Recording 영속화는 Phase 2B이고, 전사 · AI · Notion은
+    // 각각 Phase 3 · 4 · 5다. 아래 정규식이 그 선을 지킨다 — `*_recording`은 Recording
+    // 레코드를 만드는 영속화 표면의 이름이므로 여전히 막혀 있다.
+    const outOfScope =
+      /(start|stop|pause|resume)_recording|(pause|resume)_capture|play|transcri|whisper|\bai_|notion|ollama|export/i;
 
     for (const command of registeredCommands()) {
       expect(command, `${command}는 Phase 1의 command가 아니다`).not.toMatch(outOfScope);

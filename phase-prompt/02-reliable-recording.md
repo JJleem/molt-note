@@ -7,17 +7,33 @@ Implement the production stage of Phase 2 of `docs/PRODUCT-SPEC.md`.
 > ```text
 > Phase 2A  engine 잠정 선택 + 최소 spike     phase-prompt/02a-recording-engine-validation.md
 >     ↓
-> Human Review — 실제 장치 증거              (여기서 engine이 확정된다)
+> Phase 2B  production recording             이 문서          ← 지금 여기
 >     ↓
-> Phase 2B  production recording             이 문서
+> …
+>     ↓
+> Final Integration — 실제 장치 Human Review  (여기서 engine이 확정된다)
 > ```
 >
-> **이 문서는 두 번째 단계다.** engine은 여기서 결정하지 않는다 — 이미 확정된 것을 쓴다.
-> 나눈 이유: 실제 마이크 권한 프롬프트 · 실제 코덱 · 실제 음질은 자동으로 확인할 수 없고,
-> 그 증거 없이 engine을 확정한 뒤 전체를 구현하면 가정이 틀렸을 때 되돌릴 것이 너무 많다.
+> **이 문서는 두 번째 단계다.** engine은 여기서 결정하지 않는다 —
+> Phase 2A의 **잠정** 선택을 쓴다.
 >
-> **Preconditions** — Phase 2A가 DONE이고, `docs/ADR-0003-recording-engine.md`가
-> 사람의 장치 검증 결과를 반영해 확정 상태여야 한다. 그렇지 않다면 이 단계를 시작하지 않는다.
+> 원래 계획은 2A와 2B 사이에 장치 검증을 두는 것이었다. 운영자가 2026-09-02에 그 검증을
+> **Final Integration으로 옮겼고**, 그래서 이 단계는 미확정 전제 위에서 진행된다.
+>
+> **Preconditions (2026-09-02 개정)** — Phase 2A가 engineering 기준으로 DONE이어야 한다.
+>
+> **장치 검증은 확정 조건이 아니다.** 운영자가 2026-09-02에 실제 장치 Human Review를
+> **Final Integration으로 연기**하기로 결정했다 (`ADR-0003` §12 · §12.A).
+> 따라서 이 단계는 다음 전제로 진행한다.
+>
+> ```text
+> Phase 2B는 ADR-0003의 PROVISIONAL engine 선택을 소비한다.
+> 실제 장치 확정은 Final Integration으로 연기됐다.
+> Phase 2B는 ADR-0003을 조용히 CONFIRMED로 승격시키지 않는다.
+> ```
+>
+> 이것은 `ASSUMPTION A-REC-001`(사용자가 수용한 위험) 위에서 진행한다는 뜻이며,
+> **가정이 틀리면 이 단계의 recording 구현에 rework가 생길 수 있다.**
 
 ## Goal
 
@@ -43,8 +59,12 @@ Phase 3 이후(전사 · AI · Notion)는 전부 "여기서 만들어진 audio �
 
 **이 단계는 recording engine을 다시 고르지 않는다.**
 
-Phase 2A가 후보를 §6.1 기준으로 비교하고, 최소 spike를 만들고, 사람이 실제 장치에서
-확인했다. 그 결과가 `docs/ADR-0003-recording-engine.md`에 있다.
+Phase 2A가 후보를 §6.1 기준으로 비교하고 최소 spike를 만들었다.
+그 결과가 `docs/ADR-0003-recording-engine.md`에 있으며, **상태는 `PROVISIONAL`이다** —
+실제 장치 검증이 Final Integration으로 연기됐기 때문이다 (§12 · §12.A).
+
+**새 evidence 없이 MediaRecorder와 cpal 비교를 처음부터 반복하지 않는다.**
+이 단계는 잠정 선택(`cpal` + `hound`)을 구현 전제로 소비한다.
 
 시작하기 전에 그 ADR을 읽고 다음을 확인한다.
 
@@ -57,9 +77,13 @@ Windows 함의
 Phase 3 포맷 함의 (§14.4의 16-bit WAV 요구)
 ```
 
-**ADR을 근거 없이 뒤집지 않는다.** 구현 중에 ADR의 전제와 어긋나는 사실을 발견하면
-조용히 다른 선택을 하지 말고, 그 사실과 영향을 기록하고 드러낸다 — 그것은 사람이
-판단할 사항이다.
+**ADR을 근거 없이 뒤집지 않는다.** 구현 중에 ADR의 전제와 어긋나는 명확한 blocker를
+발견하면 **임의로 다른 engine으로 갈아타지 않는다.** 그 사실과 영향을 기록하고
+`engine assumption invalidated`로 드러낸다 — 그것은 사람이 판단할 사항이다.
+
+**ADR-0003의 상태를 이 단계에서 `CONFIRMED`로 바꾸지 않는다.**
+장치 증거가 없는 상태에서의 승격은 근거 없는 확정이다.
+§12의 8개 항목은 `DEFERRED`로 남으며, Final Integration에서만 `PASS`/`FAIL`이 된다.
 
 Phase 2A가 만든 임시 spike 표면은 **이 단계가 production 구현으로 대체한다.**
 임시 표면을 그대로 남겨 두지 않는다.

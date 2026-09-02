@@ -43,6 +43,42 @@ export interface NewRecording {
 }
 
 /**
+ * 고를 수 있는 입력 장치 하나 (§6.1의 `microphone enumeration`).
+ *
+ * `key`는 고를 때 쓰는 불투명한 값이고 `label`은 사람이 읽는 이름이다 — 이름이 같은 장치가
+ * 둘 있을 수 있으므로 화면은 `label`을 보여주고 `key`로 고른다. 목록이 비어 있는 것은
+ * 정상 상태다 (마이크가 없거나 뽑혀 있다).
+ */
+export interface InputDevice {
+  readonly key: string;
+  readonly label: string;
+  readonly isDefault: boolean;
+}
+
+/**
+ * 정지한 캡처 하나의 보고 값 (Phase 2A spike · docs/ADR-0003-recording-engine.md §12).
+ *
+ * Phase 2A의 성공 기준이 그대로 필드다 — 장치 이름 · 출력 경로 · 포맷 · 파일 크기(byte).
+ * `format`은 그대로 보여줄 수 있는 한 문장이고, 그 문장을 이루는 값도 따로 온다.
+ *
+ * **저장된 {@link Recording}이 아니다.** 이 값은 어떤 레코드도 만들지 않는다 —
+ * 캡처 결과를 DB에 남기는 것은 Phase 2B의 일이다.
+ */
+export interface CaptureReport {
+  /** 실제로 열린 장치의 이름. */
+  readonly deviceLabel: string;
+  readonly outputPath: string;
+  /** 사람이 읽는 형식 문장(샘플레이트 · 채널 수 · 비트 심도 · 컨테이너). */
+  readonly format: string;
+  readonly sampleRateHz: number;
+  readonly channels: number;
+  readonly bitsPerSample: number;
+  readonly container: string;
+  /** 파일시스템에서 읽은 파일 크기(byte). */
+  readonly byteSize: number;
+}
+
+/**
  * 설정 값 (§5 D).
  *
  * **INV-7: secret이 없다.** API key · integration token은 이 타입에도, 저장소에도 없다.

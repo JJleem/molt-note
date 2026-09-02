@@ -12,6 +12,8 @@
 > - 2026-09-01 (rev 2) Requirements Delta 반영 — Windows를 지원 대상 플랫폼으로 추가,
 >   AI를 vendor 중립 Provider 추상화로 전환하고 core requirement에서 제외,
 >   §14.7의 근거 없는 VERIFIED 표기 정정
+> - 2026-09-02 (rev 5) recording 장치 검증을 Final Integration으로 연기 (§6.1 · §17.3) —
+>   `ASSUMPTION A-REC-001` 위에서 진행하며 Goal.md가 hard human gate가 된다
 > - 2026-09-02 (rev 4) Recording engine 결정을 2단계로 분리 (§6.1 · §21) —
 >   실제 장치 증거를 production 구현보다 앞에 둔다
 > - 2026-09-01 (rev 3) Transcript cardinality 확정 — `Recording 1:N Transcript`.
@@ -263,17 +265,22 @@ testability                maintenance cost
 알 수 있기 때문이다.
 
 ```text
-Phase 2A  후보 비교 → 잠정 선택 → 최소 spike        (자동 검증 + 저장소 근거)
+Phase 2A  후보 비교 → 잠정 선택 → 최소 spike        (자동 검증 + 저장소 근거)   ← DONE
     ↓
-Human Review  실제 장치에서 짧은 smoke recording     (사람만 알 수 있는 것)
+Phase 2B  production recording 구현                  (잠정 전제 위에서)
     ↓
-확정          ADR-0003이 확정 상태가 된다
+   …
     ↓
-Phase 2B  production recording 구현
+Final Integration  실제 장치 Human Review             ← 확정은 여기서 일어난다
 ```
 
-**실제 장치 증거 없이 engine을 확정한 뒤 전체를 구현하지 않는다** — 가정이 틀렸을 때
-되돌릴 것이 너무 많아지기 때문이다.
+> **2026-09-02 개정** — 원래는 2A와 2B 사이에 장치 검증을 두었다.
+> 운영자가 개발 흐름 유지를 위해 그 검증을 **Final Integration으로 연기**했고,
+> 그 위험을 명시적으로 수용했다 (`ADR-0003` §12.A — `ASSUMPTION A-REC-001`).
+>
+> **결과적으로 V1은 미확정 recording 전제 위에 쌓인다.**
+> 그래서 `phase-prompt/Goal.md`의 Human Review는 **선택사항이 아니라 hard gate**다.
+> 장치 검증이 실패하면 recording 구현에 rework가 생길 수 있다.
 
 평가의 비대칭에 주의한다: native 경로의 핵심 근거는 자동 검증 가능하고 webview 경로의
 핵심 미지수는 그렇지 않다. **"검증하기 쉬운 쪽"이 그 이유만으로 선택되면 근거가 아니라 편향이다.**
@@ -1073,6 +1080,8 @@ Molt Note 실행 → 제목 입력 → Record → 긴 녹음 → Stop
 3. 사용자가 요청하지 않은 외부 전송이 일어나지 않는다.
 4. **AI Provider를 제거하거나 중지해도 §17.1이 그대로 동작한다.**
 5. Windows에서 §3.1의 핵심 기능이 동작한다 (Phase 6에서 검증).
+6. **연기된 recording 장치 검증이 실제 Mac에서 통과한다** —
+   `ADR-0003` §12의 8개 항목과 30~60분 안정성 테스트. **이것 없이 V1 완료를 선언하지 않는다.**
 
 ---
 
@@ -1141,7 +1150,7 @@ Windows에서도 같은 디자인 방향을 유지하되, 플랫폼별 UI 분기
 | --- | --- | --- | --- |
 | Bootstrap | (`prompts/PROJECT-BOOTSTRAP.md`) | 실행 가능한 개발 baseline과 실제 Gate 확보 | **DONE** (2026-09-01) |
 | 1 | `01-application-foundation.md` | 앱 셸 · 로컬 저장소 · 데이터 영속성 · 플랫폼 경계 · 마이크 권한 선언 | PLANNED |
-| 2A | `02a-recording-engine-validation.md` | engine 잠정 선택 + 최소 spike → **사람의 실제 장치 검증** | PLANNED |
+| 2A | `02a-recording-engine-validation.md` | engine 잠정 선택 + 최소 spike | **DONE** (engineering) · 장치 검증 DEFERRED |
 | 2B | `02-reliable-recording.md` | 확정된 engine으로 실제 녹음 → 파일 → 재생, 재시작 후에도 살아남는다 | PLANNED |
 | 3 | `03-local-transcription.md` | 로컬 whisper로 timestamped transcript 생성 | PLANNED |
 | 4 | `04-ai-provider-system.md` | **Provider 추상화 + Local AI(Ollama) → Structured Note** | PLANNED |

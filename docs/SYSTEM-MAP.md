@@ -107,6 +107,7 @@ Recording 레코드는 만들 수 있으나 **오디오를 만드는 경로가 �
 | 구분 | 항목 | 비고 |
 | --- | --- | --- |
 | **선택됨 · 현재 사용 중** | Tauri v2 (2.11.5) · React 19 · Vite 7 · TypeScript 5.8 · ESLint · Vitest<br>**`rusqlite` 0.40.2 (`bundled`, SQLite 3.53.2)** — 제품 경로에서 실제로 쓰인다 | persistence 선택 근거는 `docs/ADR-0001-local-persistence.md` |
+| **잠정 선택 · 장치 미검증** | **`cpal` 0.18.2 + `hound` 3.5.1** — spike 경로에서 쓰인다 | ⚠️ `ADR-0003`은 **PROVISIONAL**이다. 실제 마이크에서 확인된 적이 없다 (`ASSUMPTION A-REC-001`) |
 | **설치됨 · 미통합** | (없음) | scaffold의 `tauri-plugin-opener`는 Phase 1에서 **제거**했다 |
 | **후보 · 미선택** | recording: `cpal`+`hound` / webview MediaRecorder / 커뮤니티 플러그인<br>transcription: whisper.cpp sidecar / `whisper-rs`<br>AI: 로컬 Ollama REST (`reqwest` 또는 `ollama-rs`)<br>Notion: `@notionhq/client` | **설치되지 않았다.** 각각 이를 필요로 하는 Phase에서 검증과 함께 선택한다. 확인된 사실은 `PRODUCT-SPEC.md` §14 |
 | **탈락** | `tauri-plugin-sql` | frontend가 임의 SQL executor가 된다. INV-7 · repository 경계와 어긋난다 (ADR-0001) |
@@ -193,8 +194,44 @@ Human Review 중 제품 요구사항이 바뀌어 Product Spec을 rev 2로 갱�
 
 **구현은 하나도 바뀌지 않았다.** 여전히 Bootstrap만 DONE이다.
 
-### Phase 2A — Recording Engine Validation · **PLANNED**
+### Phase 2A — Recording Engine Validation · 2026-09-02 · **engineering DONE · 장치 검증 DEFERRED**
+
+무엇이 생겼는가 (Task 5개, 전부 Gate PASS + 독립 Verifier PASS):
+
+| Task | 결과물 |
+| --- | --- |
+| TASK-010 | `ADR-0003` — 후보 비교와 **잠정** 선택 (`cpal` + `hound`) |
+| TASK-011 | 입력 장치 열거 경계 · 하드웨어 없는 정규화 로직 |
+| TASK-012 | 캡처 → 정지 → 파일 확정과 결과 보고 |
+| TASK-013 | 임시 spike 표면 (Recording 화면 안, 임시 표시) |
+| TASK-014 | 번들 `.app` 실행 절차 문서화 |
+
+**IMPLEMENTED로 기록할 수 있는 것:**
+
+```text
+cpal/hound 잠정 capture spike
+입력 장치 열거 경계
+짧은 캡처 / 파일 확정 구현
+임시 spike 표면
+```
+
+**⚠️ IMPLEMENTED / VERIFIED로 기록하지 않는 것 — 실제 장치에서 확인된 적이 없다:**
+
+```text
+실제 마이크가 이 Mac에서 동작한다
+권한 프롬프트가 실제로 뜬다
+오디오 품질
+장시간 녹음 안정성
+production recording lifecycle 완성
+```
+
+운영자가 2026-09-02에 장치 검증을 **Final Integration으로 연기**하고 위험을 수용했다
+(`ADR-0003` §12 · §12.A — `ASSUMPTION A-REC-001`). §12의 8개 항목은 전부 `DEFERRED`다.
+
 ### Phase 2B — Reliable Recording · **PLANNED**
+
+> 잠정 engine 전제 위에서 production recording을 구현한다. ADR-0003을 `CONFIRMED`로
+> 승격시키지 않는다 — 확정은 Final Integration의 hard human gate에서만 일어난다.
 
 > Phase 2는 두 단계다. engine 확정에 필요한 증거 일부(실제 권한 프롬프트 · 실제 코덱 ·
 > 실제 음질)는 자동 검증이 불가능해 사람이 앱을 실행해야 한다. 그래서 잠정 선택 + 최소
@@ -211,7 +248,7 @@ Human Review 중 제품 요구사항이 바뀌어 Product Spec을 rev 2로 갱�
 | | 무엇을 보장하는가 | 수단 |
 | --- | --- | --- |
 | **Automated validation** | 앱 데이터 경로 결정 · migration 멱등성과 데이터 보존 · §7 스키마와 카디널리티 · repository CRUD · duration 포맷 · Settings 영속성 · 재시작 생존 · command 실패 계약 · 라우팅 · 화면 view 상태 — **자동 테스트 131개** | `build` · `lint` · `test` Gate + 독립 Verifier |
-| **Human validation / witness** | 실제 마이크 음질 · 재생 음질 · AI Note의 유용성 · Notion 페이지 품질 · **화면의 시각적 완성도** · **Windows 실동작** | 사람이 직접 확인 |
+| **Human validation / witness** | 실제 마이크 음질 · 재생 음질 · AI Note의 유용성 · Notion 페이지 품질 · **화면의 시각적 완성도** · **Windows 실동작** · **연기된 recording 장치 검증(ADR-0003 §12)** | 사람이 직접 확인 |
 
 > Phase 1에서 사람이 확인한 것: 번들 `.app`의 Info.plist 병합(확인됨) ·
 > 권한 문구(확인됨) · 화면 레이아웃(**소스 수준 검토만 — 실행 화면 확인은 사용자 몫**).
@@ -227,6 +264,10 @@ Human Review 중 제품 요구사항이 바뀌어 Product Spec을 rev 2로 갱�
 - **`currentTranscriptId`를 갱신하는 파이프라인이 없다** — 스키마는 §7.2를 표현하지만
   값을 올리는 것은 Phase 3이다.
 - **secret 저장소가 없다** — Settings에 secret 필드를 만들지 않았다 (INV-7). Phase 4가 다룬다.
+- **⚠️ recording engine이 실제 장치에서 검증되지 않았다** — `cpal`/`hound` 경로는 컴파일되고
+  순수 로직은 테스트되지만, 실제 마이크·권한·음질은 확인된 적이 없다.
+  V1은 이 미확정 전제 위에 쌓인다 (`ASSUMPTION A-REC-001`).
+  확정은 `phase-prompt/Goal.md`의 hard human gate에서만 일어난다.
 - **recording engine이 미결정** — §6.1의 기준으로 Phase 2에서 실측과 함께 결정한다.
   문서만으로 결정하지 않기로 했다.
 - **whisper 통합 방식이 미결정** — 이 기기에 `cmake`가 없어 whisper.cpp 소스 빌드가
@@ -252,6 +293,7 @@ Human Review 중 제품 요구사항이 바뀌어 Product Spec을 rev 2로 갱�
 | `phase-prompt/Goal.md` | 최종 통합 Goal |
 | `docs/ADR-0001-local-persistence.md` | persistence 엔진 선택 근거 · crate 확인 상태 · migration 모델 |
 | `docs/ADR-0002-macos-microphone-usage-description.md` | 마이크 권한 선언의 위치와 성격 · 구현하지 않은 것의 경계 |
+| `docs/ADR-0003-recording-engine.md` | recording engine 잠정 선택 · **연기된 장치 검증 기록표(§12)** · 실행 절차(§12.1) |
 | `docs/GIT-WORKFLOW.md` | Git/GitHub 운영 정책 — Phase 단위 commit · public 저장소 안전 규칙 |
 | `docs/LOOP-RUNTIME-FIELD-NOTES.md` | Runtime 운용 관찰 기록 |
 | `CLAUDE.local.md` | 대화형 세션 운영 지침 |
@@ -274,6 +316,8 @@ Human Review 중 제품 요구사항이 바뀌어 Product Spec을 rev 2로 갱�
 | 2026-09-01 (delta) | persistence를 Rust 내부(`rusqlite` 계열)로 두는 방향 유력 | frontend가 임의 SQL executor가 되는 것을 막고 domain/repository 및 secret 경계(INV-7)와 일관되게 한다. Ollama 호출 방향과도 일관된다 | **확정** (아래 Phase 1 항목) |
 | 2026-09-02 (Phase 1) | **`rusqlite` 0.40.2 + `bundled` 채택 확정** | 로컬 빌드로 feature 존재와 SQLite 3.53.2 번들을 확인했다. `tauri-plugin-sql`은 frontend가 SQL executor가 되어 탈락 | 채택 (`ADR-0001`) |
 | 2026-09-02 (Phase 1) | migration을 `PRAGMA user_version` + `schema_migrations` 이중 기록으로 관리 | 미적용분만 순서대로 적용하고, 스키마 변경이 사용자 데이터를 지우지 않도록 한다 (INV-4) | 채택 (`ADR-0001`) |
+| 2026-09-02 (Phase 2A) | recording engine을 **잠정** `cpal` + `hound`로 선택 | §6.1의 14개 기준 비교. native 경로는 PCM/WAV를 직접 만들고 두 플랫폼에서 같은 포맷을 낸다 | **PROVISIONAL** (`ADR-0003`) |
+| 2026-09-02 (운영자) | 실제 장치 Human Review를 **Final Integration으로 연기** | 개발 흐름 유지. 위험을 명시적으로 수용했다 — 가정이 틀리면 recording 구현에 rework | 채택 · 위험 수용 (`ADR-0003` §12.A) |
 | 2026-09-02 (Phase 1) | `NSMicrophoneUsageDescription`을 `src-tauri/Info.plist`에 선언 | `tauri.conf.json` 키가 아니다. 번들 `.app`에서 CLI 생성값과 병합되는 것을 실제로 확인했다 | 채택 (`ADR-0002`) |
 | 2026-09-01 (rev 3) | **Transcript cardinality를 `Recording 1:N Transcript`로 확정** | rev 1~2의 §7은 `1:1`, §8은 "재전사가 새 Transcript를 만든다"로 서로 모순이었다. 1:1은 재전사 시 overwrite를 강제하므로 INV-2(immutable source)와 양립할 수 없다. **1:1을 잘못된 명세로 판단해 정정했다** | 채택 (`PRODUCT-SPEC.md` §7.1) |
 | 2026-09-01 (rev 3) | `Recording.currentTranscriptId` 도입 | 여러 Transcript version 중 무엇을 표시하고 후속 작업의 기본 입력으로 쓸지 명시해야 한다. 재전사 실패 시 기존 current를 유지해 유효한 Transcript를 잃지 않는다 (INV-3의 귀결) | 채택 (§7.2) |
