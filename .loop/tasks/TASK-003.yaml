@@ -1,0 +1,66 @@
+# §7 데이터 모델 스키마 (Recording · Transcript · AINote · NotionSync)
+# Runtime이 PLAN-20260901T035729Z 승인 시점에 생성했다 (proposal P3). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-003
+status: DONE
+
+request: |-
+  PRODUCT-SPEC §7의 데이터 모델을 P2의 migration으로 스키마에 표현한다. Recording(id · title · createdAt · updatedAt · duration · audioPath · audioFormat · microphone · currentTranscriptId? · transcriptionStatus · aiStatus · notionStatus), Transcript(자체 id · recordingId · language · segments · rawText · createdAt · engine · model), AINote(id · recordingId · transcriptId · type · content · provider · model · promptVersion · generatedAt), NotionSync(recordingId · pageId · syncedAt · status · error)를 서로 다른 테이블로 만든다. 확정된 domain 규칙을 구현 편의로 바꾸지 않는다: Recording 1:N Transcript(immutable · versioned), Transcript 1:N AINote, 그리고 기존 Transcript row를 UPDATE하는 경로를 만들지 않는다(§7.1 · INV-2). Recording.currentTranscriptId는 값이 없는 상태도 정상 상태이고, 성공한 Transcript를 가리킬 수 있어야 한다(§7.2). 상태 필드는 none · pending · running · done · failed를 구분할 수 있어야 한다. AINote의 provider는 특정 벤더를 전제하지 않는 자유 식별자이고 domain은 벤더 타입을 알지 않는다(INV-9). AI 호출·전사·Notion 전송 기능은 만들지 않는다. §7과 다르게 만든 부분이 있으면 docs/ADR-0001-local-persistence.md(또는 별도 ADR)에 이유를 기록한다. cargo 테스트를 추가하고 npm run lint와 npm run test를 직접 실행한다. git commit은 하지 않는다.
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-002
+
+stop_condition:
+  gates: [lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 3
+
+acceptance_criteria:
+  - id: AC1
+    description: |-
+      npm run lint가 통과한다.
+    verification:
+      type: gate
+      ref: lint
+  - id: AC2
+    description: |-
+      npm run test가 통과한다.
+    verification:
+      type: gate
+      ref: test
+  - id: AC3
+    description: |-
+      테스트가 한 Recording에 Transcript를 둘 이상 저장했을 때 앞의 것이 그대로 남아 있음을 검증한다(§7.1).
+    verification:
+      type: verifier
+      instruction: |-
+        해당 테스트가 두 Transcript를 저장한 뒤 첫 Transcript의 id와 내용이 변하지 않았음을 실제로 assertion하는지 확인한다.
+  - id: AC4
+    description: |-
+      테스트가 Transcript와 AINote가 서로 다른 레코드이며, AINote를 쓰는 것이 Transcript를 덮어쓰지 않음을 검증한다(INV-2). 또한 서로 다른 Transcript에 붙인 AINote가 transcriptId로 출처가 구분되고, provider·model·promptVersion·generatedAt provenance가 저장·복원된다(§7.3).
+    verification:
+      type: verifier
+      instruction: |-
+        테스트 코드를 읽고 두 시나리오(덮어쓰지 않음 · transcriptId로 provenance 구분)가 실제 assertion으로 존재하며 provenance 5개 필드가 round-trip 되는지 확인한다.
+  - id: AC5
+    description: |-
+      테스트가 Recording.currentTranscriptId의 '값 없음' 상태와 성공한 Transcript를 가리키는 상태를 모두 표현·복원할 수 있음을 검증하고, 상태 필드가 none·pending·running·done·failed를 구분해 저장·복원한다.
+    verification:
+      type: verifier
+      instruction: |-
+        두 상태의 저장/복원 테스트와 5개 상태값 처리 테스트가 실제로 존재하는지 확인한다.
+  - id: AC6
+    description: |-
+      기존 Transcript row를 UPDATE하는 코드 경로가 없고, domain 코드가 특정 AI 벤더 타입에 의존하지 않는다(INV-2 · INV-9). §7에서 벗어난 설계가 있다면 그 이유가 문서에 기록되어 있다.
+    verification:
+      type: verifier
+      instruction: |-
+        Transcript에 대한 UPDATE 문이나 갱신 API가 존재하는지 검색한다. AINote provider가 벤더 중립 문자열 식별자인지, Claude/Gemini/Ollama 같은 벤더 지식이 domain에 들어왔는지 확인한다. §7 대비 변경점이 있으면 문서에 이유가 적혀 있는지 확인한다.
+
+evidence: []
+
+failure_memo: []

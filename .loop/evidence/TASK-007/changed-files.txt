@@ -1,0 +1,15 @@
+ M index.html
+ D public/tauri.svg
+ D public/vite.svg
+ M src/App.css
+ M src/App.tsx
+ D src/assets/react.svg
+?? src/navigation/
+?? src/screens/
+ index.html           |   3 +-
+ public/tauri.svg     |   6 --
+ public/vite.svg      |   1 -
+ src/App.css          | 288 ++++++++++++++++++++++++++++++++++++++-------------
+ src/App.tsx          |  92 ++++++++--------
+ src/assets/react.svg |   1 -
+ 6 files changed, 268 insertions(+), 123 deletions(-)

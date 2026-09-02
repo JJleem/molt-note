@@ -1,0 +1,52 @@
+# Settings 영속화
+# Runtime이 PLAN-20260901T035729Z 승인 시점에 생성했다 (proposal P5). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-005
+status: DONE
+
+request: |-
+  Settings 값을 로컬 저장소에 영속화한다. 최소한 recordings directory 경로와 automatic 처리 ON/OFF 토글 두 가지를 저장하고 읽는다. P2의 migration 경로로 설정 저장용 스키마를 추가하고, 값이 아직 없을 때의 기본값 정책을 코드에 명시한다. 설정 읽기/쓰기 API는 Rust 경계 안에 두고 임시 디렉터리 DB로 테스트한다. Secret(API key · integration token)은 이 Phase에서 다루지 않으며 저장하지도 입력받지도 않는다(INV-7). whisper 모델 선택, AI provider 설정, Notion 토큰 같은 실제 기능을 구현하지 않는다. cargo 테스트를 추가하고 npm run lint와 npm run test를 직접 실행한다. git commit은 하지 않는다.
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-003
+
+stop_condition:
+  gates: [lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 2
+
+acceptance_criteria:
+  - id: AC1
+    description: |-
+      npm run lint가 통과한다.
+    verification:
+      type: gate
+      ref: lint
+  - id: AC2
+    description: |-
+      npm run test가 통과한다.
+    verification:
+      type: gate
+      ref: test
+  - id: AC3
+    description: |-
+      테스트가 (a) 값이 없을 때 기본값이 반환되고 (b) 저장한 recordings directory와 automatic 토글이 연결을 닫고 다시 연 뒤에도 그대로 읽히는 것을 검증한다.
+    verification:
+      type: verifier
+      instruction: |-
+        기본값 테스트와 재오픈 후 값 유지 테스트가 실제 assertion으로 존재하는지 확인한다.
+  - id: AC4
+    description: |-
+      secret 성격의 값을 저장하거나 입력받는 코드가 추가되지 않았다(INV-7).
+    verification:
+      type: verifier
+      instruction: |-
+        설정 스키마와 API에 API key·token·password 류 필드가 없는지 확인한다.
+
+evidence: []
+
+failure_memo: []

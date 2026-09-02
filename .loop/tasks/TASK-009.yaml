@@ -1,0 +1,48 @@
+# macOS 마이크 권한 선언 (NSMicrophoneUsageDescription)
+# Runtime이 PLAN-20260901T035729Z 승인 시점에 생성했다 (proposal P9). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-009
+status: DONE
+
+request: |-
+  macOS 번들 설정에 NSMicrophoneUsageDescription을 선언한다. PRODUCT-SPEC §14.3에서 확인된 대로 이것은 tauri.conf.json 키가 아니라 src-tauri/Info.plist에 넣으면 Tauri CLI 생성값과 병합되는 macOS packaging 요구사항이다. 사용자가 납득할 수 있는 한국어 또는 영어 설명 문구를 넣는다. 권한을 요청하거나 장치를 열거하는 코드는 만들지 않는다(Phase 2의 일이다). Windows 권한 로직도 만들지 않는다. 이것이 Molt Note의 범용 microphone permission 구현이 아니라 macOS adapter/packaging 요구사항이라는 점을 문서(예: docs/ADR 또는 해당 설정 옆의 주석과 docs 항목)에 명시적으로 기록한다. 이 선언이 실제로 존재하는지 검사하는 자동 테스트를 tests/ 아래에 추가한다(파일을 읽어 키와 비어 있지 않은 문구를 확인). 번들된 .app에서 실제로 병합되는지는 npm run tauri build가 Gate가 아니므로 자동 판정 대상이 아니며, 사람 확인 항목으로 남는다는 사실을 문서에 적는다. npm run lint와 npm run test를 직접 실행한다. git commit은 하지 않는다.
+
+execution:
+  role: impl
+
+stop_condition:
+  gates: [lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 2
+
+acceptance_criteria:
+  - id: AC1
+    description: |-
+      npm run lint가 통과한다.
+    verification:
+      type: gate
+      ref: lint
+  - id: AC2
+    description: |-
+      npm run test가 통과한다. 새 테스트가 NSMicrophoneUsageDescription 키와 비어 있지 않은 설명 문구의 존재를 검사한다.
+    verification:
+      type: gate
+      ref: test
+  - id: AC3
+    description: |-
+      NSMicrophoneUsageDescription이 src-tauri/Info.plist에 실제로 존재하고, tauri.conf.json에 잘못된 위치로 넣지 않았다.
+    verification:
+      type: verifier
+      instruction: |-
+        src-tauri/Info.plist의 내용과 tauri.conf.json을 확인한다. 권한 요청이나 장치 열거 코드가 추가되지 않았는지도 확인한다.
+  - id: AC4
+    description: |-
+      문서가 이 선언을 macOS packaging 요구사항으로 기술하며 Molt Note의 범용 microphone permission 구현으로 표현하지 않고, .app 번들 병합 확인이 사람 확인 항목임을 밝힌다.
+    verification:
+      type: verifier
+      instruction: |-
+        추가된 문서 서술을 읽고 macOS 한정 요구사항으로 정확히 기술되었는지, 구현되지 않은 권한 기능을 구현된 것처럼 적지 않았는지 확인한다.
+
+evidence: []
+
+failure_memo: []

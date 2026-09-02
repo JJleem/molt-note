@@ -1,0 +1,22 @@
+# TASK-006 — files that make up this Task's change
+#
+# Attempt 1 wrote most of these before it timed out; attempt 2 verified them against the
+# gates and changed exactly one file (marked [attempt 2]).
+
+## Rust — command surface, failure type, app state
+src-tauri/src/lib.rs                      # setup: Storage::open_for(app) + generate_handler![6 commands], no panic, no greet
+src-tauri/src/commands/mod.rs             # Storage (Ready | Unavailable(Failure)) + the six #[tauri::command] fns
+src-tauri/src/commands/payload.rs         # RecordingPayload / NewRecording / SettingsPayload wire shapes
+src-tauri/src/domain/failure.rs           # §13 domain failure type + serialization tests
+src-tauri/src/db/mod.rs                   # From<DatabaseError> for Failure + per-variant mapping tests
+
+## Rust — tests
+src-tauri/tests/command_boundary.rs       # init-failure path + Phase 1 CRUD/settings behaviour
+src-tauri/tests/recording_repository.rs   # [attempt 2] INV-4 source check made precise (startup path vs. registered command)
+
+## TypeScript — IPC boundary
+src/ipc/commands.ts                       # the only invoke() call site; six wrappers
+src/ipc/failure.ts                        # Failure / FailureKind + toFailure()
+src/ipc/types.ts                          # Recording / NewRecording / Settings
+src/ipc/failure.test.ts                   # failure conversion tests
+tests/ipc-boundary.test.ts                # no SQL in src/, command surface bounded, no greet remnant

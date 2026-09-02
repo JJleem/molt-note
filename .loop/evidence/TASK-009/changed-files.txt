@@ -1,0 +1,41 @@
+# TASK-009가 만든 파일 (전부 신규 · 기존 파일 수정 0건)
+$ git status --porcelain -- src-tauri/Info.plist tests/macos-bundle.test.ts docs/ADR-0002-macos-microphone-usage-description.md
+?? docs/ADR-0002-macos-microphone-usage-description.md
+?? src-tauri/Info.plist
+?? tests/macos-bundle.test.ts
+
+# 저장소 전체 git status (나머지 항목은 선행 Task들이 남긴 것이며 이 Run에서 건드리지 않았다)
+$ git status --porcelain
+ M index.html
+ D public/tauri.svg
+ D public/vite.svg
+ M src-tauri/Cargo.lock
+ M src-tauri/Cargo.toml
+ M src-tauri/src/lib.rs
+ M src/App.css
+ M src/App.tsx
+ D src/assets/react.svg
+?? .loop/evidence/TASK-001/
+?? .loop/evidence/TASK-002/
+?? .loop/evidence/TASK-007/
+?? .loop/tasks/TASK-001.yaml
+?? .loop/tasks/TASK-002.yaml
+?? .loop/tasks/TASK-003.yaml
+?? .loop/tasks/TASK-004.yaml
+?? .loop/tasks/TASK-005.yaml
+?? .loop/tasks/TASK-006.yaml
+?? .loop/tasks/TASK-007.yaml
+?? .loop/tasks/TASK-008.yaml
+?? .loop/tasks/TASK-009.yaml
+?? docs/ADR-0001-local-persistence.md
+?? docs/ADR-0002-macos-microphone-usage-description.md
+?? src-tauri/Info.plist
+?? src-tauri/src/db/
+?? src-tauri/src/platform/
+?? src/navigation/
+?? src/screens/
+?? tests/macos-bundle.test.ts
+
+# git commit은 하지 않았다 (Task 지시).
+# Rust 소스(src-tauri/src/**)와 프론트엔드 소스는 이 Run에서 변경되지 않았다 —
+# 즉 권한 요청 코드나 장치 열거 코드는 추가되지 않았다.

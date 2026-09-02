@@ -1,0 +1,59 @@
+# Recording repository와 duration 포맷
+# Runtime이 PLAN-20260901T035729Z 승인 시점에 생성했다 (proposal P4). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-004
+status: DONE
+
+request: |-
+  Recording 레코드에 대한 영속성 계층(repository)을 Rust에 구현한다: 생성 · 목록 조회 · 단건 조회 · 삭제. 이 계층은 오디오 파일이나 하드웨어 없이 동작해야 하고, 임시 디렉터리 DB만으로 자동 테스트할 수 있어야 한다(§18). duration을 사람이 읽는 형식으로 바꾸는 로직(예: 3151초 → 52:31)도 이 계층/도메인에 순수 함수로 두고 여기서 테스트한다. UI가 같은 로직을 TypeScript에 중복 구현하지 않도록, 조회 결과가 사람이 읽는 형식을 함께 제공하도록 한다. 삭제는 사용자가 명시적으로 요청했을 때만 수행되는 경로이며, 자동 삭제 로직을 만들지 않는다(INV-4). 전사·AI·Notion 관련 동작은 만들지 않는다. cargo 테스트를 추가하고 npm run lint와 npm run test를 직접 실행한다. git commit은 하지 않는다.
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-003
+
+stop_condition:
+  gates: [lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 2
+
+acceptance_criteria:
+  - id: AC1
+    description: |-
+      npm run lint가 통과한다.
+    verification:
+      type: gate
+      ref: lint
+  - id: AC2
+    description: |-
+      npm run test가 통과한다.
+    verification:
+      type: gate
+      ref: test
+  - id: AC3
+    description: |-
+      테스트가 생성 · 목록 조회 · 단건 조회(없는 id 포함) · 삭제 네 가지를 모두 덮고, 오디오 파일이나 하드웨어 없이 실행된다.
+    verification:
+      type: verifier
+      instruction: |-
+        repository 테스트가 네 연산을 모두 실제로 검증하는지, 실제 오디오 파일·마이크·사용자 디렉터리에 의존하지 않는지 확인한다.
+  - id: AC4
+    description: |-
+      duration 포맷 로직에 대한 단위 테스트가 존재하고 52:31 형태를 포함한 경계 사례(0초, 1시간 이상 등)를 검증한다.
+    verification:
+      type: verifier
+      instruction: |-
+        duration 포맷 테스트의 입력/기대값을 읽고 52:31 사례와 최소 두 개 이상의 경계 사례가 포함되어 있는지 확인한다.
+  - id: AC5
+    description: |-
+      저장된 Recording이 연결을 닫고 다시 연 뒤에도 그대로 조회된다.
+    verification:
+      type: verifier
+      instruction: |-
+        재오픈 후 조회를 실제로 수행하는 테스트가 있는지 확인한다.
+
+evidence: []
+
+failure_memo: []

@@ -1,0 +1,59 @@
+# Tauri command 경계와 실패 계약
+# Runtime이 PLAN-20260901T035729Z 승인 시점에 생성했다 (proposal P6). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-006
+status: DONE
+
+request: |-
+  P4의 Recording repository와 P5의 Settings를 frontend가 쓸 수 있도록 Tauri command로 노출한다: recording 목록 조회 · 단건 조회 · 생성 · 삭제, settings 조회 · 갱신. 저장소 초기화는 앱 시작 시 수행하되, 실패하더라도 프로세스를 panic으로 죽이지 않고 실패 상태를 앱 상태로 보관해 command가 구조화된 오류로 돌려주도록 한다(§13 — 실패는 console에만 남지 않는다). 오류는 사용자에게 보여줄 수 있는 형태(무엇이 실패했는가 · 다시 시도할 수 있는가를 담은 도메인 공통 실패 타입)로 직렬화하고, frontend에는 이에 대응하는 TypeScript 타입을 둔다. scaffold의 예제 greet command와 예제 UI 잔재는 이 Task에서 정리한다. frontend는 임의 SQL을 실행하지 않으며 SQL 문자열은 Rust 밖으로 나가지 않는다. 오류 매핑에 대한 cargo 테스트를 추가하고 npm run build · npm run lint · npm run test를 직접 실행한다. git commit은 하지 않는다.
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-004
+  - TASK-005
+
+stop_condition:
+  gates: [build, lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 2
+
+acceptance_criteria:
+  - id: AC1
+    description: |-
+      npm run build가 통과한다.
+    verification:
+      type: gate
+      ref: build
+  - id: AC2
+    description: |-
+      npm run lint가 통과한다.
+    verification:
+      type: gate
+      ref: lint
+  - id: AC3
+    description: |-
+      npm run test가 통과한다.
+    verification:
+      type: gate
+      ref: test
+  - id: AC4
+    description: |-
+      저장소 초기화 실패가 panic이나 console 로그로 끝나지 않고, command가 사용자에게 표시 가능한 구조화된 실패 값을 반환한다. 이에 대한 테스트가 존재한다.
+    verification:
+      type: verifier
+      instruction: |-
+        초기화 실패 경로를 읽고 unwrap/expect/panic으로 끝나지 않는지, 실패가 앱 상태로 보관되어 command 응답으로 전달되는지 확인한다. 실패 매핑 테스트가 실제로 실패 상황을 만들어 검증하는지 본다.
+  - id: AC5
+    description: |-
+      frontend가 SQL을 실행하지 않으며(SQL은 Rust 안에만 존재), 노출된 command 목록이 Phase 1 범위(recording CRUD · settings)를 넘지 않는다.
+    verification:
+      type: verifier
+      instruction: |-
+        src/ 아래에 SQL 문자열이나 임의 쿼리 실행 경로가 있는지 검색한다. 등록된 command 목록이 녹음·전사·AI·Notion 기능으로 확장되지 않았는지 확인한다.
+
+evidence: []
+
+failure_memo: []

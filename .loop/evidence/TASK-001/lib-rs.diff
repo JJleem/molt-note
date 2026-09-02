@@ -1,0 +1,29 @@
+diff --git a/src-tauri/src/lib.rs b/src-tauri/src/lib.rs
+index 4a277ef..cad2b14 100644
+--- a/src-tauri/src/lib.rs
++++ b/src-tauri/src/lib.rs
+@@ -1,3 +1,9 @@
++pub mod platform;
++
++use tauri::Manager;
++
++use platform::app_data_dir::AppDataDirectory;
++
+ // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
+ #[tauri::command]
+ fn greet(name: &str) -> String {
+@@ -8,6 +14,14 @@ fn greet(name: &str) -> String {
+ pub fn run() {
+     tauri::Builder::default()
+         .plugin(tauri_plugin_opener::init())
++        .setup(|app| {
++            // 앱 데이터 디렉터리를 결정하는 유일한 지점이다. 여기서 만들어 관리하고,
++            // 나머지 코드는 이 값을 통해서만 경로를 안다 (INV-10).
++            let app_data_dir = AppDataDirectory::from_manager(app)?;
++            app_data_dir.ensure()?;
++            app.manage(app_data_dir);
++            Ok(())
++        })
+         .invoke_handler(tauri::generate_handler![greet])
+         .run(tauri::generate_context!())
+         .expect("error while running tauri application");

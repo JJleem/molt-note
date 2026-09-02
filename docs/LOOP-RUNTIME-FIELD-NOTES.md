@@ -1172,6 +1172,587 @@ Worker / Verifier / Planner 호출 없음. 비용 0.
 ---
 
 
+## OBS-015 — Worker launch 실패가 이전 attempt의 TIMEOUT 분류를 물려받아 retry budget을 소비했다
+
+**Date:** 2026-09-01 ~ 2026-09-02
+
+**Project phase / Goal:** Molt Note Phase 1 — Application Foundation
+
+**Plan / Task / Run / Execution:**
+- PLAN-20260901T035729Z
+- TASK-002 (로컬 영속 저장소 초기화와 migration 경로)
+- Attempt 1: RUN-20260901T041022Z-TASK-002
+- Attempt 2: RUN-20260901T043410Z-TASK-002
+- EXEC-20260901T041022Z-TASK-002 / PLANEXEC-20260901T045106Z
+
+**Runtime stage:** Diagnose (Worker launch)
+
+### What happened
+
+`execute-plan` 실행 중 두 attempt가 **서로 다른 이유로** 실패했으나, 실행 로그에는
+같은 분류가 두 번 찍혔다.
+
+```text
+Attempt 1
+  [Worker] failed: worker timed out after 900s; worker result file not found: ...
+  [Diagnose] TIMEOUT -> RETRY_WITH_HINT
+
+Attempt 2
+  [Worker] failed: Worker could not be launched: worker adapter "claude" is not
+           available: `claude --version` exited null
+  [Diagnose] TIMEOUT -> RETRY_WITH_HINT      ← Worker가 실행조차 되지 않았다
+```
+
+Attempt 2는 worker timeout이 아니라 **adapter launch 실패**다. 프로세스가 시작되지 않았다.
+
+artifact를 보면 메커니즘이 드러난다. Attempt 2의 Run 디렉터리에는 입력만 있고
+결과가 없다.
+
+```text
+.loop-local/runs/RUN-20260901T043410Z-TASK-002/
+  context.md
+  manifest.json          ← 이게 전부다. envelope도 recovery도 없다
+```
+
+그리고 `diagnose`는 대상 Run을 이렇게 고른다.
+
+```text
+$ ./loopctl diagnose TASK-002
+Resolved Run: RUN-20260901T041022Z-TASK-002  (latest completed worker run)
+```
+
+즉 **launch 실패는 "completed worker run"을 만들지 않으므로 진단에서 보이지 않는다.**
+Runtime은 직전 attempt(=attempt 1)의 분류를 다시 해석해 그것을 이번 attempt의
+분류인 것처럼 보고했다. 그 결과:
+
+- attempt 카운트가 2/3으로 올라갔고
+- `escalation.hint_retry_max` (1/1)가 소진됐으며
+- Failure Memo에는 *"Spend less time exploring… write the result file early rather
+  than at the very end"* 라는 hint가 남았다 — **Worker가 한 번도 실행되지 않은 실패에
+  대해 Worker의 탐색 습관을 교정하라는 조언이다.**
+
+근본 원인은 provider 일시 장애로 보인다. 같은 시간대에 이 저장소를 운영하던 대화형
+세션에서도 `claude-sonnet-5[1m] is temporarily unavailable (timed out)` 오류가 관측됐다.
+장애가 해소된 뒤에는 정상이다.
+
+```text
+$ claude --version   → 2.1.252 (Claude Code)   exit 0
+$ ./loopctl adapters → claude   available
+```
+
+### Expected
+
+Worker가 **실행되지 않은 것**과 Worker가 **실행됐으나 실패한 것**은 다른 사건이다.
+
+launch 실패는 infrastructure 가용성 문제이며 Worker의 행동을 교정해서 해결되지 않는다.
+따라서:
+
+- 별도의 실패 종류(예: `ADAPTER_UNAVAILABLE`)로 분류되는 편이 자연스럽고,
+- 그 경우 Worker 행동 교정 hint를 만들지 않는 편이 낫고,
+- **retry budget(특히 hint_retry_max)을 소비하지 않는 편이 합리적이다.**
+  hint retry는 "직전 실패에서 배운 것을 주입한 재시도"인데, 배울 것이 없는 실패다.
+
+최소한 이전 attempt의 분류를 이번 attempt의 분류로 재사용하지는 않아야 한다.
+
+### Current workaround
+
+없음. attempt 2가 hint retry를 소진했고, 그 결과 TASK-002가 사람에게 올라왔다.
+provider가 회복된 뒤 `execute-plan`을 다시 실행했으나 TASK-002는 여전히 dispatch되지
+않았다 (OBS-017 참조).
+
+### Impact
+
+**Medium~High.** 일시적인 provider 장애 하나가 Task의 재시도 예산을 조용히 태우고,
+사실과 다른 교훈을 Failure Memo에 남긴다. 장애가 attempt 경계에 걸치면 실제 작업
+품질과 무관하게 Task가 정지한다.
+
+이번 사례에서는 **Attempt 1이 사실상 작업을 완료한 상태**(OBS-016)였기 때문에
+손실이 더 두드러졌다.
+
+### Possible Runtime improvement
+
+- launch 실패를 `ADAPTER_UNAVAILABLE`처럼 별도로 분류한다.
+- 그 분류에서는 hint를 생성하지 않고 hint_retry_max를 소비하지 않는다.
+- 진단 대상 Run 해석 시, "latest completed worker run"이 **이번 attempt가 아닐 때**
+  그 사실을 출력에 드러낸다 (현재는 조용히 이전 Run의 분류를 보여 준다).
+- 실행 직전 adapter 가용성을 확인하고, 불가하면 attempt를 소비하지 않고 정지한다.
+
+### Evidence
+
+```text
+.loop-local/runs/RUN-20260901T043410Z-TASK-002/     # context.md · manifest.json 뿐
+.loop-local/runs/RUN-20260901T041022Z-TASK-002/recovery/history/1/diagnosis.json
+    { "action": "RETRY_WITH_HINT", "reason": "Worker exceeded the 900s worker timeout…",
+      "attempt": 1 }
+./loopctl diagnose TASK-002   # "Resolved Run: … (latest completed worker run)"
+```
+
+Worker 호출 2회 · Verifier 0회 · provider-reported cost (known) $2.3220.
+
+### Status
+
+`OBSERVED`
+
+---
+
+## OBS-016 — 900s worker timeout이 1428s에 SIGKILL됐고, Worker는 마지막 15분간 아무 출력도 내지 않았다
+
+**Date:** 2026-09-01
+
+**Project phase / Goal:** Molt Note Phase 1 — Application Foundation
+
+**Plan / Task / Run / Execution:**
+- PLAN-20260901T035729Z · TASK-002
+- RUN-20260901T041022Z-TASK-002 (attempt 1)
+
+**Runtime stage:** Worker
+
+### What happened
+
+설정된 worker timeout은 900초인데 실제로는 약 1428초가 지난 뒤 SIGKILL됐다.
+
+```json
+"process": {
+  "exit_code": null, "signal": "SIGKILL",
+  "timed_out": true, "timeout_seconds": 900
+},
+"started_at":  "2026-09-01T04:10:22.987Z",
+"finished_at": "2026-09-01T04:34:10.783Z",
+"duration_ms": 1427796
+```
+
+**약 528초(8분 48초)의 초과분이 있다.** timeout enforcement 자체가 관찰 대상이다.
+
+또 `stdout.log`와 `stderr.log`가 **둘 다 0바이트**다. 23.8분 동안 Worker가 남긴
+표준 출력이 하나도 없다.
+
+그러나 파일 시스템 증거는 Worker가 **실제로는 잘 작동했다가 도중에 멈췄음**을 보여 준다.
+(시각은 로컬, UTC+9)
+
+```text
+13:10:22  Worker 시작
+13:12:46  src-tauri/Cargo.toml            rusqlite = { version = "0.40", features = ["bundled"] }
+13:13:14  src-tauri/src/db/migrations.rs
+13:14:16  src-tauri/src/db/mod.rs
+13:17:57  docs/ADR-0001-local-persistence.md
+13:18:11  .loop/evidence/TASK-002/gate-lint.log     ← Worker가 자기 self-check를 돌린 흔적
+13:18:27  .loop/evidence/TASK-002/gate-test.log
+13:18:51  .loop/evidence/TASK-002/changed-files.log ← 마지막 의미 있는 활동
+   …      (15분 19초 동안 아무 일도 일어나지 않음)
+13:34:10  SIGKILL
+```
+
+Worker는 **8분 29초 만에 Task를 사실상 끝내고** evidence까지 남긴 뒤,
+`worker-result.json` 하나를 쓰지 못한 채 15분 19초를 멈춰 있다가 죽었다.
+
+이후 대화형 세션에서 저장소 상태를 독립적으로 확인한 결과:
+
+```text
+$ ./loopctl self-check          build PASS · lint PASS · test PASS
+$ cargo test --manifest-path src-tauri/Cargo.toml
+                                14 passed; 0 failed
+```
+
+AC3가 요구한 세 가지(빈 디렉터리 초기화 · 닫았다 다시 열기 · migration 재실행)가
+모두 실제 테스트로 존재하며 통과한다. AC4가 요구한 ADR도 작성되어 있고,
+§14.7이 UNVERIFIED로 남겨 둔 `rusqlite`의 `bundled` feature를 로컬 빌드 산출물로
+확인하면서 **공식 문서 확인은 UNVERIFIED로 정직하게 구분**해 두었다.
+
+### Expected
+
+두 가지가 어긋났다.
+
+1. **timeout이 설정값 근처에서 집행되는 것.** 900초 설정에 1428초는 예산 계획을
+   무너뜨린다. 사람이 `worker_timeout_seconds`로 통제할 수 있다고 믿는 값이
+   실제 상한이 아니다.
+2. 15분간 무출력 상태가 **hang으로 감지되는 것.** `limits.yaml`의 `stall` 절은
+   `identical_tool_calls` · `unchanged_error_string` · `zero_diff_attempts`를 정의하지만
+   "일정 시간 이상 아무 출력도 없음"은 정의하지 않는다. V0에서 stall은 감지만 하고
+   자동 대응은 하지 않기로 되어 있으므로, 이 항목이 없다는 것 자체가 관찰 결과다.
+
+### Current workaround
+
+없음. 결과적으로 완료된 작업이 결과 파일 부재만으로 미완료 처리됐다.
+
+**주의: 이것을 근거로 "900초가 짧다"고 결론짓지 않는다.** 증거는 반대를 가리킨다 —
+Worker는 8분 29초 만에 작업을 마쳤다. 예산을 소진한 것은 작업량이 아니라 무응답 구간이다.
+cold `rusqlite` bundled 빌드(SQLite C 컴파일)가 self-check 안에서 돌긴 했지만,
+그 구간은 13:18:11~13:18:51에 이미 끝나 있었다.
+
+### Impact
+
+**Medium.** 완료된 작업이 버려졌고, 재시도 예산이 OBS-015와 겹쳐 소진됐다.
+timeout 초과 집행은 비용 상한 추정을 어렵게 만든다.
+
+### Possible Runtime improvement
+
+- timeout 집행 경로를 점검한다. 설정값과 실제 kill 시점의 차이를 Envelope에
+  드러내는 것만으로도 진단이 쉬워진다.
+- Worker가 결과 파일을 **일찍, 점진적으로** 쓰도록 계약을 조정하는 방향
+  (KERNEL §7의 Result를 마지막에 한 번 쓰는 현재 구조가 이 실패 양식에 취약하다).
+- `stall`에 "무출력 지속 시간" 항목을 추가할지 검토한다 — 다만 실측 사례는 아직 이것 하나다.
+
+### Evidence
+
+```text
+.loop-local/runs/RUN-20260901T041022Z-TASK-002/runtime-envelope.json
+.loop-local/runs/RUN-20260901T041022Z-TASK-002/stdout.log   # 0 bytes
+.loop-local/runs/RUN-20260901T041022Z-TASK-002/stderr.log   # 0 bytes
+.loop/evidence/TASK-002/                                    # gate-lint.log · gate-test.log · …
+docs/ADR-0001-local-persistence.md
+```
+
+### Status
+
+`OBSERVED`
+
+---
+
+## OBS-017 — Runtime이 안내한 resume가 독립 Task를 진행시키면서, 막혀 있던 Task의 복구 경로를 없앴다
+
+**Date:** 2026-09-02
+
+**Project phase / Goal:** Molt Note Phase 1 — Application Foundation
+
+**Plan / Task / Run / Execution:**
+- PLAN-20260901T035729Z · TASK-002
+- PLANEXEC-20260901T045106Z (1차) → PLANEXEC-20260902T032717Z (resume)
+
+**Runtime stage:** Execute loop / Diagnose
+
+### What happened
+
+1차 실행이 TASK-002에서 멈추면서 Runtime이 다음 행동을 직접 안내했다.
+
+```text
+Inspect:
+  loopctl status
+  loopctl diagnose TASK-002
+  re-running `loopctl execute-plan PLAN-20260901T035729Z` resumes from the remaining tasks
+```
+
+그 시점 TASK-002의 진단은 이랬다.
+
+```text
+Failure: TIMEOUT
+Retryable: yes
+Recommended action: RETRY_WITH_HINT
+Subject bound: unchanged since the failure
+```
+
+안내대로 아무것도 바꾸지 않고 `execute-plan`을 다시 실행했다. Runtime은 TASK-002를
+건너뛰고 의존성이 없는 TASK-007 · TASK-009를 진행해 **둘 다 DONE으로 만들었다.**
+그 과정에서 working tree가 바뀌었다.
+
+그 직후 TASK-002의 진단이 달라졌다.
+
+```text
+Failure: RECOVERY_AMBIGUOUS
+Retryable: no
+Recommended action: NEEDS_HUMAN
+Reason: … The working tree has changed since this attempt, so a retry would be
+        layered onto unrelated changes.
+Subject bound: CHANGED or unknown
+```
+
+Plan 실행은 `NEEDS_HUMAN / PLAN_NO_READY_TASK`로 끝났다.
+
+**즉 Runtime이 스스로 권한 resume 동작이, 막혀 있던 Task를 `retryable: yes`에서
+`retryable: no`로 밀어냈다.**
+
+### Expected
+
+fail-closed 자체는 옳다. 다른 Task가 바꿔 놓은 tree 위에 예전 attempt의 재시도를
+얹는 것은 실제로 위험하며, Runtime이 이를 거부하는 것은 설계 원칙(Subject 바인딩)에 맞다.
+
+문제는 **안내와 결과의 불일치**다. `re-running … resumes from the remaining tasks`는
+남은 Task를 이어서 한다는 뜻으로 읽히지, *막힌 Task의 복구 가능성이 그 대가로
+사라진다*는 뜻으로 읽히지 않는다.
+
+resume 전에 다음을 알 수 있었으면 좋았다.
+
+```text
+TASK-002는 이번 resume에서 dispatch되지 않는다.
+이 resume는 working tree를 바꾸므로, 이후 TASK-002의 retry는 subject 불일치로 거부된다.
+```
+
+### Current workaround
+
+없음. 현재 TASK-002는 `IN_PROGRESS` · `NEEDS_HUMAN`이며 Plan에 READY Task가 없다.
+Phase 1의 나머지 5개 Task(TASK-003~006, 008)가 전부 TASK-002에 막혀 있다.
+
+`loopctl transition TASK-002 TODO`로 상태를 되돌리는 것은 escalation 우회에 해당하므로
+운영자 판단 없이 하지 않는다.
+
+### Impact
+
+**High.** Runtime이 권한 정상 경로를 그대로 따랐는데 상황이 나빠졌다.
+Plan 전체가 사람 개입 없이는 더 진행되지 않는다.
+
+### Possible Runtime improvement
+
+- resume 시작 전에 "이번 실행에서 dispatch되지 않는 Task"와 "tree 변경으로 복구
+  경로를 잃게 될 Task"를 미리 보여 준다.
+- 정지 메시지의 resume 안내에 이 부작용을 한 줄 덧붙인다.
+- 막힌 Task가 있는 Plan에서 독립 Task만 진행하는 것을 별도 의사결정으로 만든다
+  (예: 확인 플래그, 또는 per-Task worktree 격리 — 후자는 이미 "아직 없는 것"에 있다).
+
+### Evidence
+
+```text
+PLANEXEC-20260901T045106Z.json   # LIMIT_REACHED / TASK_STOPPED
+PLANEXEC-20260902T032717Z.json   # NEEDS_HUMAN / PLAN_NO_READY_TASK
+.loop-local/runs/RUN-20260901T041022Z-TASK-002/recovery/history/1/diagnosis.json
+    { "action": "RETRY_WITH_HINT", … }        # resume 이전
+.loop-local/runs/RUN-20260901T041022Z-TASK-002/recovery/diagnosis.json
+    { "action": "NEEDS_HUMAN", "reason": "… The working tree has changed …" }  # resume 이후
+```
+
+resume 실행 비용: provider-reported $6.7420 (Worker 2 · Verifier 2 · gate runs 2).
+
+### Status
+
+`OBSERVED`
+
+---
+
+
+## OBS-018 — 정상 구현의 Gate가 환경 stall로 timeout됐고, 같은 subject에 대한 `gate --rerun`이 1.4초에 통과했다
+
+**Date:** 2026-09-02
+
+**Project phase / Goal:** Molt Note Phase 1 — Application Foundation
+
+**Plan / Task / Run / Execution:**
+- PLAN-20260901T035729Z · TASK-005 (Settings 영속화)
+- RUN-20260902T040119Z-TASK-005
+- EXEC-20260902T040119Z-TASK-005 → EXEC-20260902T050826Z-TASK-005 (수동 복구)
+
+**Runtime stage:** Gate
+
+### What happened
+
+Worker는 성공했는데 Gate에서 멈췄다. 두 Gate 중 하나만 timeout이다.
+
+```text
+[Worker] success -> REVIEW
+[Gate] FAIL  (lint TIMEOUT, test PASS)
+[Diagnose] TIMEOUT -> NEEDS_HUMAN
+```
+
+`test` Gate는 통과했다. `test`도 `lint`도 둘 다 Rust를 컴파일하므로,
+**컴파일이 느려서 생긴 문제라면 test가 먼저 걸렸어야 한다.**
+
+정지 후 같은 명령을 사람이 직접 재보았다.
+
+```text
+1회차   npm run lint    4:14.79 wall  ·  0.94s user  ·  0.34s system  ·  0% cpu
+          ├ lint:web (eslint)   0.568s
+          └ lint:rust (clippy)  0.237s   "Finished dev profile in 0.79s"
+2회차   npm run lint    0.852s   exit 0
+3회차   npm run lint    0.806s   exit 0
+        npm run test    1.164s   exit 0
+```
+
+**254초 동안 CPU를 거의 쓰지 않았다.** 계산이 오래 걸린 것이 아니라 무언가를 기다렸다.
+child command를 따로 재면 각각 1초 미만이고, composite만 wall time이 길었다.
+(원인은 특정하지 못했다. 새로 쓰인 실행 파일에 대한 macOS 보안 검사나 파일시스템 정체가
+후보이나 **이 Run에서 확인하지 못했다 — UNVERIFIED.**)
+
+Runtime의 진단 문구는 이 상황을 정확히 표현하고 있었다.
+
+```text
+Reason: Gate "lint" exceeded its timeout. A gate timeout is ambiguous between a
+        hanging implementation and a slow environment; it is not retried automatically.
+```
+
+사람이 "환경 쪽"이라고 판단한 뒤 같은 subject에 대해 공식 rerun을 실행했다.
+
+```text
+$ ./loopctl gate TASK-005 --rerun
+[PASS]    lint  1.4s
+[PASS]    test  1.0s
+Preserved previous gate evidence: gate-history/1/
+Gate Result: PASS
+Task remains REVIEW.  Ready for independent verification.
+```
+
+**900초를 초과하던 Gate가 같은 코드·같은 subject에서 1.4초에 통과했다.**
+이후 Verifier도 PASS했고 TASK-005는 DONE이 됐다.
+
+### 대조 증거 — retry 경로는 provider가 정상이면 실제로 수렴한다
+
+같은 실행에서 TASK-006이 Worker timeout을 겪었으나 자동 복구됐다.
+
+```text
+Attempt 1  [Worker] failed: worker timed out after 900s
+           [Diagnose] TIMEOUT -> RETRY_WITH_HINT
+Attempt 2  [Worker] success -> REVIEW
+           [Gate] PASS  (build, lint, test)
+           [Verifier] PASS
+TASK-006: DONE   attempts=2  19m 32s
+```
+
+이것은 OBS-015의 해석을 뒷받침한다. **900초 timeout 자체가 이 Task class에 부족한 것이
+아니라**, TASK-002에서는 provider 장애가 두 번째 시도를 삼켰던 것이다.
+`worker_timeout_seconds`는 이번 Phase 내내 900으로 유지했고 Phase는 완료됐다.
+
+### Expected
+
+Runtime 동작 자체는 **옳다.** gate timeout을 자동 재시도하면 진짜로 hang하는 구현을
+무한히 되돌릴 수 있다. fail-closed가 맞다.
+
+관찰 가치가 있는 것은 **환경 stall이 완성된 작업을 사람 개입 지점까지 밀어 올린다**는 사실과,
+그것을 판별할 근거가 Gate 기록만으로는 부족하다는 점이다. 현재 gate-report에는
+exit code와 소요 시간은 있으나 **CPU 시간이 없다.** wall time과 CPU time을 함께 기록하면
+"느린 환경"과 "hang하는 구현"을 사람이 훨씬 빨리 가른다 — 이번 판별의 결정적 근거가
+정확히 그 두 값의 차이였다.
+
+### Current workaround
+
+`./loopctl gate <TASK> --rerun`. subject가 바뀌지 않았다면 깨끗하게 복구된다.
+이전 Gate 기록은 `gate-history/1/`에 보존되므로 실패 사실이 지워지지 않는다.
+
+### Impact
+
+**Medium.** 작업은 정상이었고 복구도 저렴했다(AI 호출 0회, 2.5초). 다만 사람이 개입해야
+했고, 판별 근거를 사람이 직접 `time`으로 재서 만들어야 했다.
+
+### Possible Runtime improvement
+
+- gate-report에 **CPU time(user/system)** 을 wall time과 함께 기록한다.
+  이번 사례에서 판별을 가능하게 한 유일한 신호다.
+- gate timeout 정지 메시지에 `gate --rerun`을 복구 후보로 함께 안내한다
+  (현재는 `status` · `diagnose`만 안내한다).
+
+### Evidence
+
+```text
+.loop-local/runs/RUN-20260902T040119Z-TASK-005/gate-report.json
+.loop-local/runs/RUN-20260902T040119Z-TASK-005/gate-history/1/     # 실패한 Gate 기록 보존
+./loopctl diagnose TASK-005     # "ambiguous between a hanging implementation and a slow environment"
+```
+
+Gate rerun 비용 0 (AI 호출 없음). 이후 Verifier 1회 $2.2660.
+
+### Status
+
+`OBSERVED`
+
+---
+
+## OBS-019 — `execute-plan`이 REVIEW 상태의 Task를 이어받지 못해, 수동 Gate 복구 후 Plan이 스스로 진행하지 못했다
+
+**Date:** 2026-09-02
+
+**Project phase / Goal:** Molt Note Phase 1 — Application Foundation
+
+**Plan / Task / Run / Execution:**
+- PLAN-20260901T035729Z · TASK-005
+- PLANEXEC-20260902T050658Z
+
+**Runtime stage:** Execute loop
+
+### What happened
+
+OBS-018의 `gate --rerun` 이후 TASK-005의 상태는 이랬다.
+
+```text
+$ ./loopctl verify-ready
+TASK-005     RUN-20260902T040119Z-TASK-005     REVIEW   GATES PASS
+
+$ ./loopctl status
+REVIEW
+  TASK-005
+    gates: PASS
+    verifier: ready
+```
+
+Gate는 통과했고 Verifier만 남은, 명백히 진행 가능한 상태다.
+그래서 Plan 단위 루프에 맡기려고 `execute-plan`을 실행했다.
+
+```text
+$ ./loopctl execute-plan PLAN-20260901T035729Z
+Plan Result: NEEDS_HUMAN   stop_reason: PLAN_NO_READY_TASK
+  no task is ready; outstanding: TASK-005 (REVIEW); TASK-006 (TODO) waiting on: TASK-005; …
+Duration: 0s
+Tasks executed this run: (none)
+LLM invocations: 0
+```
+
+`execute-plan`은 **READY(=TODO이고 의존성이 충족된) Task만 dispatch한다.**
+`REVIEW`에서 Verifier를 기다리는 Task는 그 조건에 들지 않으므로, Plan 루프에게는
+"할 수 있는 일이 없는" 상태로 보인다. 정작 `verify-ready`는 바로 그 Task를 지목하고 있다.
+
+복구는 사람이 Verifier를 직접 호출해야 했다.
+
+```text
+$ ./loopctl verify TASK-005
+Verifier Result: PASS
+TASK-005: REVIEW -> DONE
+Recorded this manual recovery as EXEC-20260902T050826Z-TASK-005
+  it supersedes EXEC-20260902T040119Z-TASK-005, which stays exactly as it was recorded
+```
+
+그 뒤에야 TASK-006이 READY가 되고 `execute-plan`이 정상적으로 이어졌다.
+
+### Expected
+
+`execute-plan`은 "Plan의 Task를 끝까지 진행시키는" 명령으로 읽힌다. 그런데 Plan 안에
+**Verifier만 남은 Task**가 있을 때 그것을 이어받지 못하고 `PLAN_NO_READY_TASK`로 끝난다.
+
+`verify-ready`가 그 Task를 명시적으로 나열하고 있으므로 Runtime은 무엇이 남았는지 이미 안다.
+정지 메시지가 `no task is ready`라고만 말하는 대신 **"TASK-005는 verify 대기 중이다 —
+`loopctl verify TASK-005`"** 를 안내하면 사람이 다음 행동을 추측하지 않아도 된다.
+
+Task 단위 `execute`는 Worker → Gate → Verifier를 잇는데, Plan 단위 진입점은
+그 중간 지점에서 시작할 수 없다는 비대칭이 있다.
+
+### Current workaround
+
+`./loopctl verify <TASK>`를 직접 호출한 뒤 `execute-plan`을 다시 실행한다.
+비용은 들지 않았다(0초 · AI 호출 0회). 다만 실패한 `execute-plan` 실행도
+Plan execution 기록으로 남는다.
+
+### Impact
+
+**Low~Medium.** 비용은 없고 복구도 한 줄이다. 그러나 수동 Gate 복구(OBS-018)와
+반드시 짝을 이루어 발생한다 — `gate --rerun`은 Task를 항상 `REVIEW`에 남기므로,
+그 경로를 쓴 사람은 **반드시** 이 막다른 길을 만난다.
+
+### Possible Runtime improvement
+
+- `execute-plan`이 `REVIEW` + gates PASS 상태의 Task를 Verifier 단계부터 이어받는다.
+- 또는 `PLAN_NO_READY_TASK` 정지 메시지가 verify 대기 Task와 그 명령을 함께 안내한다.
+- `gate --rerun` 출력의 "Ready for independent verification."에 실제 명령을 덧붙인다.
+
+### Evidence
+
+```text
+PLANEXEC-20260902T050658Z.json        # NEEDS_HUMAN / PLAN_NO_READY_TASK · 0s · 0 LLM
+./loopctl verify-ready                # 같은 시점에 TASK-005를 지목하고 있었다
+```
+
+### 부수 확인 — 수동 복구 기록은 정확했다
+
+이번 Phase에서 수동 개입이 두 번 있었고(`transition TASK-002 TODO`, `gate TASK-005 --rerun`),
+두 경우 모두 Runtime이 이전 기록을 지우지 않고 관계를 남겼다.
+
+```text
+TASK-002   status에 "[superseded — task is now TODO]" 표시
+TASK-005   "it supersedes EXEC-…040119Z, which stays exactly as it was recorded"
+```
+
+OBS-004가 지적했던 "수동 복구 후 실행 보고서가 낡은 채로 남는다"는 문제는
+V0.1 유지보수 패스 이후 **재현되지 않았다.** 새 결함이 아니라 확인 사항으로 남긴다.
+
+### Status
+
+`OBSERVED`
+
+---
+
+
 # Candidate Improvements
 
 실제 사용 사례가 충분히 쌓인 항목만 이 표로 승격한다.

@@ -1,0 +1,66 @@
+# Recordings 화면과 실패 상태 표시 연결
+# Runtime이 PLAN-20260901T035729Z 승인 시점에 생성했다 (proposal P8). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-008
+status: DONE
+
+request: |-
+  Recordings 화면이 P6의 command를 통해 저장소에서 읽은 실제 레코드 목록을 렌더링하도록 연결한다. 레코드가 있으면 제목 · 날짜 · 길이(사람이 읽는 형식) · transcription / AI / Notion 세 가지 상태를 보여주고, 없으면 empty state를 보여준다. 길이 포맷은 Rust에서 온 값을 쓰고 TypeScript에 같은 로직을 중복 구현하지 않는다. 저장소 초기화 실패처럼 이 Phase에서 실제로 발생 가능한 오류는 console에만 남기지 않고 사용자에게 보이는 상태로 표현한다(§13 — 무엇이 실패했는가 · 원본 데이터는 안전한가 · 다시 시도할 수 있는가). Settings 화면도 P6의 settings command와 연결해 변경한 값이 저장되고 다시 읽히도록 한다. 녹음·전사·AI·Notion 기능은 여전히 구현하지 않는다. command 호출 결과를 화면 상태로 바꾸는 로직은 DOM 없이 테스트 가능한 모듈로 분리하고 vitest 테스트를 추가한다. npm run build · npm run lint · npm run test를 직접 실행한다. git commit은 하지 않는다.
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-006
+  - TASK-007
+
+stop_condition:
+  gates: [build, lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 3
+
+acceptance_criteria:
+  - id: AC1
+    description: |-
+      npm run build가 통과한다.
+    verification:
+      type: gate
+      ref: build
+  - id: AC2
+    description: |-
+      npm run lint가 통과한다.
+    verification:
+      type: gate
+      ref: lint
+  - id: AC3
+    description: |-
+      npm run test가 통과한다.
+    verification:
+      type: gate
+      ref: test
+  - id: AC4
+    description: |-
+      Recordings 화면이 저장소에서 읽은 목록을 렌더링하고(제목 · 날짜 · 길이 · 세 상태), 목록이 비었을 때 empty state를 보여준다. 목록/상태 변환 로직에 자동 테스트가 있다.
+    verification:
+      type: verifier
+      instruction: |-
+        화면 코드와 테스트를 읽고 목록 항목이 실제 저장소 데이터에서 오는지(하드코딩된 더미가 아닌지), 세 상태가 표시되는지, 빈 목록 경로가 있는지 확인한다.
+  - id: AC5
+    description: |-
+      저장소 초기화 실패 등 실패가 사용자에게 보이는 상태로 표현되며, 실패 표시 경로에 자동 테스트가 있다.
+    verification:
+      type: verifier
+      instruction: |-
+        실패 응답을 받았을 때 UI 상태가 어떻게 바뀌는지 코드로 확인하고, console.error로만 끝나는 경로가 남아 있지 않은지 본다. 실패 상태 변환 테스트가 존재하는지 확인한다.
+  - id: AC6
+    description: |-
+      길이 포맷 로직이 TypeScript에 중복 구현되지 않고 Rust에서 온 값을 사용한다.
+    verification:
+      type: verifier
+      instruction: |-
+        src/ 아래에 초를 mm:ss로 바꾸는 별도 구현이 생기지 않았는지 확인한다.
+
+evidence: []
+
+failure_memo: []

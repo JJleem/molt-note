@@ -1,0 +1,39 @@
+TASK-002 — 실제로 해석된 persistence crate (ADR-0001 §4의 근거)
+
+$ grep -n -A3 'name = "rusqlite"|name = "libsqlite3-sys"' src-tauri/Cargo.lock
+
+2018:name = "libsqlite3-sys"
+2019-version = "0.38.2"
+2020-source = "registry+https://github.com/rust-lang/crates.io-index"
+2021-checksum = "f1d20bef17f513b9b3004532233187769cd072d790971f4e4da0e346eb6401e8"
+--
+2883:name = "rusqlite"
+2884-version = "0.40.2"
+2885-source = "registry+https://github.com/rust-lang/crates.io-index"
+2886-checksum = "23f2a97da3e3873c73cb2a2e71b35c40ff95e0b1eefa8d72d8499a6928c3b5b3"
+
+선언 (src-tauri/Cargo.toml):
+    rusqlite = { version = "0.40", features = ["bundled"] }
+
+
+bundled feature가 실제로 SQLite C 소스를 빌드했다는 증거
+-------------------------------------------------------
+$ ls src-tauri/target/debug/build/libsqlite3-sys-c711128fa9e4c1ec/out/
+    flag_check
+    bindgen.rs
+    c877a2978823c39d-sqlite3.o      ← SQLite C 소스를 직접 컴파일한 오브젝트
+    libsqlite3.a                    ← 함께 링크되는 정적 라이브러리
+    flag_check.c
+
+$ grep -m5 -n "SQLITE_VERSION" .../out/bindgen.rs
+    26:pub const SQLITE_VERSION: &::core::ffi::CStr = c"3.53.2";
+    27:pub const SQLITE_VERSION_NUMBER: i32 = 3053002;
+
+→ 번들된 SQLite는 3.53.2다. 시스템 SQLite에 링크만 했다면 위 산출물은 생기지 않는다.
+
+확인하지 못한 것 (UNVERIFIED)
+-----------------------------
+- crates.io / docs.rs 페이지를 직접 열지 못했다 (이 Run에서 웹 조회 도구 사용 권한 없음).
+  cargo가 인덱스에서 해석한 결과는 `^0.40` 범위 안의 최신만 말해 준다.
+  0.41 이상의 존재 여부, docs.rs의 bundled 공식 설명은 확인하지 않았다.
+- Windows에서의 빌드는 이 Run에서 검증하지 않았다 (macOS만).

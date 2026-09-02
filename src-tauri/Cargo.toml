@@ -19,7 +19,9 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
-tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# 로컬 영속 저장소. persistence ownership을 Rust 경계 안에 둔다 (PRODUCT-SPEC §14.7 · docs/ADR-0001-local-persistence.md).
+# `bundled`는 SQLite C 소스를 함께 빌드하므로 시스템에 설치된 SQLite 버전에 의존하지 않는다.
+rusqlite = { version = "0.40", features = ["bundled"] }
 

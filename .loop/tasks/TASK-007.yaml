@@ -1,0 +1,54 @@
+# 4개 화면 navigation shell
+# Runtime이 PLAN-20260901T035729Z 승인 시점에 생성했다 (proposal P7). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-007
+status: DONE
+
+request: |-
+  Recordings · Recording · Recording Detail · Settings 네 화면의 navigation shell을 frontend에 만든다. 각 화면은 실제 라우팅으로 도달 가능해야 하고, 데이터가 없을 때의 empty state를 보여준다. 라우트 정의와 화면 전이는 DOM 없이 vitest로 판정할 수 있는 순수 모듈(예: src/navigation/routes.ts)로 분리하고, React 컴포넌트는 그 모듈을 소비한다. URL 요구사항이 없으므로 새로운 runtime 라우팅 의존성을 추가하지 않고 저장소 안의 최소 구현을 우선한다(필요하다고 판단되면 jsdom·testing-library 같은 테스트 전용 devDependency는 추가해도 된다). Settings 화면에는 Recording 그룹(recordings directory · automatic 토글)을 두고, Transcription / AI Provider / Notion은 섹션 자리만 두되 그 안의 실제 기능이나 secret 입력은 만들지 않는다. Recording 화면은 Phase 2의 실제 녹음을 구현하지 않는다 — 화면과 empty/idle 상태까지다. UI는 §19를 따른다: minimal · macOS-like · typography first, 장식용 dashboard나 불필요한 card UI를 만들지 않는다. scaffold의 Vite/Tauri/React 로고 데모 화면은 제거한다. npm run build · npm run lint · npm run test를 직접 실행한다. git commit은 하지 않는다.
+
+execution:
+  role: impl
+
+stop_condition:
+  gates: [build, lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 2
+
+acceptance_criteria:
+  - id: AC1
+    description: |-
+      npm run build가 통과한다.
+    verification:
+      type: gate
+      ref: build
+  - id: AC2
+    description: |-
+      npm run lint가 통과한다.
+    verification:
+      type: gate
+      ref: lint
+  - id: AC3
+    description: |-
+      npm run test가 통과한다.
+    verification:
+      type: gate
+      ref: test
+  - id: AC4
+    description: |-
+      네 화면이 모두 라우팅으로 도달 가능하며, 라우트 정의/전이에 대한 자동 테스트가 존재해 네 화면이 모두 다뤄진다.
+    verification:
+      type: verifier
+      instruction: |-
+        라우트 모듈과 그 테스트를 읽고 네 화면(Recordings · Recording · Recording Detail · Settings)이 모두 등록되고 전이가 검증되는지, 컴포넌트가 실제로 그 모듈을 통해 렌더링되는지 확인한다. 화면 레이아웃이 §19 방향에 맞는지는 사람 확인 항목이므로 자동 PASS로 적지 않는다.
+  - id: AC5
+    description: |-
+      각 화면에 empty state가 있고, Settings의 Transcription / AI Provider / Notion 섹션은 자리만 있으며 실제 기능이나 secret 입력이 없다.
+    verification:
+      type: verifier
+      instruction: |-
+        각 화면 컴포넌트의 empty state 표현을 확인하고, Settings에 API key·token 입력 필드나 provider 호출 코드가 없는지 확인한다.
+
+evidence: []
+
+failure_memo: []

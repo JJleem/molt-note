@@ -1,0 +1,48 @@
+# AppDataDirectory 플랫폼 경계
+# Runtime이 PLAN-20260901T035729Z 승인 시점에 생성했다 (proposal P1). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-001
+status: DONE
+
+request: |-
+  src-tauri에 앱 데이터 디렉터리 결정을 한 곳에 가두는 모듈(예: src-tauri/src/platform/app_data_dir.rs)을 만든다. 실제 플랫폼 위치는 Tauri v2의 PathResolver(app_data_dir / app_local_data_dir, PRODUCT-SPEC §14.2에서 확인된 API)로 얻고, 그 호출은 이 모듈(또는 앱 wiring 지점) 밖으로 새지 않는다. 타입(예: AppDataDirectory)은 임의의 base path로 생성할 수 있어야 하며(테스트에서 임시 디렉터리 주입), 디렉터리가 없으면 생성하고(ensure), DB 파일 같은 파생 경로를 결정론적으로 돌려준다. 나머지 코드는 '앱 데이터 디렉터리'라는 개념만 알고 OS별 경로 규약(/Users, Library/Application Support, %APPDATA% 등)이나 target_os 분기를 갖지 않는다(INV-10). Windows 전용 구현이나 분기를 지금 채우지 않는다. RecordingBackend·TranscriptionRunner·SidecarResolver·SecretStore 같은 다른 경계는 만들지 않는다(§20.6). 임시 디렉터리를 쓰는 cargo 단위 테스트를 추가하고 npm run lint와 npm run test를 직접 실행해 확인한다. git commit은 하지 않는다.
+
+execution:
+  role: impl
+
+stop_condition:
+  gates: [lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 2
+
+acceptance_criteria:
+  - id: AC1
+    description: |-
+      npm run lint가 통과한다(eslint + cargo clippy -D warnings).
+    verification:
+      type: gate
+      ref: lint
+  - id: AC2
+    description: |-
+      npm run test가 통과한다(vitest + cargo test).
+    verification:
+      type: gate
+      ref: test
+  - id: AC3
+    description: |-
+      새 Rust 단위 테스트가 임시 디렉터리를 주입해 (a) 디렉터리가 없을 때 생성되고 (b) 이미 있을 때도 성공하며 (c) DB 등 파생 경로가 결정론적으로 결정되는 것을 실제로 검증한다. 테스트가 사용자 홈 디렉터리를 건드리지 않는다.
+    verification:
+      type: verifier
+      instruction: |-
+        추가된 테스트 코드를 읽고 세 항목이 실제 assertion으로 존재하는지, 그리고 테스트가 실제 사용자 디렉터리를 생성하거나 오염시키지 않는지 확인한다.
+  - id: AC4
+    description: |-
+      OS별 경로 규약과 플랫폼 분기가 이 모듈 밖에 존재하지 않으며(INV-10), 이 Task가 Phase 1에서 필요하지 않은 추상화 경계를 새로 만들지 않았다.
+    verification:
+      type: verifier
+      instruction: |-
+        저장소에서 /Users, Library/Application Support, %APPDATA%, cfg(target_os) 류의 경로 지식이 해당 모듈 밖에 나타나는지 검색한다. 또한 RecordingBackend·TranscriptionRunner·SidecarResolver·SecretStore·PlatformPermissions 같은 미래 경계가 새로 생기지 않았는지 확인한다.
+
+evidence: []
+
+failure_memo: []

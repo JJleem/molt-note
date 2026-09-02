@@ -1,50 +1,60 @@
-import { useState } from "react";
-import reactLogo from "./assets/react.svg";
-import { invoke } from "@tauri-apps/api/core";
-import "./App.css";
+import { useCallback, useState } from 'react';
+import {
+  INITIAL_NAVIGATION_STATE,
+  ROUTES,
+  SIDEBAR_SCREENS,
+  canGoBack,
+  goBack,
+  navigate,
+  type NavigationState,
+  type Route,
+} from './navigation/routes';
+import { SCREEN_COMPONENTS } from './screens/registry';
+import './App.css';
 
 function App() {
-  const [greetMsg, setGreetMsg] = useState("");
-  const [name, setName] = useState("");
+  const [nav, setNav] = useState<NavigationState>(INITIAL_NAVIGATION_STATE);
 
-  async function greet() {
-    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-    setGreetMsg(await invoke("greet", { name }));
-  }
+  const go = useCallback((route: Route) => setNav((state) => navigate(state, route)), []);
+  const back = useCallback(() => setNav((state) => goBack(state)), []);
+
+  const definition = ROUTES[nav.current.screen];
+  const Screen = SCREEN_COMPONENTS[nav.current.screen];
 
   return (
-    <main className="container">
-      <h1>Welcome to Tauri + React</h1>
+    <div className="app">
+      <nav className="sidebar" aria-label="Screens">
+        <p className="sidebar__brand">Molt Note</p>
+        <ul className="sidebar__list">
+          {SIDEBAR_SCREENS.map((screen) => (
+            <li key={screen}>
+              <button
+                type="button"
+                className={
+                  nav.current.screen === screen ? 'sidebar__item sidebar__item--active' : 'sidebar__item'
+                }
+                aria-current={nav.current.screen === screen ? 'page' : undefined}
+                onClick={() => go({ screen })}
+              >
+                {ROUTES[screen].title}
+              </button>
+            </li>
+          ))}
+        </ul>
+      </nav>
 
-      <div className="row">
-        <a href="https://vite.dev" target="_blank">
-          <img src="/vite.svg" className="logo vite" alt="Vite logo" />
-        </a>
-        <a href="https://tauri.app" target="_blank">
-          <img src="/tauri.svg" className="logo tauri" alt="Tauri logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <p>Click on the Tauri, Vite, and React logos to learn more.</p>
-
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          greet();
-        }}
-      >
-        <input
-          id="greet-input"
-          onChange={(e) => setName(e.currentTarget.value)}
-          placeholder="Enter a name..."
-        />
-        <button type="submit">Greet</button>
-      </form>
-      <p>{greetMsg}</p>
-    </main>
+      <main className="main">
+        <header className="header">
+          {canGoBack(nav) && (
+            <button type="button" className="header__back" onClick={back}>
+              Back
+            </button>
+          )}
+          <h1 className="header__title">{definition.title}</h1>
+        </header>
+        <Screen route={nav.current} navigate={go} goBack={back} />
+      </main>
+    </div>
   );
 }
 
