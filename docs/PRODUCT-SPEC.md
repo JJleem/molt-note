@@ -12,6 +12,8 @@
 > - 2026-09-01 (rev 2) Requirements Delta 반영 — Windows를 지원 대상 플랫폼으로 추가,
 >   AI를 vendor 중립 Provider 추상화로 전환하고 core requirement에서 제외,
 >   §14.7의 근거 없는 VERIFIED 표기 정정
+> - 2026-09-03 (rev 7) 운영자 결정 반영 — 통합 방식 선택 정책(§14.4.2) ·
+>   Phase 3 실제 추론 smoke test 요구(§14.4.3) · cmake 설치로 §14.1 갱신
 > - 2026-09-03 (rev 6) Phase 3 계획을 위해 whisper 관련 외부 사실 재확인 (§14.4.1) —
 >   macOS CLI prebuilt 부재 확정 · 두 후보 모두 CMake 필요 · timestamp 단위 차이 ·
 >   Tauri #11992 미해결 · 변환은 순수 Rust로 가능
@@ -694,7 +696,7 @@ macOS가 primary development platform이다 (§3).
 | C 컴파일러 | Apple clang 17.0.0 | `clang --version` |
 | Xcode | Command Line Tools — **full Xcode 아님** | `xcode-select -p` |
 | ffmpeg | 8.1.1 | `ffmpeg -version` |
-| cmake | **없음** | `cmake --version` → not found |
+| cmake | **4.4.3** (2026-09-03 설치) | `cmake --version` |
 | Homebrew | 6.0.6 | `brew --version` |
 
 > Windows 개발/검증 환경은 아직 존재하지 않는다. Phase 6에서 구축한다.
@@ -902,9 +904,9 @@ whisper-cublas-12.4.0-bin-x64.zip
 | **timestamp 단위** | JSON `offsets` = **밀리초** (`t0*10`, 내부 t0는 센티초) | `WhisperSegment::start_timestamp()` = **센티초** |
 | Apple Silicon | Metal 기본 ON (`if (APPLE)`에서 `GGML_METAL_DEFAULT=ON`) | `metal` feature flag |
 
-> ⚠️ **CMake는 두 후보 모두에 필요하다.** §14.1 기준 이 기기에 cmake가 **없다.**
-> 즉 cmake 부재는 sidecar만의 제약이 아니다 — 사용자가 직접 설치한 바이너리를 참조하는
-> 세 번째 후보만이 이를 피한다.
+> **CMake는 두 후보 모두에 필요하다** — sidecar 소스 빌드와 `whisper-rs` 양쪽 다.
+> 즉 cmake는 두 후보를 **가르는 기준이 아니다.**
+> 2026-09-03에 개발 Mac에 cmake 4.4.3을 설치했으므로 이 제약은 해소됐다 (§14.1).
 
 > ⚠️ **timestamp 단위가 통합 방식마다 다르다** (밀리초 vs 센티초).
 > Phase 1의 `transcript_segments`는 `start_ms` · `end_ms`이므로 **선택한 방식의 실제 단위를
@@ -937,6 +939,48 @@ WAV 읽기와 리샘플링을 한 번에 하는 crate는 없다.
 
 이것은 §11의 "개발 Mac에 ffmpeg이 있다는 이유로 사용자 의존성으로 가정하지 않는다"를
 만족하는 경로가 실재함을 뜻한다.
+
+### 14.4.2 통합 방식 선택 정책 (운영자 결정 · 2026-09-03)
+
+**제품 정책 — 최종 사용자에게 설치를 요구하지 않는다.**
+
+```text
+Molt Note 사용자는 전사를 쓰기 위해
+whisper.cpp · Homebrew · CMake · Whisper CLI를
+직접 설치하도록 요구받지 않는다.
+```
+
+개발 Mac에 cmake가 없었던 것은 **개발 환경 제약이지 제품 아키텍처 요구가 아니었다.**
+2026-09-03에 설치해 해소했다 (§14.1).
+
+최종 선택은 여전히 Phase 3의 ADR-0007이 근거로 결정한다. 단 다음 제약 아래에서 한다.
+
+| 후보 | 정책 |
+| --- | --- |
+| **A. Tauri sidecar + `whisper-cli`** | **진지한 후보다.** tauri#11992의 notarization 이슈는 **packaging 위험이지, sidecar를 배포할 수 없다는 확정된 증거가 아니다.** "sidecar를 빼는 것 외에 우회가 없다"를 **확정된 사실로 적지 않는다** — 관찰된 증거를 기록하고, 최종 notarization 확인은 배포 검증 경계로 넘긴다 |
+| **B. `whisper-rs`** | **진지한 후보다.** cmake/빌드 도구 요구 · Apple Silicon · Metal feature · 번들 whisper.cpp 버전 지연(v1.8.3 vs v1.9.3) · 유지보수가 GitHub→Codeberg로 이동 · in-process crash 격리 tradeoff를 함께 본다. **Rust라는 이유만으로 선택하지 않는다** |
+| **C. 사용자 설치 바이너리** | **V1 정상 배포 경로로는 부적합하다.** 두 embedded 방식이 **실증된 blocker**를 만났을 때만 고려한다. 개발/디버그 fallback으로는 남을 수 있다. **cmake가 처음에 없었다는 이유로 선택하지 않는다** |
+
+### 14.4.3 Phase 3 실제 추론 smoke test (운영자 결정 · 2026-09-03)
+
+전사 **품질**은 Final Integration으로 연기된 상태다. 그러나
+**Phase 3가 실제 Whisper 추론을 한 번도 하지 않은 채 끝나서는 안 된다.**
+
+Phase 3 엔지니어링이 완료된 뒤 운영자가 짧은 통합 smoke test를 한 번 수행한다.
+
+```text
+짧은 로컬 WAV → (필요시 변환) → 실제 Whisper 엔진 → 실제 모델
+  → 추론 → segments + timestamps → Transcript 영속화
+```
+
+목적은 **"이 통합이 실제 모델을 올려 실제 오디오로 추론하고 timestamp 있는 결과를 만들어
+Transcript로 저장할 수 있는가"** 하나다. **품질 벤치마크가 아니다.**
+
+필요하지 않은 것: 실제 마이크 녹음 · 1시간 오디오 · 한국어 품질 판정 ·
+혼용 언어 판정 · 성능 측정.
+
+**이 추론이 실행되지 않으면 Phase 3를 "end-to-end 전사가 검증됐다"고 표현하지 않는다.**
+자동 Gate는 계획대로 하드웨어/모델 독립을 유지한다.
 
 ### 14.5 Note AI Provider — Ollama (확인된 사실 · 구현은 Phase 4)
 
