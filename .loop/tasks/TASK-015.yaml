@@ -1,0 +1,47 @@
+# Recording state machine (하드웨어 없는 순수 모듈)
+# Runtime이 PLAN-20260902T080012Z 승인 시점에 생성했다 (proposal P1). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-015
+status: DONE
+
+request: |-
+  src-tauri 안에 녹음 session의 상태 기계를 순수 모듈로 만든다(예: `src-tauri/src/domain/session.rs` 또는 `src-tauri/src/audio/session.rs`). idle → recording → paused → recording → stopped 전이를 표현하고, 잘못된 전이(녹음 중이 아닌데 pause · 진행 중이 아닌데 resume · idle에서 stop · 이미 녹음 중인데 start)를 panic이 아니라 기존 `crate::domain::Failure` 값으로 거절한다. 경과 시간은 **주입된 시각 값**으로 누적하며 pause 구간은 duration에 포함되지 않는다 — 이 모듈 안에 시계도, 파일시스템도, cpal도 없다. 사람이 읽는 길이 문자열은 기존 `src-tauri/src/domain/duration.rs`의 규칙을 재사용한다(TypeScript에 길이 포맷을 다시 만들지 않기 위해서다 — `tests/screen-boundary.test.ts`). 전이표 전체 · 여러 번의 pause/resume 반복 · pause를 포함한 duration 누적을 덮는 자동 테스트를 함께 넣는다. 이 Task는 캡처 · command · 프론트엔드를 건드리지 않는다. commit하지 않는다.
+
+execution:
+  role: impl
+
+stop_condition:
+  gates: [build, lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 2
+
+acceptance_criteria:
+  - id: AC1
+    description: |-
+      test Gate가 통과한다. 상태 기계의 전이와 duration 누적을 덮는 새 테스트가 마이크 없이 실행된다.
+    verification:
+      type: gate
+      ref: test
+  - id: AC2
+    description: |-
+      lint Gate가 통과한다 (clippy -D warnings 포함).
+    verification:
+      type: gate
+      ref: lint
+  - id: AC3
+    description: |-
+      build Gate가 통과한다.
+    verification:
+      type: gate
+      ref: build
+  - id: AC4
+    description: |-
+      상태 기계 모듈에 하드웨어·시계·파일시스템 의존이 없고, 시각은 값으로 들어온다. idle → recording → paused → recording → stopped 전이와 잘못된 전이의 거절이 테스트로 판정되며, 거절은 Failure 값이지 panic이 아니다.
+    verification:
+      type: verifier
+      instruction: |-
+        모듈 소스와 테스트를 읽고 확인한다: (1) cpal · std::time::SystemTime/Instant · fs 의존이 모듈 안에 없다, (2) 전이표의 각 잘못된 전이가 테스트로 거절이 확인된다, (3) pause 구간이 duration에서 빠지는 것을 검증하는 테스트가 있고, pause를 포함하도록 구현이 바뀌면 그 테스트가 실패하게 되어 있다.
+
+evidence: []
+
+failure_memo: []

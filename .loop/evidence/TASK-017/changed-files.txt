@@ -1,0 +1,32 @@
+ M src-tauri/src/audio/capture.rs
+ M src-tauri/src/audio/mod.rs
+ M src-tauri/src/audio/system_capture.rs
+ M src-tauri/src/commands/mod.rs
+ M src-tauri/src/commands/payload.rs
+ M src-tauri/src/lib.rs
+ M src-tauri/src/platform/mod.rs
+ M src-tauri/tests/capture.rs
+ M src/ipc/commands.ts
+ M src/ipc/types.ts
+ M src/screens/RecordingScreen.tsx
+ M src/screens/captureSpikeView.test.ts
+ M tests/ipc-boundary.test.ts
+?? .loop/evidence/TASK-015/
+?? .loop/evidence/TASK-016/
+?? .loop/evidence/TASK-017/
+?? .loop/tasks/TASK-015.yaml
+?? .loop/tasks/TASK-016.yaml
+?? .loop/tasks/TASK-017.yaml
+?? .loop/tasks/TASK-018.yaml
+?? .loop/tasks/TASK-019.yaml
+?? .loop/tasks/TASK-020.yaml
+?? .loop/tasks/TASK-021.yaml
+?? .loop/tasks/TASK-022.yaml
+?? docs/ADR-0004-recording-session-lifecycle.md
+?? src-tauri/src/audio/finalized.rs
+?? src-tauri/src/audio/session.rs
+?? src-tauri/src/platform/clock.rs
+?? src-tauri/tests/recording_lifecycle.rs
+?? src-tauri/tests/recording_session.rs
+?? src-tauri/tests/stop_persistence.rs
+?? tests/audio-boundary.test.ts

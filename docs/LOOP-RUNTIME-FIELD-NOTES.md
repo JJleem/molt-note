@@ -1753,6 +1753,244 @@ V0.1 유지보수 패스 이후 **재현되지 않았다.** 새 결함이 아니
 ---
 
 
+## OBS-020 — 중단된 Task는 Plan 루프로 스스로 돌아오지 못한다 (stale 회수 → RECOVERY_AMBIGUOUS → 사람의 transition)
+
+**Date:** 2026-09-02 ~ 2026-09-03
+
+**Project phase / Goal:** Molt Note Phase 2B — Reliable Recording
+
+**Plan / Task / Run / Execution:**
+- PLAN-20260902T080012Z · TASK-022 (문서 전용 Task)
+- RUN-20260902T102750Z-TASK-022 · EXEC-20260902T102750Z-TASK-022
+- EXEC-20260903T005041Z-TASK-022 (회수 시도) · PLANEXEC-20260903T005030Z
+
+**Runtime stage:** Execute loop / Diagnose
+
+### What happened
+
+운영자가 퇴근 때문에 `execute-plan` 프로세스를 의도적으로 종료했다. 종료 시점에
+TASK-022는 막 시작된 상태였고(run 디렉터리 생성 19:27:50, 종료 19:28), **산출물이 없었다.**
+
+```text
+.loop-local/runs/RUN-20260902T102750Z-TASK-022/
+  context.md
+  manifest.json          ← 이게 전부. envelope · gate · verification 없음
+```
+
+다음 날 재개할 때 Runtime의 상태 표현은 **정확했다.**
+
+```text
+ACTIVE EXECUTION
+  TASK-022             STALE
+      execution STALE: EXEC-20260902T102750Z-TASK-022  (no heartbeat for 51705s (limit 300s))
+      the runtime stopped updating this marker; `loopctl execute TASK-022` will reclaim it
+  (liveness comes from the runtime's own heartbeat, not from process liveness)
+```
+
+프로세스 생존이 아니라 **자체 heartbeat**로 판단한다는 설계 덕분에, 프로세스를 죽인 상태가
+손상이 아니라 **스스로를 설명하는 상태**로 남았다. 여기까지는 좋다.
+
+문제는 **거기서 자동으로 돌아올 방법이 없다는 것**이다. 세 단계가 전부 막혔다.
+
+**1. `execute-plan`은 회수하지 못한다.**
+
+```text
+$ ./loopctl execute-plan PLAN-20260902T080012Z
+Plan Result: NEEDS_HUMAN   stop_reason: PLAN_NO_READY_TASK
+  no task is ready; outstanding: TASK-022 (IN_PROGRESS)
+Duration: 0s        LLM invocations: 0
+```
+
+Plan 루프는 **READY(=TODO + 의존성 충족) Task만 dispatch한다.** `IN_PROGRESS`에 stale
+마커가 붙은 Task는 그 조건에 들지 않는다. 정작 `status`는 그 Task를 지목하며 회수 명령까지
+알려주고 있다.
+
+**2. `execute <TASK>`는 마커를 회수하지만 거기서 멈춘다.**
+
+```text
+$ ./loopctl execute TASK-022
+(reclaimed a stale execution marker from EXEC-20260902T102750Z-TASK-022)
+Execution Result: NEEDS_HUMAN
+Stop reason: RECOVERY_AMBIGUOUS
+  TASK-022 is IN_PROGRESS but has no completed worker run;
+  the runtime cannot tell whether a worker is still executing.
+Attempts: 0   Duration: 0s   LLM invocations: 0
+```
+
+**이 거부 자체는 옳다.** Runtime 입장에서 "Worker가 어젯밤 죽었다"와 "Worker가 아직 돌고
+있다"는 구분되지 않으며, 잘못 추측하면 살아 있는 Worker와 경쟁하게 된다.
+
+**3. 결국 사람의 `transition`이 필요했다.**
+
+```text
+$ ./loopctl transition TASK-022 TODO
+TASK-022: IN_PROGRESS -> TODO
+$ ./loopctl ready
+TASK-022  TODO  ...
+```
+
+그 뒤 `execute-plan`이 정상적으로 이어받아 TASK-022가 DONE이 됐다.
+
+### Expected
+
+**의도적이고 깨끗한 중단(산출물 0)조차 사람의 상태 전이 없이는 Plan 루프로 돌아오지 못한다.**
+
+Runtime은 회수 시점에 이미 다음을 전부 알고 있었다.
+
+```text
+heartbeat가 51705초 동안 없었다 (limit 300s)
+completed worker run이 없다 (runtime-envelope.json 부재)
+Gate 결과가 없다
+Verifier 결과가 없다
+```
+
+"heartbeat가 limit의 170배를 넘겼고 산출물이 하나도 없다"는 조합은 사실상 한 가지 상황만
+가리킨다. 그럼에도 `Attempts: 0`인 Task를 TODO로 되돌리는 데 사람이 필요했다.
+
+Worker가 살아 있을 가능성을 배제할 수 없다는 판단은 옳지만, **그 가능성을 좁힐 신호를
+Runtime이 이미 갖고 있다.** 최소한 회수 명령이 그 신호를 근거로 제안이라도 할 수 있다.
+
+### Current workaround
+
+```text
+loopctl execute <TASK>        # stale 마커 회수
+loopctl transition <TASK> TODO
+loopctl execute-plan <PLAN>
+```
+
+세 명령이며, 두 번째는 사람이 "정말 Worker가 없다"를 외부 지식으로 확인해야 한다.
+이번에는 프로세스 목록 · run 디렉터리 내용 · 타임스탬프로 확인했다.
+
+### Impact
+
+**Medium.** 비용은 0이다(두 번의 실패한 시도 모두 LLM 호출 0회). 그러나
+**계획된 중단조차 사람 없이는 재개되지 않는다.** 장시간 Plan을 밤새 돌리거나
+자리를 비우는 운용에서 이 성질은 실질적인 제약이다.
+
+OBS-019와 같은 뿌리다 — Plan 루프의 진입 조건이 READY 하나뿐이라 Task 생애주기의
+중간 지점에서 다시 시작할 수 없다. OBS-019는 `REVIEW`에서, 이번은 stale `IN_PROGRESS`에서
+같은 벽을 만났다.
+
+### Possible Runtime improvement
+
+- 회수 시 판단 근거를 함께 제시한다 — heartbeat 경과 · completed run 부재 ·
+  Gate/Verifier 산출물 부재. 그리고 `Attempts: 0`이고 산출물이 없으면
+  **TODO 복귀를 제안**한다 (자동 수행이 아니라 명시적 제안).
+- `PLAN_NO_READY_TASK` 정지 메시지가 outstanding Task의 **다음 명령**을 안내한다.
+  현재는 `no task is ready`라고만 말한다 (OBS-019와 동일한 지적).
+- lease/heartbeat에 프로세스 식별자를 남겨 "그 프로세스가 살아 있는가"를
+  Runtime이 직접 확인할 수 있게 한다.
+
+### Evidence
+
+```text
+./loopctl status                       # STALE 표시와 회수 안내
+PLANEXEC-20260903T005030Z.json         # PLAN_NO_READY_TASK · 0s · 0 LLM
+EXEC-20260903T005041Z-TASK-022         # RECOVERY_AMBIGUOUS · Attempts 0 · 0 LLM
+.loop-local/runs/RUN-20260902T102750Z-TASK-022/   # context.md · manifest.json 뿐
+```
+
+### Status
+
+`OBSERVED`
+
+---
+
+## OBS-021 — 무거운 Task에서 900s worker timeout이 **작업 중인** 시도를 버린다 (8개 중 4개)
+
+**Date:** 2026-09-02
+
+**Project phase / Goal:** Molt Note Phase 2B — Reliable Recording
+
+**Plan / Task / Run / Execution:** PLAN-20260902T080012Z · TASK-016 · TASK-017 · TASK-019 · TASK-021
+
+**Runtime stage:** Worker
+
+### What happened
+
+Phase 2B의 8개 Task 중 **4개가 첫 시도에서 900초 timeout으로 폐기**됐고, 4개 모두
+두 번째 시도에서 성공했다.
+
+```text
+TASK-015  state machine        attempts=1
+TASK-016  backend session      attempts=2   ← timeout
+TASK-017  Stop 확정·영속화     attempts=2   ← timeout
+TASK-018  default microphone   attempts=1
+TASK-019  macOS 권한           attempts=2   ← timeout
+TASK-020  Recording 화면       attempts=1
+TASK-021  Detail 재생          attempts=2   ← timeout
+TASK-022  문서                 attempts=1
+```
+
+**중요한 것은 그 시도들이 놀고 있지 않았다는 점이다.** Runtime envelope의
+subject fingerprint가 Run 전후로 전부 바뀌었다 — 즉 파일을 만들고 있었다.
+
+| Task | timeout | 실제 duration | signal | dirty entries (전 → 후) |
+| --- | --- | --- | --- | --- |
+| TASK-016 | 900s | 900s | SIGKILL | 14 → **27** |
+| TASK-017 | 900s | 900s | SIGKILL | 32 → **35** |
+| TASK-019 | 900s | 900s | SIGKILL | 54 → **55** |
+| TASK-021 | 900s | 900s | SIGKILL | 73 → **86** |
+
+**이것은 OBS-016과 다른 현상이다.** OBS-016(Phase 1 TASK-002)에서는 Worker가 8분 29초
+만에 작업을 마치고 **15분 19초 동안 아무것도 하지 않다가** 죽었다 — 무응답이 예산을
+소진했다. 이번 넷은 **죽는 순간까지 산출물을 늘리고 있었다.**
+
+부수적으로 **OBS-016이 지적한 timeout 초과 집행(900s 설정에 1428s 실행)은 재현되지 않았다.**
+네 번 모두 정확히 900초에 SIGKILL됐다. OBS-016의 초과분은 timeout 로직의 결함이라기보다
+그때의 provider 장애와 얽힌 현상이었을 가능성이 높아졌다 — **다만 이것은 추론이며
+확정된 원인 규명이 아니다.**
+
+### Expected
+
+timeout은 "폭주하는 Worker를 끊는 안전장치"로 기능해야지 "정상 작업의 상한"이 되어서는
+곤란하다. 지금은 후자에 가깝다 — 무거운 Task에서 **작업 중인 시도가 규칙적으로 버려진다.**
+
+버려지는 비용이 작지 않다. 첫 시도가 만든 산출물은 다음 시도가 처음부터 다시 만든다.
+Phase 2B는 8개 Task에 약 3시간이 걸렸고 그중 4번의 900초(총 1시간)가 폐기됐다.
+
+무엇이 무거운지도 드러났다. UI 코드량이 아니라 **불확실성 아래서의 결정**이 시간을 쓴다 —
+TASK-019(macOS 권한 판정 수단이 없음)와 TASK-021(Tauri asset protocol 범위 결정)은
+겉보기에 작지만 둘 다 timeout에 걸렸다. Worker는 웹 조회를 할 수 없어(OBS-015 §What happened)
+저장소 안에서 근거를 만들어야 하고, 그 과정이 길다.
+
+### Current workaround
+
+없다. 재시도가 자동으로 수렴하므로 사람 개입은 필요 없었다. 시간과 비용만 든다.
+
+### Impact
+
+**Medium.** 진행은 되지만 무거운 Task마다 예산이 사실상 두 배가 된다.
+Phase 1 TASK-006, Phase 2A TASK-012에서도 같은 양상이 있었으므로 이 Plan에 국한되지 않는다.
+
+### Possible Runtime improvement
+
+- `worker_timeout_seconds`를 이 Task class에 맞게 올리는 것을 검토한다.
+  **다만 무작정 올리면 진짜 폭주를 늦게 잡는다.** 이번 증거는 "900초가 부족하다"까지는
+  지지하지만 적정값이 얼마인지는 말해 주지 않는다 — 네 시도 모두 상한에서 잘렸으므로
+  **완료에 실제로 얼마가 필요했는지는 알 수 없다** [UNVERIFIED].
+- Task별 timeout 재정의를 허용한다. 지금은 전역 값 하나다.
+- 더 근본적으로는 Worker가 **결과 파일을 점진적으로 쓰게** 하는 것이 timeout에 강하다
+  (OBS-016의 개선 후보와 같다). 지금은 마지막에 한 번 쓰므로 중간에 잘리면 전부 잃는다.
+
+### Evidence
+
+```text
+.loop-local/runs/RUN-20260902T082429Z-TASK-016/runtime-envelope.json
+.loop-local/runs/RUN-20260902T085101Z-TASK-017/runtime-envelope.json
+.loop-local/runs/RUN-20260902T092655Z-TASK-019/runtime-envelope.json
+.loop-local/runs/RUN-20260902T100954Z-TASK-021/runtime-envelope.json
+   각각 process.timeout_seconds=900 · duration_ms≈900000 · signal=SIGKILL
+   verification_subject_before/after 의 dirty_entry_count 증가
+```
+
+### Status
+
+`OBSERVED`
+
+---
+
+
 # Candidate Improvements
 
 실제 사용 사례가 충분히 쌓인 항목만 이 표로 승격한다.

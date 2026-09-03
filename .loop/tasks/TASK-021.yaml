@@ -1,0 +1,51 @@
+# Recording Detail 재생과 파일 없음 상태
+# Runtime이 PLAN-20260902T080012Z 승인 시점에 생성했다 (proposal P7). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-021
+status: DONE
+
+request: |-
+  Recording Detail(`src/screens/RecordingDetailScreen.tsx`)이 대상 recording을 `get_recording`으로 읽고 **저장된 audio 파일을 재생**할 수 있게 만든다. 재생 경로는 추측하지 말고 **설치된 Tauri v2에서 실제로 지원되는 방법을 확인해서** 고른다(asset protocol 설정 + capability, 또는 파일 바이트를 돌려주는 command 등). 어느 쪽이든 파일 접근 범위는 녹음 파일이 놓이는 자리를 넘지 않게 하고, 외부로 나가는 경로를 만들지 않는다(§12). **레코드는 있는데 파일이 없는 상태**를 감지해 사용자에게 보이는 상태로 표현하며, 그 상태가 레코드를 지우거나 덮어쓰지 않는다(INV-3 · INV-4). 상태를 만드는 규칙은 DOM 없이 테스트되는 순수 모듈에 둔다 — 로딩 · 재생 가능 · 파일 없음 · 조회 실패 경로를 자동 테스트로 판정한다. 재생 자체의 음질은 자동으로 판정하지 않으며 Human Review 항목이다. commit하지 않는다.
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-017
+
+stop_condition:
+  gates: [build, lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 2
+
+acceptance_criteria:
+  - id: AC1
+    description: |-
+      test Gate가 통과한다. 상세 화면의 로딩 · 재생 가능 · 파일 없음 · 조회 실패 네 상태가 DOM 없이 판정된다.
+    verification:
+      type: gate
+      ref: test
+  - id: AC2
+    description: |-
+      lint Gate가 통과한다.
+    verification:
+      type: gate
+      ref: lint
+  - id: AC3
+    description: |-
+      build Gate가 통과한다.
+    verification:
+      type: gate
+      ref: build
+  - id: AC4
+    description: |-
+      재생 경로가 설치된 Tauri 버전에서 실제로 지원되는 방식으로 구현됐고 파일 접근 범위가 녹음 파일 자리로 제한된다. 레코드는 있는데 파일이 없는 상태가 화면에 보이며 아무것도 삭제하지 않는다.
+    verification:
+      type: verifier
+      instruction: |-
+        확인한다: (1) 재생 방식이 저장소의 설정/코드로 실제 구현되어 있고 상상한 API에 의존하지 않는다, (2) 설정을 바꿨다면 접근 범위가 필요한 최소한이며 외부 전송 경로가 없다, (3) 파일 없음 상태가 사용자에게 보이고 레코드나 파일을 지우지 않는다, (4) 실제 재생 음질이 자동 PASS로 적히지 않았다.
+
+evidence: []
+
+failure_memo: []

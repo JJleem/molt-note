@@ -1,0 +1,57 @@
+# Phase 2B 결정 기록과 남은 UNVERIFIED / Human Review 항목
+# Runtime이 PLAN-20260902T080012Z 승인 시점에 생성했다 (proposal P8). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-022
+status: DONE
+
+request: |-
+  문서만 바꾸는 Task다. 소스와 설정은 건드리지 않는다. (1) `docs/ADR-0003-recording-engine.md`에 Phase 2B 추가 기록을 붙인다 — production 구현이 그 잠정 선택에서 무엇을 소비했고 무엇이 [A✓]로 바뀌었는지, 무엇이 여전히 [H]/[U]인지. **Status는 `PROVISIONAL` 그대로 두고 §12의 8개 항목은 `DEFERRED`로 남긴다 — CONFIRMED로 승격시키지 않는다.** (2) P2가 만든 recording lifecycle 문서를 완성한다: 녹음 session의 소유권 위치와 근거(R-001) · 파일 확정과 DB 저장의 순서와 보상 정책(두 어긋난 상태 각각) · 권한 판정 수단의 VERIFIED/UNVERIFIED 상태 · 샘플레이트와 채널 수는 여전히 장치가 정한다는 사실(리샘플링·다운믹스 없음). (3) 자동으로 판정할 수 없는 것을 Human Review 항목으로 명시한다: 실제 음질 · **장시간 녹음 안정성(사람이 한 번 수행 — Worker나 Verifier가 매번 장시간 녹음을 하지 않는다)** · 녹음 중 UI가 상태를 분명히 보여주는가 · dev 실행과 번들된 `.app` 양쪽에서의 권한 프롬프트. `docs/SYSTEM-MAP.md`는 고치지 않는다(Phase 종료 시 운영자가 한다). commit하지 않는다.
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-017
+  - TASK-019
+  - TASK-020
+  - TASK-021
+
+stop_condition:
+  gates: []
+  requires_verifier: true
+  max_consecutive_failures: 2
+
+acceptance_criteria:
+  - id: AC1
+    description: |-
+      ADR-0003의 Status가 여전히 PROVISIONAL이고 §12의 8개 항목이 DEFERRED로 남아 있으며, Phase 2B가 무엇을 소비했고 무엇이 아직 확인되지 않았는지가 근거 태그와 함께 기록됐다.
+    verification:
+      type: verifier
+      instruction: |-
+        ADR-0003을 읽고 Status와 §12의 상태 표기가 승격되지 않았는지, 추가 기록이 [A✓]/[H]/[U] 구분을 지키는지 확인한다.
+  - id: AC2
+    description: |-
+      recording lifecycle 문서에 session 소유권 · 파일/DB 순서와 두 어긋난 상태의 보상 정책 · 권한 판정의 검증 상태 · 장치가 정하는 포맷이 기록되어 있고, 문서의 내용이 실제 구현과 일치한다.
+    verification:
+      type: verifier
+      instruction: |-
+        문서와 P2 · P3 · P5의 구현을 대조해 기록된 정책이 실제 코드와 어긋나지 않는지 확인한다.
+  - id: AC3
+    description: |-
+      자동으로 확인할 수 없는 항목이 Human Review 목록으로 명시됐고 자동 PASS로 적히지 않았다. 장시간 녹음은 사람이 한 번 수행하는 항목으로 적혀 있다.
+    verification:
+      type: verifier
+      instruction: |-
+        Human Review 목록에 실제 음질 · 장시간 녹음 안정성 · UI 상태 명확성 · dev/번들 양쪽 권한 프롬프트가 있고, 자동 검증을 장시간 녹음으로 만들라는 요구가 없는지 확인한다.
+  - id: AC4
+    description: |-
+      이 Task는 문서만 바꿨다. 소스 · 설정 · docs/SYSTEM-MAP.md는 변경되지 않았고 commit도 하지 않았다.
+    verification:
+      type: verifier
+      instruction: |-
+        변경 범위가 문서 파일에 한정됐는지, SYSTEM-MAP.md와 소스/설정이 그대로인지, 새 commit이 만들어지지 않았는지 확인한다.
+
+evidence: []
+
+failure_memo: []

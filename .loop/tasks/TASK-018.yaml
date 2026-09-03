@@ -1,0 +1,47 @@
+# Settings의 default microphone과 사라진 장치 처리
+# Runtime이 PLAN-20260902T080012Z 승인 시점에 생성했다 (proposal P4). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-018
+status: DONE
+
+request: |-
+  Settings에 default microphone을 추가한다: `src-tauri/src/db/migrations.rs`에 **목록 끝에 새 migration을 추가**하고(이미 적용된 migration의 version·sql은 고치지 않는다), `domain::Settings` · `SettingsPayload` · `src/ipc/types.ts` · Settings 화면까지 값이 이어지게 한다. 화면은 열거된 입력 장치 중에서 고르게 하고, 고르지 않은 상태(`None`)도 정상 상태로 다룬다. 그리고 **저장된 default 장치가 현재 목록에 더 이상 없는 경우를 명시적으로 다루는 순수 해석 함수**를 만든다 — 결과는 최소한 '저장된 장치를 찾았다' · '저장된 장치가 지금 없다' · '저장된 값이 없다' 세 가지로 갈리며, **조용히 첫 번째 장치로 바꿔치기하지 않는다.** 이 해석 함수와 Settings 영속화는 하드웨어 없이 테스트한다(장치 목록은 값으로 주입한다). 이 Task는 녹음 화면 UI를 바꾸지 않는다 — 소비는 P6이 한다. commit하지 않는다.
+
+execution:
+  role: impl
+
+stop_condition:
+  gates: [build, lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 2
+
+acceptance_criteria:
+  - id: AC1
+    description: |-
+      test Gate가 통과한다. default microphone의 영속성(재시작 후에도 남는 것 포함)과 세 가지 해석 결과가 테스트로 판정된다.
+    verification:
+      type: gate
+      ref: test
+  - id: AC2
+    description: |-
+      lint Gate가 통과한다.
+    verification:
+      type: gate
+      ref: lint
+  - id: AC3
+    description: |-
+      build Gate가 통과한다.
+    verification:
+      type: gate
+      ref: build
+  - id: AC4
+    description: |-
+      저장된 default 장치가 사라졌을 때 조용한 대체가 일어나지 않고 그 사실이 값으로 구분된다. migration은 목록 끝에 추가됐고 기존 migration은 수정되지 않았다.
+    verification:
+      type: verifier
+      instruction: |-
+        확인한다: (1) 해석 함수가 '없어진 장치'를 별도 결과로 돌려주고 첫 장치로 대체하는 경로가 없다, (2) migrations.rs의 기존 항목이 그대로이고 새 항목이 끝에 추가됐다, (3) Rust payload와 src/ipc/types.ts의 모양이 1:1이다, (4) INV-7대로 secret 필드가 추가되지 않았다.
+
+evidence: []
+
+failure_memo: []

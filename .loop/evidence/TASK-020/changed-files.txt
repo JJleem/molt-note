@@ -1,0 +1,16 @@
+TASK-020 — Phase 2A spike 표면을 production 녹음 화면으로 대체
+RUN-20260902T095416Z-TASK-020 / 2026-09-02
+
+이 Task가 실제로 손댄 파일 (git status --porcelain 기준, 이 Task 범위만):
+
+A  src/screens/recordingView.ts          녹음 화면의 순수 상태 모듈 (신규)
+A  src/screens/recordingView.test.ts     그 모듈의 테스트 — DOM·마이크 없이 (신규)
+M  src/screens/RecordingScreen.tsx       spike 패널 → §5-B/§19를 따르는 production 화면
+M  src/screens/FailureNotice.tsx         선택적 headline prop 추가 (실패 갈래를 구분해 보여주는 자리)
+M  src/App.css                           .spike-notice / .spike-result* 제거, 녹음 화면 스타일 추가
+M  tests/screen-boundary.test.ts         경과 시간이 backend 값 그대로인지 보는 검사 1개 추가
+D  src/screens/captureSpikeView.ts       Phase 2A 임시 표면 (삭제)
+D  src/screens/captureSpikeView.test.ts  그 임시 표면의 테스트 (삭제)
+
+commit하지 않았다 (Phase 정책 · phase-prompt/02-reliable-recording.md).
+Runtime State(.loop/tasks/**, .loop/policies/**, .loop/project.yaml)는 건드리지 않았다.

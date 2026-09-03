@@ -1,0 +1,54 @@
+TASK-017 — "어떤 경로도 audio 파일을 자동 삭제하지 않는다" 감사 (INV-3 · INV-4 · R-004)
+Date: 2026-09-02
+
+## 1. 제품 소스 전체에서 파일 삭제 호출 검색
+
+$ grep -rn "remove_file\|remove_dir\|std::fs::remove\|fs::remove" src-tauri/src/
+
+src-tauri/src/platform/app_data_dir.rs:174:  let _ = std::fs::remove_dir_all(&self.0);
+src-tauri/src/audio/capture.rs:523:         let _ = fs::remove_dir_all(&self.0);
+src-tauri/src/db/mod.rs:181:              let _ = std::fs::remove_dir_all(&self.0);
+src-tauri/src/audio/finalized.rs:180:       let _ = fs::remove_dir_all(&self.0);
+
+## 2. 네 건 모두 #[cfg(test)] 안이다
+
+$ grep -n "cfg(test)" <위 네 파일>
+
+src-tauri/src/platform/app_data_dir.rs:143:#[cfg(test)]   → 삭제 호출 174 > 143
+src-tauri/src/audio/finalized.rs:147:#[cfg(test)]       → 삭제 호출 180 > 147
+src-tauri/src/db/mod.rs:148:#[cfg(test)]               → 삭제 호출 181 > 148
+src-tauri/src/audio/capture.rs:493:#[cfg(test)]        → 삭제 호출 523 > 493
+
+네 건 전부 각 테스트 모듈이 소유한 임시 디렉터리(TempDir)의 Drop 구현이며,
+테스트가 스스로 만든 자리만 치운다. 제품 빌드에는 컴파일되지 않는다.
+
+결론: 제품 경로에 오디오 파일을 지우는 코드가 하나도 없다.
+
+## 3. 사용자의 명시적 삭제 경로가 지우는 것
+
+src-tauri/src/commands/mod.rs:201  Storage::delete_recording
+  → store::delete_recording — 레코드(행)만 지운다. audio_path의 파일은 건드리지 않는다.
+  → Tauri command `delete_recording` 하나만 이 경로에 닿는다.
+
+## 4. 실패 경로가 파일 대신 하는 일
+
+src-tauri/src/commands/mod.rs:532  keeping_file(failure, path)
+  → 모든 정지 실패 문장에 "녹음된 파일은 남아 있다: <경로>"를 덧붙인다.
+src-tauri/src/commands/mod.rs:519  not_listed(failure)
+  → DB 저장 실패 시 "녹음은 파일로 저장됐지만 목록에 추가하지 못했다: ..."를 앞에 붙인다.
+  → finish_recording(mod.rs:497)이 두 가지를 함께 적용하므로,
+    DB 저장 실패 메시지에는 확정된 파일의 경로가 반드시 들어간다.
+
+## 5. 자동 테스트가 판정하는 자리
+
+src-tauri/tests/stop_persistence.rs
+  no_failure_on_any_path_removes_audio_that_was_already_written
+    → 상태 불일치 요청 · 소리 없는 녹음 · 중복 시작을 연달아 실패시킨 뒤
+      만들어진 .wav 파일 수가 줄지 않았고 앞선 녹음의 샘플이 그대로인지 확인한다.
+  a_recording_that_cannot_be_saved_keeps_its_audio_and_tells_the_user_where_it_is
+    → DB만 죽은 상태에서 파일이 남고 실패 문장에 그 경로가 실리는지 확인한다.
+  a_record_whose_audio_is_gone_is_detected_and_nothing_is_removed_or_repaired
+    → missing_audio 감지가 레코드도 파일도 바꾸지 않는지 확인한다.
+
+src-tauri/src/audio/finalized.rs (단위 테스트)
+    → 확인 실패 다섯 경로 각각에서 path.is_file()이 여전히 참인지 확인한다.

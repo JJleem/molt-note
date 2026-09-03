@@ -25,6 +25,7 @@ function sourceFiles(directory: string): string[] {
 
 const frontendSources = sourceFiles(path('../src'));
 const recordingsViewSource = readFileSync(path('../src/screens/recordingsView.ts'), 'utf8');
+const recordingViewSource = readFileSync(path('../src/screens/recordingView.ts'), 'utf8');
 
 describe('길이 포맷은 Rust에만 있다', () => {
   it('src/ 아래에 초를 mm:ss로 바꾸는 계산이 없다', () => {
@@ -47,6 +48,12 @@ describe('길이 포맷은 Rust에만 있다', () => {
 
   it('목록 항목의 길이가 저장소에서 온 값 그대로다', () => {
     expect(recordingsViewSource).toMatch(/durationLabel:\s*recording\.durationLabel/);
+  });
+
+  it('녹음 화면의 경과 시간이 backend가 준 값 그대로다', () => {
+    // 녹음 중에 화면에 가장 크게 보이는 값이다 (§19). 여기서 초를 세기 시작하면 화면과
+    // 저장되는 길이가 서로 다른 규칙으로 만들어진다.
+    expect(recordingViewSource).toMatch(/elapsedLabel:\s*session\.elapsedLabel/);
   });
 });
 

@@ -21,20 +21,25 @@ const SETTINGS_ROW_ID: i64 = 1;
 /// 저장된 설정을 읽는다. 저장된 적이 없으면 [`Settings::DEFAULT`]를 돌려준다.
 pub fn load(connection: &Connection) -> Result<Settings, DatabaseError> {
     let row = connection.query_row(
-        "SELECT recordings_directory, automatic_processing FROM settings WHERE id = ?1",
+        "SELECT recordings_directory, automatic_processing, default_microphone
+         FROM settings WHERE id = ?1",
         [SETTINGS_ROW_ID],
         |row| {
             Ok((
                 row.get::<_, Option<String>>(0)?,
                 row.get::<_, i64>(1)?,
+                row.get::<_, Option<String>>(2)?,
             ))
         },
     );
 
     match row {
-        Ok((recordings_directory, automatic_processing)) => Ok(Settings {
+        Ok((recordings_directory, automatic_processing, default_microphone)) => Ok(Settings {
             recordings_directory,
             automatic_processing: decode_toggle(automatic_processing)?,
+            // 저장된 키가 지금 목록에 있는지는 여기서 묻지 않는다. 저장소는 장치를 알지
+            // 않으며, 없어진 장치를 읽는 김에 지우거나 다른 값으로 바꾸지도 않는다.
+            default_microphone,
         }),
         // 행이 없는 것은 오류가 아니다 — 기본값 정책이 답을 갖고 있다.
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(Settings::DEFAULT),
@@ -48,15 +53,17 @@ pub fn load(connection: &Connection) -> Result<Settings, DatabaseError> {
 pub fn save(connection: &Connection, settings: &Settings) -> Result<(), DatabaseError> {
     connection
         .execute(
-            "INSERT INTO settings (id, recordings_directory, automatic_processing)
-             VALUES (?1, ?2, ?3)
+            "INSERT INTO settings (id, recordings_directory, automatic_processing, default_microphone)
+             VALUES (?1, ?2, ?3, ?4)
              ON CONFLICT (id) DO UPDATE
              SET recordings_directory = excluded.recordings_directory,
-                 automatic_processing = excluded.automatic_processing",
+                 automatic_processing = excluded.automatic_processing,
+                 default_microphone = excluded.default_microphone",
             rusqlite::params![
                 SETTINGS_ROW_ID,
                 settings.recordings_directory,
                 i64::from(settings.automatic_processing),
+                settings.default_microphone,
             ],
         )
         .map_err(DatabaseError::Sql)?;

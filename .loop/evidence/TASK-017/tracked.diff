@@ -1,0 +1,1615 @@
+diff --git a/src-tauri/src/audio/capture.rs b/src-tauri/src/audio/capture.rs
+index 368c542..2e08bd4 100644
+--- a/src-tauri/src/audio/capture.rs
++++ b/src-tauri/src/audio/capture.rs
+@@ -10,8 +10,23 @@
+ //! 그래서 **파일이 만들어지고 확정되는 경로 전체가 마이크 없이 테스트된다** — 가짜 샘플
+ //! 소스를 [`SampleSource`] 자리에 넣으면 나머지는 실제 코드가 그대로 지나간다 (§18).
+ //!
+-//! **start / stop 한 쌍이 전부다.** pause/resume · 재시작 영속성 · 재생 · Recording 레코드
+-//! 생성은 여기에 없다 — 전부 Phase 2B다 (ADR-0003 §14).
++//! **start · pause · resume · stop 네 가지가 여기에 있다.** 그 넷을 언제 부를 수 있는지는
++//! 이 파일이 정하지 않는다 — 전이 규칙은 [`super::session`]에, 둘을 엮는 자리는
++//! [`crate::commands`]에 있다. 재시작 영속성과 재생은 아직 없다.
++//!
++//! **확정된 파일이 쓸 수 있는 녹음인지 확인하는 것도 이 파일의 일이 아니다.** [`ActiveCapture::stop`]이
++//! 돌려주는 보고 값은 "여기까지 했다"이며, 그것이 R-002가 말하는 성공인지는
++//! [`super::finalized`]가 판정한다.
++//!
++//! ## pause는 장치를 닫지 않는다
++//!
++//! 일시정지는 **열린 장치와 쓰는 중인 파일을 그대로 둔 채** 샘플이 파일에 도달하지 않게
++//! 하는 것이다 (Phase 2B 요구사항 4). 그래서 resume은 같은 파일에 이어 쓰고, 정지는 여전히
++//! 파일 하나를 확정한다.
++//!
++//! 표시(`Paused` · `Resumed`)는 샘플과 **같은 통로**를 지난다 ([`Packet`]). 별도의 플래그를
++//! 두면 큐에 이미 들어와 있던 — 즉 일시정지 **이전에 녹음된** — 샘플이 그 플래그에 휩쓸려
++//! 사라진다. 같은 통로를 쓰면 표시가 샘플 사이의 정확한 자리에 놓인다.
+ //!
+ //! ## 만들어지는 포맷 — 확인된 것과 확인되지 않은 것
+ //!
+@@ -26,7 +41,7 @@
+ use std::fs;
+ use std::io::BufWriter;
+ use std::path::{Path, PathBuf};
+-use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
++use std::sync::mpsc::{sync_channel, Receiver, SyncSender, TrySendError};
+ use std::thread::JoinHandle;
+ 
+ use crate::domain::{Failure, FailureKind};
+@@ -37,8 +52,12 @@ pub const CONTAINER: &str = "WAV";
+ /// 이 경로가 쓰는 샘플 하나의 비트 수. 샘플을 `i16`으로 쓰므로 16이다.
+ pub const BITS_PER_SAMPLE: u16 = 16;
+ 
+-/// 출력 파일 확장자.
+-const EXTENSION: &str = "wav";
++/// 출력 파일 확장자이자 **레코드에 남는 형식 식별자**(`Recording::audio_format` · §7).
++///
++/// 컨테이너 이름([`CONTAINER`])과 같은 것을 가리키지만 쓰임이 다르다 — 하나는 사람이 읽는
++/// 문장에 들어가고, 이 값은 저장되고 이후 Phase가 읽는 식별자다. 두 값을 각각 지어내지
++/// 않도록 형식 식별자의 출처는 여기 하나뿐이다 ([`super::finalized::VerifiedAudio::format`]).
++pub const EXTENSION: &str = "wav";
+ 
+ /// 같은 이름을 몇 번까지 비켜 볼 것인가. 여기까지 전부 차 있으면 이름을 만들지 못한 것이다.
+ const MAX_PATH_ATTEMPTS: u32 = 1_000;
+@@ -115,6 +134,63 @@ pub struct CaptureReport {
+     pub byte_size: u64,
+ }
+ 
++/// 파일에 쓰는 쪽으로 흘러가는 것.
++///
++/// 샘플과 일시정지 표시가 **같은 순서로 같은 통로를 지난다.** 그래서 표시가 도착한 시점이
++/// 곧 "여기까지가 녹음이다"이며, 그 앞의 샘플은 전부 파일에 들어가고 뒤의 것은 하나도
++/// 들어가지 않는다 (모듈 주석).
++enum Packet {
++    /// 파일에 쓸 샘플 덩어리.
++    Samples(Vec<i16>),
++    /// 여기서부터 파일에 쓰지 않는다.
++    Paused,
++    /// 여기서부터 다시 파일에 쓴다. 파일은 같은 파일이다.
++    Resumed,
++}
++
++/// 샘플을 보내지 못한 이유.
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
++pub enum SinkError {
++    /// 아직 파일에 쓰지 못한 것이 한도([`SAMPLE_QUEUE_CAPACITY`])까지 쌓여 있다.
++    ///
++    /// **저장이 녹음을 따라가지 못하고 있다는 뜻이다.** 보내는 쪽은 이 사실을 조용히
++    /// 삼키지 않는다 (R-005).
++    Full,
++    /// 받는 쪽이 이미 끝났다. 정지 중이라는 뜻이며 보통은 실패가 아니다.
++    Closed,
++}
++
++/// 샘플이 파일 쪽으로 들어가는 입구. [`SampleSource`]가 받는 값이다.
++///
++/// 통로의 실제 모양(일시정지 표시가 함께 흐른다는 것)은 이 타입 뒤에 있다 — 장치를 여는
++/// 코드는 샘플을 보내는 일만 알면 된다.
++#[derive(Clone)]
++pub struct SampleSink {
++    sender: SyncSender<Packet>,
++}
++
++impl SampleSink {
++    /// 자리가 날 때까지 기다렸다가 보낸다.
++    ///
++    /// 스스로 속도를 조절할 수 있는 쪽(테스트의 가짜 장치 등)이 쓴다. **실제 오디오 콜백은
++    /// 기다릴 수 없으므로** [`Self::try_send`]를 쓴다.
++    pub fn send(&self, chunk: Vec<i16>) -> Result<(), SinkError> {
++        self.sender
++            .send(Packet::Samples(chunk))
++            .map_err(|_| SinkError::Closed)
++    }
++
++    /// 기다리지 않고 보낸다. 보내지 못했으면 그 이유를 돌려준다.
++    pub fn try_send(&self, chunk: Vec<i16>) -> Result<(), SinkError> {
++        self.sender
++            .try_send(Packet::Samples(chunk))
++            .map_err(|error| match error {
++                TrySendError::Full(_) => SinkError::Full,
++                TrySendError::Disconnected(_) => SinkError::Closed,
++            })
++    }
++}
++
+ /// 열린 캡처 하나. [`SampleSource`]가 돌려주는 값이다.
+ pub struct OpenCapture {
+     /// 실제로 열린 장치의 이름.
+@@ -135,8 +211,11 @@ pub trait SampleSource {
+     /// 들어오는 샘플은 `samples`로 보낸다. 큐가 가득 차면 **버리지 말고** 정지 시점에
+     /// 실패로 알린다 ([`OpenCapture::stop`]).
+     ///
++    /// **일시정지는 이 경계의 일이 아니다.** 장치는 계속 열려 있고 샘플도 계속 들어온다 —
++    /// 그것을 파일에 쓸지 말지는 [`ActiveCapture`]가 정한다 (모듈 주석).
++    ///
+     /// 장치를 열지 못하면 실패다. 이때 파일은 아직 만들어지지 않았다.
+-    fn open(&self, device_key: &str, samples: SyncSender<Vec<i16>>) -> Result<OpenCapture, Failure>;
++    fn open(&self, device_key: &str, samples: SampleSink) -> Result<OpenCapture, Failure>;
+ }
+ 
+ /// 진행 중인 캡처 하나. [`Self::stop`]이 파일을 확정하고 보고 값을 만든다.
+@@ -146,11 +225,44 @@ pub struct ActiveCapture {
+     output_path: PathBuf,
+     stop_device: Box<dyn FnOnce() -> Result<(), Failure> + Send>,
+     /// 파일에 쓰는 쪽으로 가는 통로. 이것을 닫는 것이 "더 이상 샘플이 없다"는 신호다.
+-    samples: SyncSender<Vec<i16>>,
++    packets: SyncSender<Packet>,
+     writer: JoinHandle<Result<(), Failure>>,
+ }
+ 
+ impl ActiveCapture {
++    /// 확정될 파일의 경로. 아직 쓰는 중이다.
++    pub fn output_path(&self) -> &Path {
++        &self.output_path
++    }
++
++    /// 여기서부터 들어오는 샘플을 파일에 쓰지 않는다.
++    ///
++    /// **장치도 파일도 그대로 열려 있다.** 표시가 도착하기 전까지 들어온 샘플은 전부
++    /// 파일에 들어간다 (모듈 주석).
++    pub fn pause(&self) -> Result<(), Failure> {
++        self.mark(Packet::Paused)
++    }
++
++    /// 여기서부터 다시 파일에 쓴다. **같은 파일에 이어 쓴다** — 새 파일을 만들지 않는다.
++    pub fn resume(&self) -> Result<(), Failure> {
++        self.mark(Packet::Resumed)
++    }
++
++    /// 표시 하나를 통로에 넣는다.
++    ///
++    /// 넣지 못하는 경우는 하나뿐이다 — **쓰는 쪽이 이미 끝났을 때**다. 그때는 파일에 쓰는
++    /// 일이 실패했다는 뜻이므로 그 사실을 숨기지 않는다. 정지하면 그때까지 확정된 것을
++    /// 사용자가 알 수 있다 ([`Self::stop`]).
++    fn mark(&self, packet: Packet) -> Result<(), Failure> {
++        self.packets.send(packet).map_err(|_| {
++            Failure::permanent(
++                FailureKind::Storage,
++                "녹음을 파일에 쓰는 일이 이미 끝났다. 정지하면 그때까지 저장된 것을 확인할 수 있다.",
++            )
++            .with_source_data_at_risk()
++        })
++    }
++
+     /// 캡처를 멈추고 파일을 확정한 뒤 보고 값을 만든다.
+     ///
+     /// 순서가 중요하다 — **장치를 먼저 멈추고 · 통로를 닫고 · 쓰는 쪽이 끝나기를 기다린 뒤**
+@@ -161,7 +273,7 @@ impl ActiveCapture {
+             format,
+             output_path,
+             stop_device,
+-            samples,
++            packets,
+             writer,
+         } = self;
+ 
+@@ -169,7 +281,7 @@ impl ActiveCapture {
+         let stopped = stop_device();
+ 
+         // 2. 통로를 닫는다. 쓰는 쪽은 남은 것을 전부 쓰고 스스로 끝난다.
+-        drop(samples);
++        drop(packets);
+ 
+         // 3. 파일이 확정될 때까지 기다린다. 쓰는 쪽이 죽었더라도 앱은 죽지 않는다.
+         let written = match writer.join() {
+@@ -218,9 +330,14 @@ pub fn start(
+     stem: &str,
+ ) -> Result<ActiveCapture, Failure> {
+     let output_path = output_path(directory, stem)?;
+-    let (sender, receiver) = sync_channel::<Vec<i16>>(SAMPLE_QUEUE_CAPACITY);
++    let (sender, receiver) = sync_channel::<Packet>(SAMPLE_QUEUE_CAPACITY);
+ 
+-    let open = source.open(device_key, sender.clone())?;
++    let open = source.open(
++        device_key,
++        SampleSink {
++            sender: sender.clone(),
++        },
++    )?;
+ 
+     let file = match WavFile::create(&output_path, open.format) {
+         Ok(file) => file,
+@@ -251,7 +368,7 @@ pub fn start(
+         format: open.format,
+         output_path,
+         stop_device: open.stop,
+-        samples: sender,
++        packets: sender,
+         writer,
+     })
+ }
+@@ -299,12 +416,22 @@ pub fn file_size(path: &Path) -> Result<u64, Failure> {
+     })
+ }
+ 
+-/// 들어오는 샘플을 파일에 쓰고, 통로가 닫히면 파일을 확정한다.
++/// 들어오는 것을 순서대로 처리하고, 통로가 닫히면 파일을 확정한다.
++///
++/// 일시정지 구간의 샘플은 **여기서 버려진다** — 파일에 도달하지 않는다. 표시가 샘플과 같은
++/// 통로로 오므로 어느 샘플이 그 구간의 것인지 판단할 필요가 없다 (모듈 주석).
+ ///
+ /// **이 함수 안에 panic 경로가 없다.** 여기서 죽으면 파일이 확정되지 않은 채 남는다.
+-fn drain(receiver: Receiver<Vec<i16>>, mut file: WavFile) -> Result<(), Failure> {
+-    for chunk in receiver {
+-        file.write(&chunk)?;
++fn drain(receiver: Receiver<Packet>, mut file: WavFile) -> Result<(), Failure> {
++    let mut writing = true;
++    for packet in receiver {
++        match packet {
++            Packet::Samples(chunk) if writing => file.write(&chunk)?,
++            // 일시정지 구간이다. 이 샘플은 녹음이 아니다.
++            Packet::Samples(_) => {}
++            Packet::Paused => writing = false,
++            Packet::Resumed => writing = true,
++        }
+     }
+     file.finish()
+ }
+@@ -530,6 +657,90 @@ mod tests {
+         );
+     }
+ 
++    /// 확정된 WAV 파일에 실제로 들어 있는 샘플 전부. **크기가 아니라 내용을 본다.**
++    fn samples_in(path: &Path) -> Vec<i16> {
++        hound::WavReader::open(path)
++            .expect("확정된 파일은 다시 읽을 수 있어야 한다")
++            .into_samples::<i16>()
++            .map(|sample| sample.expect("샘플을 읽을 수 있어야 한다"))
++            .collect()
++    }
++
++    /// 가짜 통로 하나에 정해진 것을 흘려보내고, 만들어진 파일의 샘플을 돌려준다.
++    fn drained(label: &str, packets: Vec<Packet>) -> (TempDir, Vec<i16>) {
++        let temp = TempDir::new(label);
++        let path = temp.path().join("drained.wav");
++        let file = WavFile::create(&path, CaptureFormat::pcm_16bit(16_000, 1))
++            .expect("파일을 만들 수 있어야 한다");
++
++        let (sender, receiver) = sync_channel::<Packet>(SAMPLE_QUEUE_CAPACITY);
++        for packet in packets {
++            sender.send(packet).expect("보낼 수 있어야 한다");
++        }
++        drop(sender);
++
++        drain(receiver, file).expect("파일을 확정할 수 있어야 한다");
++        let samples = samples_in(&path);
++        (temp, samples)
++    }
++
++    #[test]
++    fn samples_that_arrive_between_paused_and_resumed_never_reach_the_file() {
++        // 이 테스트가 pause의 의미 그 자체다 (Phase 2B 요구사항 4).
++        let (_temp, samples) = drained(
++            "paused-span",
++            vec![
++                Packet::Samples(vec![1_000; 4]),
++                Packet::Paused,
++                Packet::Samples(vec![2_000; 64]), // 멈춰 있는 동안 들어온 것
++                Packet::Resumed,
++                Packet::Samples(vec![3_000; 4]),
++            ],
++        );
++
++        assert_eq!(samples, [vec![1_000; 4], vec![3_000; 4]].concat());
++        assert!(
++            !samples.contains(&2_000),
++            "일시정지 구간의 샘플이 파일에 들어갔다"
++        );
++    }
++
++    #[test]
++    fn resuming_writes_into_the_same_file_rather_than_starting_a_new_one() {
++        // 여러 번 멈췄다 이어도 파일은 하나이고, 녹음된 구간이 순서대로 이어 붙는다.
++        let (_temp, samples) = drained(
++            "many-cycles",
++            vec![
++                Packet::Samples(vec![1; 2]),
++                Packet::Paused,
++                Packet::Samples(vec![9; 8]),
++                Packet::Resumed,
++                Packet::Samples(vec![2; 2]),
++                Packet::Paused,
++                Packet::Samples(vec![9; 8]),
++                Packet::Resumed,
++                Packet::Samples(vec![3; 2]),
++            ],
++        );
++
++        assert_eq!(samples, [1, 1, 2, 2, 3, 3]);
++    }
++
++    #[test]
++    fn a_capture_that_is_stopped_while_paused_still_finalizes_what_was_recorded() {
++        // 멈춰 둔 녹음을 그대로 끝내는 것은 정상적인 사용이다 (`super::session`).
++        let (_temp, samples) = drained(
++            "stopped-while-paused",
++            vec![
++                Packet::Samples(vec![7; 4]),
++                Packet::Paused,
++                Packet::Samples(vec![9; 4]),
++            ],
++        );
++
++        assert_eq!(samples, [7; 4], "멈춘 뒤의 것은 들어가지 않는다");
++    }
++
+     #[test]
+     fn a_file_that_cannot_be_created_becomes_a_failure_instead_of_a_panic() {
+         // 디렉터리가 없다. 존재하지 않는 자리에 파일을 만들 수는 없다.
+diff --git a/src-tauri/src/audio/mod.rs b/src-tauri/src/audio/mod.rs
+index dfdc1d8..e3225d7 100644
+--- a/src-tauri/src/audio/mod.rs
++++ b/src-tauri/src/audio/mod.rs
+@@ -4,24 +4,35 @@
+ //! `PROVISIONAL`이며, 사람이 실제 장치에서 확인해야 할 항목이 남아 있다 (ADR-0003 §12).
+ //! 그러므로 이 모듈은 그 결정을 확정된 것처럼 다루지 않는다 — 확정 전에 필요한 만큼만 있다.
+ //!
+-//! 지금 있는 것은 **입력 장치 열거**와 **start / stop 한 쌍의 캡처**다.
+-//! pause/resume · 재시작 영속성 · 재생 · Recording 레코드 생성은 없다 (Phase 2B).
++//! 지금 있는 것은 **입력 장치 열거**와 **start · pause · resume · stop 네 가지 캡처 동작**,
++//! 녹음 session의 상태 기계, 그리고 **확정된 파일의 확인**이다. [`session`]의 전이 규칙과
++//! [`capture`]의 실제 파일 쓰기를 엮고 확인을 마친 녹음을 레코드로 남기는 자리는
++//! [`crate::commands`]이며, 진행 중인 session은 거기(Tauri managed state)가 소유한다 —
++//! 화면이 아니다 (R-001 · `docs/ADR-0004-recording-session-lifecycle.md`).
++//! 재시작 영속성과 재생은 아직 없다.
+ //!
+ //! ```text
+ //! devices.rs         목록을 다듬는 규칙        (하드웨어 없이 테스트된다)
+ //! capture.rs         파일을 만들고 확정하는 규칙 (하드웨어 없이 테스트된다)
++//! finalized.rs       확정된 파일을 확인하는 규칙 (하드웨어 없이 테스트된다)
++//! session.rs         녹음 session의 상태 기계   (하드웨어도 시계도 없이 테스트된다)
+ //! system_devices.rs  실제 장치에 묻는 부분      (cpal을 아는 두 자리 중 하나)
+ //! system_capture.rs  실제 장치를 여는 부분      (cpal을 아는 두 자리 중 하나)
+ //! ```
+ 
+ pub mod capture;
+ pub mod devices;
++pub mod finalized;
++pub mod session;
+ pub mod system_capture;
+ pub mod system_devices;
+ 
+ pub use capture::{
+-    ActiveCapture, CaptureFormat, CaptureReport, OpenCapture, SampleSource, CONTAINER,
++    ActiveCapture, CaptureFormat, CaptureReport, OpenCapture, SampleSink, SampleSource, SinkError,
++    CONTAINER,
+ };
++pub use finalized::{audio_is_present, VerifiedAudio, MIN_FINALIZED_BYTES};
+ pub use devices::{catalog, InputDevice, InputDeviceSource, ObservedInputDevice};
++pub use session::{RecordingSession, SessionState, SessionSummary};
+ pub use system_capture::SystemSampleSource;
+ pub use system_devices::SystemInputDevices;
+diff --git a/src-tauri/src/audio/system_capture.rs b/src-tauri/src/audio/system_capture.rs
+index 2920747..fe508e2 100644
+--- a/src-tauri/src/audio/system_capture.rs
++++ b/src-tauri/src/audio/system_capture.rs
+@@ -15,13 +15,13 @@
+ //! 스레드를 만들고, 바깥에는 **정지 신호와 결과만** 건넨다. 스트림은 그 스레드에서 태어나
+ //! 그 스레드에서 닫힌다.
+ 
+-use std::sync::mpsc::{self, SyncSender, TrySendError};
++use std::sync::mpsc;
+ use std::sync::{Arc, Mutex};
+ use std::thread;
+ 
+ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+ 
+-use crate::audio::capture::{CaptureFormat, OpenCapture, SampleSource};
++use crate::audio::capture::{CaptureFormat, OpenCapture, SampleSink, SampleSource, SinkError};
+ use crate::audio::devices::{catalog, selection_keys, ObservedInputDevice};
+ use crate::audio::system_devices::name_of;
+ use crate::domain::{Failure, FailureKind};
+@@ -36,7 +36,7 @@ type Interrupted = Arc<Mutex<Option<Failure>>>;
+ pub struct SystemSampleSource;
+ 
+ impl SampleSource for SystemSampleSource {
+-    fn open(&self, device_key: &str, samples: SyncSender<Vec<i16>>) -> Result<OpenCapture, Failure> {
++    fn open(&self, device_key: &str, samples: SampleSink) -> Result<OpenCapture, Failure> {
+         let interrupted: Interrupted = Arc::new(Mutex::new(None));
+ 
+         // 스트림을 소유할 스레드와 주고받는 두 통로: 열린 결과와 정지 신호.
+@@ -124,7 +124,7 @@ struct OpenedStream {
+ /// 고른 장치를 찾아 열고 캡처를 시작한다. **스트림을 소유한 스레드 안에서만 불린다.**
+ fn open_stream(
+     device_key: &str,
+-    samples: SyncSender<Vec<i16>>,
++    samples: SampleSink,
+     interrupted: Interrupted,
+ ) -> Result<OpenedStream, Failure> {
+     let host = cpal::default_host();
+@@ -228,7 +228,7 @@ fn open_stream(
+ 
+ /// 장치가 16-bit 정수로 주는 경우. 그대로 넘긴다.
+ fn forward_i16(
+-    samples: SyncSender<Vec<i16>>,
++    samples: SampleSink,
+     interrupted: Interrupted,
+ ) -> impl FnMut(&[i16], &cpal::InputCallbackInfo) + Send + 'static {
+     move |data, _| deliver(&samples, &interrupted, data.to_vec())
+@@ -236,7 +236,7 @@ fn forward_i16(
+ 
+ /// 장치가 32-bit 실수로 주는 경우(macOS CoreAudio의 흔한 경우). 16-bit PCM으로 옮긴다.
+ fn forward_f32(
+-    samples: SyncSender<Vec<i16>>,
++    samples: SampleSink,
+     interrupted: Interrupted,
+ ) -> impl FnMut(&[f32], &cpal::InputCallbackInfo) + Send + 'static {
+     move |data, _| {
+@@ -260,11 +260,14 @@ fn note_stream_error(interrupted: &Interrupted, error: impl std::fmt::Display) {
+ }
+ 
+ /// 받은 샘플을 파일에 쓰는 쪽으로 넘긴다.
+-fn deliver(samples: &SyncSender<Vec<i16>>, interrupted: &Interrupted, chunk: Vec<i16>) {
++///
++/// **일시정지 중에도 이 함수는 계속 불린다.** 장치는 열려 있고 샘플도 계속 온다 —
++/// 그것을 파일에 쓰지 않는 것은 통로 반대편의 일이다 (`super::capture`).
++fn deliver(samples: &SampleSink, interrupted: &Interrupted, chunk: Vec<i16>) {
+     match samples.try_send(chunk) {
+         Ok(()) => {}
+         // 큐가 찼다. **버렸다는 사실을 숨기지 않는다** — 정지할 때 사용자에게 알린다 (R-005).
+-        Err(TrySendError::Full(_)) => note(
++        Err(SinkError::Full) => note(
+             interrupted,
+             Failure::retryable(
+                 FailureKind::AudioDevice,
+@@ -272,7 +275,7 @@ fn deliver(samples: &SyncSender<Vec<i16>>, interrupted: &Interrupted, chunk: Vec
+             ),
+         ),
+         // 받는 쪽이 이미 끝났다. 정지 중이라는 뜻이며 실패가 아니다.
+-        Err(TrySendError::Disconnected(_)) => {}
++        Err(SinkError::Closed) => {}
+     }
+ }
+ 
+diff --git a/src-tauri/src/commands/mod.rs b/src-tauri/src/commands/mod.rs
+index 16650e5..e177aba 100644
+--- a/src-tauri/src/commands/mod.rs
++++ b/src-tauri/src/commands/mod.rs
+@@ -5,11 +5,27 @@
+ //! (`docs/ADR-0001-local-persistence.md` · PRODUCT-SPEC §12).
+ //!
+ //! Phase 1의 표면은 두 가지였다 — **recording CRUD**와 **settings**.
+-//! 여기에 Phase 2A가 **입력 장치 열거**와 **캡처 시작 / 정지 한 쌍**을 더한다.
+-//! ADR-0003이 아직 `PROVISIONAL`이므로 그 검증에 필요한 만큼만 만든다 —
+-//! pause/resume · 재시작 영속성 · 재생 · 캡처 결과의 DB 영속화는 여기에 없다 (Phase 2B).
++//! 여기에 **입력 장치 열거**와 **녹음 session**(시작 · 일시정지 · 재개 · 정지 · 상태 조회),
++//! 그리고 **레코드와 파일이 어긋난 상태의 감지**가 더해진다. 재시작 영속성과 재생은 아직 없다.
+ //! 전사 · AI · Notion을 위한 command도 그 기능이 존재하는 Phase가 함께 추가한다.
+ //!
++//! ## 정지의 성공은 "파일이 확정됐다"는 뜻이다 (R-002)
++//!
++//! [`finish_recording`]이 그 순서를 갖고 있다 — **파일을 확정하고 · 확인하고 · 레코드를
++//! 저장한다.** 셋 중 하나라도 성립하지 않으면 정지는 사용자에게 보이는 실패이며, 그 실패는
++//! **확정된 파일이 어디에 남아 있는지** 함께 말한다.
++//!
++//! **어느 실패 경로도 오디오 파일을 지우지 않는다** (INV-3 · INV-4 · R-004). 파일과 레코드가
++//! 어긋난 두 상태를 각각 어떻게 다루는지는
++//! `docs/ADR-0004-recording-session-lifecycle.md` §10~§13에 있다.
++//!
++//! ## 진행 중인 녹음을 소유하는 것은 여기다
++//!
++//! [`Recorder`]는 Tauri managed state로 앱이 들고 있다 (`crate::run`). 화면 컴포넌트가
++//! session 핸들을 갖지 않으므로 **화면이 unmount되어도 녹음이 사라지지 않는다** (R-001).
++//! 화면은 command로 시작·정지를 요청하고 [`Recorder::status`]로 지금 상태를 물어볼 뿐이다.
++//! 이 결정과 근거는 `docs/ADR-0004-recording-session-lifecycle.md`에 있다.
++//!
+ //! ## 저장소 초기화 실패는 앱을 죽이지 않는다
+ //!
+ //! 저장소는 앱 시작 시 한 번 연다. 열지 못하면 [`Storage`]는 **실패를 값으로 들고 있다가**
+@@ -18,6 +34,7 @@
+ 
+ pub mod payload;
+ 
++use std::path::{Path, PathBuf};
+ use std::sync::{Mutex, MutexGuard};
+ use std::time::{SystemTime, UNIX_EPOCH};
+ 
+@@ -25,13 +42,18 @@ use rusqlite::Connection;
+ use tauri::{Manager, State};
+ 
+ use crate::audio::capture::{self, ActiveCapture};
+-use crate::audio::{catalog, InputDeviceSource, SampleSource, SystemInputDevices, SystemSampleSource};
++use crate::audio::{
++    catalog, finalized, InputDeviceSource, RecordingSession, SampleSource, SystemInputDevices,
++    SystemSampleSource,
++};
+ use crate::db::{self, settings, store};
+ use crate::domain::{Failure, FailureKind, RecordingId, RecordingView};
+ use crate::platform::app_data_dir::AppDataDirectory;
++use crate::platform::clock::{Clock, MonotonicClock};
+ 
+ pub use payload::{
+-    CaptureReportPayload, InputDevicePayload, NewRecording, RecordingPayload, SettingsPayload,
++    CaptureReportPayload, InputDevicePayload, MissingAudioPayload, NewRecording, RecordingPayload,
++    SessionStatusPayload, SettingsPayload, StoppedRecordingPayload,
+ };
+ 
+ /// 앱이 들고 있는 로컬 저장소.
+@@ -102,12 +124,71 @@ impl Storage {
+     ///
+     /// 식별자와 시각은 저장소가 만든다 — 프론트엔드가 정하지 않는다.
+     pub fn create_recording(&self, recording: NewRecording) -> Result<RecordingPayload, Failure> {
+-        let recording = validated(recording)?;
++        self.insert(|_| recording)
++    }
+ 
++    /// 방금 확정된 녹음 하나를 레코드로 남긴다 (Phase 2B 요구사항 5 · 6).
++    ///
++    /// **파일이 확인된 뒤에만 부른다.** 이 함수는 파일을 다시 확인하지 않는다 — 순서를 아는
++    /// 자리는 [`finish_recording`] 하나이며, 그 순서가 정책이다
++    /// (`docs/ADR-0004-recording-session-lifecycle.md` §11).
++    ///
++    /// 남는 값은 요구사항이 열거한 여섯 가지다 — title · duration(일시정지 제외) ·
++    /// audioPath · audioFormat · microphone · createdAt. 저장 경로는 Phase 1의 저장소
++    /// 그대로이며([`store::insert_recording`]), 여기에 별도의 쓰기 경로를 만들지 않는다.
++    ///
++    /// `title`이 비어 있으면 저장 시각에서 제목을 만든다 ([`title_for`]) — 제목이 빈 레코드는
++    /// 저장되지 않으므로([`validated`]) 이름 없는 녹음이 조용히 유실되지 않게 한다.
++    pub fn save_capture(
++        &self,
++        capture: &CaptureReportPayload,
++        title: Option<&str>,
++    ) -> Result<RecordingPayload, Failure> {
++        let chosen = title.map(str::trim).filter(|title| !title.is_empty());
++
++        self.insert(|created_at| NewRecording {
++            title: match chosen {
++                Some(title) => title.to_string(),
++                None => title_for(created_at),
++            },
++            // 일시정지 구간을 뺀 길이다. 그것을 세는 곳은 상태 기계 한 곳뿐이다.
++            duration_ms: capture.duration_ms,
++            audio_path: capture.output_path.clone(),
++            audio_format: capture::EXTENSION.to_string(),
++            // 실제로 열린 장치의 이름이다 — 고른 이름이 아니다.
++            microphone: Some(capture.device_label.clone()),
++        })
++    }
++
++    /// **레코드는 있는데 오디오 파일이 없는** 녹음 전부 (Phase 2B 요구사항 6).
++    ///
++    /// 정지 경로는 이 상태를 만들지 않는다 — 레코드는 파일이 확인된 뒤에만 쓰인다. 그래도
++    /// 파일은 앱 밖에서 옮겨지거나 지워질 수 있으므로, 그 사실을 **알 수 있는 수단**이 필요하다.
++    ///
++    /// **감지는 감지일 뿐이다.** 여기서 레코드를 지우거나 고치지 않고 파일을 새로 만들지도
++    /// 않는다 (INV-3 · INV-4). 하나도 없으면 빈 목록이며 그것이 정상 상태다.
++    pub fn missing_audio(&self) -> Result<Vec<MissingAudioPayload>, Failure> {
++        Ok(self
++            .list_recordings()?
++            .iter()
++            .filter(|recording| !finalized::audio_is_present(&recording.audio_path))
++            .map(MissingAudioPayload::from)
++            .collect())
++    }
++
++    /// 녹음 하나를 저장한다. 식별자와 시각을 만드는 자리가 여기 하나뿐이다.
++    ///
++    /// 저장할 값은 **저장 시각을 받아** 만들어진다 — 제목을 그 시각에서 짓는 경로가 있기
++    /// 때문이다 ([`Self::save_capture`]).
++    fn insert(
++        &self,
++        recording: impl FnOnce(&str) -> NewRecording,
++    ) -> Result<RecordingPayload, Failure> {
+         let connection = self.connection()?;
+         let id = store::new_id(&connection)?;
+         let timestamp = store::now(&connection)?;
+-        let recording = recording.into_recording(id, timestamp);
++
++        let recording = validated(recording(&timestamp))?.into_recording(id, timestamp);
+         store::insert_recording(&connection, &recording)?;
+ 
+         Ok(RecordingPayload::from(RecordingView::from(recording)))
+@@ -191,25 +272,40 @@ impl AudioDevices {
+     }
+ }
+ 
+-/// 앱이 들고 있는 캡처 경로 (Phase 2A spike).
++/// 진행 중인 녹음 하나. **상태 기계와 열려 있는 캡처가 한 값으로 묶여 있다.**
++///
++/// 둘이 따로 놓이면 "session은 일시정지인데 파일에는 계속 쓰이는" 상태가 만들어질 수 있다.
++/// 여기서는 그 둘을 함께만 얻을 수 있다.
++struct ActiveRecording {
++    /// 전이 규칙과 경과 시간을 아는 쪽 (`crate::audio::session`).
++    session: RecordingSession,
++    /// 열린 장치와 쓰는 중인 파일을 아는 쪽 (`crate::audio::capture`).
++    capture: ActiveCapture,
++}
++
++/// 앱이 들고 있는 **녹음 session**. 진행 중인 녹음의 소유자다 (R-001).
+ ///
+ /// [`AudioDevices`]와 같은 방식으로 갈라져 있다 — 실제 장치에서 샘플을 받는 부분은
+-/// [`SampleSource`] 뒤에 있고, 테스트는 자신의 구현을 넣어 **마이크 없이** 이 경로를
+-/// 그대로 지난다 ([`Self::with_source`]).
++/// [`SampleSource`] 뒤에, 흐르는 시간은 [`Clock`] 뒤에 있다. 테스트는 그 두 자리에 자신의
++/// 구현을 넣어 **마이크 없이, 그리고 시간을 실제로 흘려보내지 않고** 이 경로를 그대로 지난다
++/// ([`Self::with_clock`] · §18).
+ ///
+ /// [`Storage`]처럼 **앱 데이터 디렉터리를 얻지 못한 실패도 값으로 들고 있다.** 그 실패는
+ /// 녹음을 시작하려 할 때 사용자에게 그대로 전달된다 — 시작 시점에 죽지 않는다 (§13).
+ ///
+-/// **한 번에 하나만 녹음한다.** 진행 중인 캡처가 있는지가 이 값의 상태 전부이며,
+-/// pause/resume 같은 세 번째 상태는 없다 (Phase 2B).
+-pub struct Capture {
++/// **한 번에 하나만 녹음한다.** 진행 중인 녹음이 있는지, 있다면 그 session이 어떤 상태인지가
++/// 이 값의 상태 전부다. 정지한 session은 여기 남지 않는다 — 끝난 녹음을 들고 있을 이유가
++/// 없고, 다음 녹음은 새 session으로 시작한다 ([`Self::stop`]).
++pub struct Recorder {
+     source: Box<dyn SampleSource + Send + Sync>,
++    /// 경과 시간을 재는 자리. 상태 기계는 시각을 값으로만 받는다.
++    clock: Box<dyn Clock>,
+     /// 출력 파일이 놓일 자리. 얻지 못했다면 그 실패를 들고 있다.
+     app_data_dir: Result<AppDataDirectory, Failure>,
+-    active: Mutex<Option<ActiveCapture>>,
++    active: Mutex<Option<ActiveRecording>>,
+ }
+ 
+-impl Capture {
++impl Recorder {
+     /// Tauri가 결정한 앱 데이터 디렉터리에 이 기기의 실제 입력 장치로 녹음한다 (INV-10).
+     pub fn open_for<R, M>(manager: &M) -> Self
+     where
+@@ -218,24 +314,35 @@ impl Capture {
+     {
+         Self {
+             source: Box::new(SystemSampleSource),
++            clock: Box::new(MonotonicClock::new()),
+             app_data_dir: AppDataDirectory::from_manager(manager).map_err(Into::into),
+             active: Mutex::new(None),
+         }
+     }
+ 
+-    /// 주어진 디렉터리에 주어진 경계 구현으로 녹음한다.
++    /// 주어진 디렉터리에 주어진 경계 구현으로 녹음한다. 시간은 실제로 흐른다.
+     pub fn with_source(
+         app_data_dir: AppDataDirectory,
+         source: impl SampleSource + Send + Sync + 'static,
++    ) -> Self {
++        Self::with_clock(app_data_dir, source, MonotonicClock::new())
++    }
++
++    /// 시계까지 주어진 것으로 바꾼다. **경과 시간을 확인하는 테스트가 쓰는 자리다.**
++    pub fn with_clock(
++        app_data_dir: AppDataDirectory,
++        source: impl SampleSource + Send + Sync + 'static,
++        clock: impl Clock + 'static,
+     ) -> Self {
+         Self {
+             source: Box::new(source),
++            clock: Box::new(clock),
+             app_data_dir: Ok(app_data_dir),
+             active: Mutex::new(None),
+         }
+     }
+ 
+-    /// 고른 장치를 열고 캡처를 시작한다.
++    /// 고른 장치를 열고 녹음을 시작한다.
+     ///
+     /// 이미 녹음 중이면 시작하지 않는다 — **진행 중인 녹음을 조용히 버리지 않는다.**
+     pub fn start(&self, device_key: &str) -> Result<(), Failure> {
+@@ -252,30 +359,107 @@ impl Capture {
+         let directory = app_data_dir.ensure_recordings_dir()?;
+         let stem = capture::file_stem(unix_seconds());
+ 
+-        *active = Some(capture::start(
+-            self.source.as_ref(),
+-            device_key,
+-            &directory,
+-            &stem,
+-        )?);
++        // 장치를 먼저 열고, 열린 뒤부터 시간을 잰다 — 장치를 여는 데 걸린 시간은 녹음이 아니다.
++        let capture = capture::start(self.source.as_ref(), device_key, &directory, &stem)?;
++
++        let mut session = RecordingSession::idle();
++        if let Err(failure) = session.start(self.clock.now_ms()) {
++            // 새 session은 언제나 idle이므로 여기 오지 않는다. 그래도 열어 둔 장치를 두고
++            // 나가지는 않는다 — 열린 것을 닫는 책임은 실패해도 사라지지 않는다.
++            let _ = capture.stop();
++            return Err(failure);
++        }
++
++        *active = Some(ActiveRecording { session, capture });
+         Ok(())
+     }
+ 
+-    /// 캡처를 정지하고 파일을 확정한 뒤 보고 값을 돌려준다.
++    /// 일시정지한다. **장치도 파일도 열려 있는 채로 둔다.**
++    ///
++    /// 이 시점 이후의 샘플은 파일에 도달하지 않고, 흐르는 시간도 길이에 더해지지 않는다
++    /// (Phase 2B 요구사항 4).
++    pub fn pause(&self) -> Result<(), Failure> {
++        let now = self.clock.now_ms();
++        let mut active = self.active()?;
++        let recording = active.as_mut().ok_or_else(not_recording)?;
++
++        // 전이가 먼저다. 거절되면 파일 쪽은 건드리지 않는다 — 거절은 아무 일도 일어나지
++        // 않았다는 뜻이기 때문이다.
++        recording.session.pause(now)?;
++        recording.capture.pause()
++    }
++
++    /// 다시 녹음한다. **같은 파일에 이어 쓴다.**
++    pub fn resume(&self) -> Result<(), Failure> {
++        let now = self.clock.now_ms();
++        let mut active = self.active()?;
++        let recording = active.as_mut().ok_or_else(not_recording)?;
++
++        recording.session.resume(now)?;
++        recording.capture.resume()
++    }
++
++    /// 녹음을 끝내고 파일을 확정한 뒤, **그 파일이 정말 쓸 수 있는 녹음인지 확인한다** (R-002).
++    ///
++    /// 확정만으로는 성공이 아니다. 경로가 존재하고 · 크기가 유효 최소치를 넘고 · 포맷을 알고
++    /// 있어야 한다 ([`finalized::verify`]). 확인에 실패하면 사용자에게 보이는 실패다.
++    ///
++    /// **어떤 실패에서도 파일을 지우지 않는다** (INV-4 · R-004). 그래서 모든 실패는 그 파일이
++    /// 어디에 있는지 함께 말한다 ([`keeping_file`]) — 지우지 않는 파일은 찾을 수 있어야 한다.
+     ///
+-    /// 성공이든 실패든 **이 호출로 캡처 하나가 끝난다.** 실패한 캡처를 다시 정지할 수는 없다.
++    /// 성공이든 실패든 **이 호출로 녹음 하나가 끝난다.** 정지한 session은 남지 않으므로
++    /// 다음 녹음은 새 session으로 시작한다. 실패한 녹음을 다시 정지할 수는 없다.
++    ///
++    /// 여기까지가 파일의 일이고, 레코드를 남기는 것은 [`finish_recording`]이다.
+     pub fn stop(&self) -> Result<CaptureReportPayload, Failure> {
++        let now = self.clock.now_ms();
+         let mut active = self.active()?;
+-        let capture = active.take().ok_or_else(|| {
+-            Failure::permanent(FailureKind::InvalidInput, "녹음 중이 아니다.")
+-        })?;
++
++        // 길이를 먼저 확정한다. 전이가 거절되면 진행 중인 녹음을 그대로 둔다.
++        let summary = match active.as_mut() {
++            Some(recording) => recording.session.stop(now)?,
++            None => return Err(not_recording()),
++        };
++        let capture = match active.take() {
++            Some(recording) => recording.capture,
++            None => return Err(not_recording()),
++        };
+         drop(active);
+ 
+-        Ok(CaptureReportPayload::from(capture.stop()?))
++        // 여기서부터 실패하더라도 **이미 쓰인 파일은 남는다.** 그 자리를 잃지 않도록 먼저 적어 둔다.
++        let output_path = capture.output_path().to_path_buf();
++        let report = capture
++            .stop()
++            .map_err(|failure| keeping_file(failure, &output_path))?;
++
++        finalized::verify(&report.output_path, report.format)
++            .map_err(|failure| keeping_file(failure, &output_path))?;
++
++        Ok(CaptureReportPayload::new(report, summary))
+     }
+ 
+-    /// 진행 중인 캡처 자리를 빌린다. 이전 호출이 쥔 채 죽었다면 그 사실을 그대로 알린다.
+-    fn active(&self) -> Result<MutexGuard<'_, Option<ActiveCapture>>, Failure> {
++    /// 지금 녹음이 어떤 상태이고 얼마나 진행됐는지.
++    ///
++    /// 진행 중인 녹음이 없으면 **아직 시작하지 않은 session의 답**을 그대로 돌려준다 —
++    /// `idle`과 `0:00`이다. 여기에 특별한 빈 값을 따로 만들지 않는다.
++    pub fn status(&self) -> Result<SessionStatusPayload, Failure> {
++        let now = self.clock.now_ms();
++        let active = self.active()?;
++        let idle = RecordingSession::idle();
++        let session = match active.as_ref() {
++            Some(recording) => &recording.session,
++            None => &idle,
++        };
++
++        Ok(SessionStatusPayload::new(
++            session.state(),
++            session.elapsed_ms(now),
++            session.elapsed_label(now),
++        ))
++    }
++
++    /// 진행 중인 녹음 자리를 빌린다. 이전 호출이 쥔 채 죽었다면 그 사실을 그대로 알린다.
++    fn active(&self) -> Result<MutexGuard<'_, Option<ActiveRecording>>, Failure> {
+         self.active.lock().map_err(|_| {
+             Failure::permanent(
+                 FailureKind::AudioDevice,
+@@ -285,6 +469,100 @@ impl Capture {
+     }
+ }
+ 
++/// 녹음을 끝낸다 — **파일 확정 · 확인 · 레코드 영속화까지가 한 동작이다** (R-002).
++///
++/// ## 순서: 파일이 먼저, 레코드가 나중
++///
++/// ```text
++/// 1. 파일을 확정한다            (Recorder::stop → capture)
++/// 2. 확정된 파일을 확인한다      (Recorder::stop → finalized::verify)
++/// 3. 레코드를 저장한다          (Storage::save_capture)
++/// ```
++///
++/// 반대로 하지 않는 이유는 하나다 — **레코드는 존재가 확인된 파일만 가리켜야 한다.** 먼저
++/// 행을 쓰면 확정에 실패한 순간 "레코드는 있는데 audio가 없다"가 정상 경로에서 만들어진다.
++/// 이 순서에서는 그 상태가 정지 때문에 생기지 않는다.
++///
++/// ## 어긋난 상태와 보상 (`docs/ADR-0004-recording-session-lifecycle.md` §12)
++///
++/// 3에서 실패하면 **audio는 있는데 레코드가 없는** 상태가 남는다. 그때 하는 일은 하나다 —
++/// **파일을 그대로 두고, 그 경로를 담은 실패를 사용자에게 보낸다.** 방금 녹음한 것을
++/// "정리"라는 이름으로 지우는 보상은 하지 않는다 (INV-3 · INV-4 · R-004).
++///
++/// 반대 방향(레코드는 있는데 audio가 없다)은 이 경로가 만들지 않지만, 파일은 앱 밖에서
++/// 옮겨지거나 지워질 수 있다. 그것을 아는 수단이 [`Storage::missing_audio`]이며,
++/// 그 역시 지우거나 고치지 않고 **알리기만 한다.**
++///
++/// `title`은 사용자가 입력한 제목이다. 없거나 비어 있으면 저장 시각에서 만든다.
++pub fn finish_recording(
++    recorder: &Recorder,
++    storage: &Storage,
++    title: Option<&str>,
++) -> Result<StoppedRecordingPayload, Failure> {
++    let capture = recorder.stop()?;
++    let output_path = PathBuf::from(&capture.output_path);
++
++    let recording = storage
++        .save_capture(&capture, title)
++        .map_err(|failure| keeping_file(not_listed(failure), &output_path))?;
++
++    Ok(StoppedRecordingPayload { recording, capture })
++}
++
++/// 파일은 남았는데 레코드를 남기지 못한 실패.
++///
++/// 저장소가 말한 원인은 그대로 두고 **무슨 일이 일어났는지를 앞에 붙인다** — 사용자가 읽어야
++/// 하는 첫 문장은 "저장소 질의가 실패했다"가 아니라 "녹음은 파일로 남았지만 목록에는 없다"다.
++///
++/// `source_data_safe`를 바꾸지 않는다. 이 실패는 이미 저장된 것을 훼손하지 않았고,
++/// 방금 녹음한 파일도 확인을 마친 채 그대로 있다 (§13).
++fn not_listed(failure: Failure) -> Failure {
++    Failure {
++        message: format!("녹음은 파일로 저장됐지만 목록에 추가하지 못했다: {failure}"),
++        ..failure
++    }
++}
++
++/// 실패 하나에 **확정된 파일이 남아 있는 자리**를 덧붙인다.
++///
++/// 이 앱에는 녹음 파일을 지우는 자동 경로가 없다 (INV-4 · R-004). 그러므로 정지가 실패해도
++/// 파일은 거기 있고, **사용자가 그것을 찾을 수 있어야 실패가 유실이 되지 않는다** (INV-1).
++///
++/// 이미 경로를 담고 있는 실패는 그대로 둔다 — 같은 사실을 두 번 적지 않는다.
++fn keeping_file(failure: Failure, path: &Path) -> Failure {
++    let path = path.display().to_string();
++    if failure.message.contains(&path) {
++        return failure;
++    }
++
++    Failure {
++        message: format!("{failure} 녹음된 파일은 남아 있다: {path}"),
++        ..failure
++    }
++}
++
++/// 저장 시각에서 만드는 기본 제목.
++///
++/// 사용자가 제목을 입력하지 않아도 목록에서 서로 구분되어야 하고, 제목이 빈 레코드는 저장되지
++/// 않는다 ([`validated`]) — 이름이 없다는 이유로 방금 녹음한 것을 잃지 않게 하는 자리다.
++///
++/// 저장된 시각 텍스트(`2026-09-02T10:00:00.000Z`)의 날짜와 분까지를 그대로 쓴다. 그 값은
++/// 저장소가 만든 UTC 텍스트이며, **여기서 시간대를 계산하지 않는다** — 이 함수에는 시계도
++/// 시간대 지식도 없다. 예상과 다른 모양이 오면 지어내지 않고 받은 값을 그대로 쓴다.
++fn title_for(created_at: &str) -> String {
++    match (created_at.get(0..10), created_at.get(11..16)) {
++        (Some(date), Some(time)) => format!("녹음 {date} {time}"),
++        _ => format!("녹음 {created_at}"),
++    }
++}
++
++/// 진행 중인 녹음이 없는데 그것을 전제한 요청이 왔다.
++///
++/// 같은 요청을 다시 보내도 결과가 같으므로 재시도 가능한 실패가 아니다.
++fn not_recording() -> Failure {
++    Failure::permanent(FailureKind::InvalidInput, "녹음 중이 아니다.")
++}
++
+ /// 1970년 이후 흐른 초. 출력 파일 이름의 뿌리가 된다.
+ ///
+ /// 시계가 그보다 앞을 가리켜도 죽지 않는다 — 이름을 정하는 일이 앱을 멈추게 할 이유는 없다.
+@@ -327,9 +605,9 @@ fn validated(recording: NewRecording) -> Result<NewRecording, Failure> {
+ 
+ // --- Tauri command 표면 -------------------------------------------------------------
+ //
+-// 아래 아홉 개가 frontend가 부를 수 있는 전부다. 각 함수는 [`Storage`] · [`AudioDevices`] ·
+-// [`Capture`]의 같은 이름 동작을 그대로 부른다 — 로직을 여기에 두지 않으므로, 실제 동작은
+-// Tauri 없이 테스트할 수 있다.
++// 아래 열세 개가 frontend가 부를 수 있는 전부다. 각 함수는 [`Storage`] · [`AudioDevices`] ·
++// [`Recorder`]의 같은 이름 동작이나 [`finish_recording`]을 그대로 부른다 — 로직을 여기에 두지
++// 않으므로, 실제 동작은 Tauri 없이 테스트할 수 있다.
+ 
+ #[tauri::command]
+ pub fn list_recordings(storage: State<'_, Storage>) -> Result<Vec<RecordingPayload>, Failure> {
+@@ -378,11 +656,39 @@ pub fn list_input_devices(
+ }
+ 
+ #[tauri::command]
+-pub fn start_capture(capture: State<'_, Capture>, device_key: String) -> Result<(), Failure> {
+-    capture.start(&device_key)
++pub fn start_capture(recorder: State<'_, Recorder>, device_key: String) -> Result<(), Failure> {
++    recorder.start(&device_key)
++}
++
++#[tauri::command]
++pub fn pause_capture(recorder: State<'_, Recorder>) -> Result<(), Failure> {
++    recorder.pause()
++}
++
++#[tauri::command]
++pub fn resume_capture(recorder: State<'_, Recorder>) -> Result<(), Failure> {
++    recorder.resume()
++}
++
++/// 정지한다. **성공은 파일이 확정되고 확인되고 레코드로 저장됐다는 뜻이다** (R-002).
++#[tauri::command]
++pub fn stop_capture(
++    recorder: State<'_, Recorder>,
++    storage: State<'_, Storage>,
++    title: Option<String>,
++) -> Result<StoppedRecordingPayload, Failure> {
++    finish_recording(&recorder, &storage, title.as_deref())
++}
++
++/// 레코드는 있는데 오디오 파일이 없는 녹음을 알린다. **아무것도 지우거나 고치지 않는다.**
++#[tauri::command]
++pub fn list_missing_audio(
++    storage: State<'_, Storage>,
++) -> Result<Vec<MissingAudioPayload>, Failure> {
++    storage.missing_audio()
+ }
+ 
+ #[tauri::command]
+-pub fn stop_capture(capture: State<'_, Capture>) -> Result<CaptureReportPayload, Failure> {
+-    capture.stop()
++pub fn capture_status(recorder: State<'_, Recorder>) -> Result<SessionStatusPayload, Failure> {
++    recorder.status()
+ }
+diff --git a/src-tauri/src/commands/payload.rs b/src-tauri/src/commands/payload.rs
+index c9f0f37..3f42d92 100644
+--- a/src-tauri/src/commands/payload.rs
++++ b/src-tauri/src/commands/payload.rs
+@@ -10,7 +10,7 @@
+ 
+ use serde::{Deserialize, Serialize};
+ 
+-use crate::audio::{CaptureReport, InputDevice};
++use crate::audio::{CaptureReport, InputDevice, SessionState, SessionSummary};
+ use crate::domain::{ProcessingStatus, Recording, RecordingId, RecordingView, Settings};
+ 
+ /// 조회된 녹음 하나. 목록 화면과 상세 화면이 그대로 쓴다 (§5 A · C).
+@@ -124,17 +124,18 @@ impl From<InputDevice> for InputDevicePayload {
+     }
+ }
+ 
+-/// 정지한 캡처 하나의 보고 값 (Phase 2A spike).
++/// 정지한 녹음 하나의 보고 값.
+ ///
+-/// **Phase 2A의 성공 기준이 그대로 필드다** —
+-/// 장치 이름 · 출력 경로 · 포맷 · 파일 크기(byte).
+-/// 사람이 이 값을 보고 잠정 결정을 지지할지 반박할지 판단한다 (ADR-0003 §12).
++/// 장치 이름 · 출력 경로 · 포맷 · 파일 크기(byte)는 ADR-0003 §12가 사람에게 보여 주기로 한
++/// 네 값 그대로다. 여기에 **녹음 길이**가 더해진다 — 일시정지 구간을 뺀 값이며, 그것을 세는
++/// 곳은 [`crate::audio::RecordingSession`] 한 곳뿐이다.
+ ///
+-/// `format`은 사람이 읽는 한 문장이고, 그 문장을 이루는 값도 따로 보낸다 — 화면이 문자열을
+-/// 다시 뜯어보지 않아도 되게 하기 위해서다 ([`RecordingPayload::duration_label`]과 같은 이유).
++/// `format`과 `duration_label`은 사람이 읽는 문장이고, 그 문장을 이루는 값도 따로 보낸다 —
++/// 화면이 문자열을 다시 뜯어보거나 같은 계산을 TypeScript에 다시 만들지 않게 하기 위해서다
++/// ([`RecordingPayload::duration_label`]과 같은 이유).
+ ///
+-/// **이것은 저장된 Recording이 아니다.** 캡처 결과를 DB에 남기는 것은 Phase 2B의 일이며,
+-/// 이 값은 어떤 레코드도 만들지 않는다.
++/// **이것은 저장된 Recording이 아니다.** 저장된 레코드는 [`StoppedRecordingPayload::recording`]
++/// 쪽이며, 둘은 [`StoppedRecordingPayload`]에서 함께 온다.
+ #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+ #[serde(rename_all = "camelCase")]
+ pub struct CaptureReportPayload {
+@@ -150,10 +151,19 @@ pub struct CaptureReportPayload {
+     pub container: String,
+     /// 파일시스템에서 읽은 파일 크기(byte).
+     pub byte_size: u64,
++    /// 일시정지 구간을 뺀 녹음 길이(밀리초).
++    pub duration_ms: i64,
++    /// Rust가 만든 표시용 길이(예: `52:31`).
++    pub duration_label: String,
+ }
+ 
+-impl From<CaptureReport> for CaptureReportPayload {
+-    fn from(report: CaptureReport) -> Self {
++impl CaptureReportPayload {
++    /// 확정된 파일에 대한 사실과 session이 센 길이를 한 값으로 합친다.
++    ///
++    /// 둘을 여기서 합치는 이유는 **각자가 답할 수 없는 질문이 있기 때문이다** — 파일은
++    /// 자신이 몇 초짜리 녹음인지 모르고(일시정지 구간을 알지 못한다), session은 파일이
++    /// 실제로 얼마나 쓰였는지 모른다.
++    pub(super) fn new(report: CaptureReport, summary: SessionSummary) -> Self {
+         Self {
+             device_label: report.device_label,
+             output_path: report.output_path.display().to_string(),
+@@ -163,6 +173,89 @@ impl From<CaptureReport> for CaptureReportPayload {
+             bits_per_sample: report.format.bits_per_sample,
+             container: report.format.container().to_string(),
+             byte_size: report.byte_size,
++            duration_ms: summary.duration_ms,
++            duration_label: summary.duration_label,
++        }
++    }
++}
++
++/// 정지가 **성공했을 때** 돌아오는 값 (Phase 2B 요구사항 5 · 6 · R-002).
++///
++/// 두 가지가 함께 온다 — **저장된 레코드**와 **확정된 파일에 대한 사실**이다.
++///
++/// ```text
++/// recording  목록에 나타나는 Recording 그 자체 (Phase 1의 저장소를 지나 저장됐다)
++/// capture    그 레코드가 가리키는 파일에 대한 사실 (장치 이름 · 포맷 · 크기)
++/// ```
++///
++/// 이 값이 돌아왔다는 것은 **파일이 확정되고 확인됐으며 레코드가 저장됐다**는 뜻이다.
++/// 넷 중 하나라도 성립하지 않으면 이 값 대신 [`Failure`]가 간다 —
++/// 그때 그 실패는 확정된 파일이 어디에 남아 있는지 함께 말한다 (INV-4).
++///
++/// [`Failure`]: crate::domain::Failure
++#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
++#[serde(rename_all = "camelCase")]
++pub struct StoppedRecordingPayload {
++    /// 저장된 녹음. 목록 화면이 그대로 쓰는 값과 같은 모양이다.
++    pub recording: RecordingPayload,
++    /// 방금 확정된 파일에 대한 사실.
++    pub capture: CaptureReportPayload,
++}
++
++/// **레코드는 있는데 오디오 파일이 없는** 녹음 하나 (Phase 2B 요구사항 6).
++///
++/// 이 값은 **보고일 뿐이다.** 이런 상태를 발견해도 레코드를 지우거나 고치지 않고, 파일을
++/// 새로 만들지도 않는다 (INV-3 · INV-4). 무엇을 할지는 사용자가 정한다 — 이 앱이 대신
++/// 정리하지 않는다는 것이 정책이다
++/// (`docs/ADR-0004-recording-session-lifecycle.md`).
++#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
++#[serde(rename_all = "camelCase")]
++pub struct MissingAudioPayload {
++    pub recording_id: String,
++    pub title: String,
++    /// 레코드가 가리키고 있지만 지금 그 자리에 없는 경로.
++    pub audio_path: String,
++    pub created_at: String,
++}
++
++impl From<&RecordingPayload> for MissingAudioPayload {
++    fn from(recording: &RecordingPayload) -> Self {
++        Self {
++            recording_id: recording.id.clone(),
++            title: recording.title.clone(),
++            audio_path: recording.audio_path.clone(),
++            created_at: recording.created_at.clone(),
++        }
++    }
++}
++
++/// 지금 녹음이 어떤 상태인지 (Phase 2B 요구사항 4 · R-001).
++///
++/// 화면은 이 값을 **물어봐서** 안다. 진행 중인 session을 들고 있는 것은 backend이므로,
++/// 화면이 다시 그려지거나 사용자가 다른 화면에 다녀와도 여기서 같은 답이 나온다
++/// (`docs/ADR-0004-recording-session-lifecycle.md`).
++///
++/// **길이는 Rust가 세고 Rust가 문장까지 만든다.** `elapsed_ms`와 `elapsed_label`을 함께
++/// 보내는 이유가 그것이다 — TypeScript에 길이 계산을 만들지 않는다
++/// (`tests/screen-boundary.test.ts` · [`RecordingPayload::duration_label`]).
++#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
++#[serde(rename_all = "camelCase")]
++pub struct SessionStatusPayload {
++    /// `idle · recording · paused · stopped` 중 하나.
++    pub state: String,
++    /// 일시정지 구간을 뺀, 지금까지의 녹음 길이(밀리초).
++    pub elapsed_ms: i64,
++    /// 같은 길이를 사람이 읽는 문장으로 (예: `0:07`).
++    pub elapsed_label: String,
++}
++
++impl SessionStatusPayload {
++    /// 상태와 경과 시간 하나를 값으로 만든다.
++    pub(super) fn new(state: SessionState, elapsed_ms: i64, elapsed_label: String) -> Self {
++        Self {
++            state: state.as_str().to_string(),
++            elapsed_ms,
++            elapsed_label,
+         }
+     }
+ }
+diff --git a/src-tauri/src/lib.rs b/src-tauri/src/lib.rs
+index e62b8a6..301680f 100644
+--- a/src-tauri/src/lib.rs
++++ b/src-tauri/src/lib.rs
+@@ -6,7 +6,7 @@ pub mod platform;
+ 
+ use tauri::Manager;
+ 
+-use commands::{AudioDevices, Capture, Storage};
++use commands::{AudioDevices, Recorder, Storage};
+ 
+ #[cfg_attr(mobile, tauri::mobile_entry_point)]
+ pub fn run() {
+@@ -23,10 +23,14 @@ pub fn run() {
+             // 앱 시작이 마이크나 마이크 권한에 의존하지 않는다 (ADR-0003).
+             app.manage(AudioDevices::system());
+ 
+-            // 캡처도 여기서 장치를 열지 않는다. 여는 것은 사용자가 시작할 때다.
+-            // 출력 파일이 놓일 자리를 얻지 못하면 그 실패를 값으로 들고 있다가
+-            // 녹음을 시작하려 할 때 알린다 — 앱 시작을 막지 않는다 (§13).
+-            app.manage(Capture::open_for(app));
++            // 녹음 session의 소유자는 여기다 — **화면이 아니다.** 화면이 다시 그려지거나
++            // 사용자가 다른 화면에 다녀와도 진행 중인 녹음은 이 값 안에 그대로 있다
++            // (R-001 · docs/ADR-0004-recording-session-lifecycle.md).
++            //
++            // 장치는 여기서 열지 않는다. 여는 것은 사용자가 시작할 때다. 출력 파일이 놓일
++            // 자리를 얻지 못하면 그 실패를 값으로 들고 있다가 녹음을 시작하려 할 때
++            // 알린다 — 앱 시작을 막지 않는다 (§13).
++            app.manage(Recorder::open_for(app));
+             Ok(())
+         })
+         .invoke_handler(tauri::generate_handler![
+@@ -39,7 +43,12 @@ pub fn run() {
+             commands::update_settings,
+             commands::list_input_devices,
+             commands::start_capture,
++            commands::pause_capture,
++            commands::resume_capture,
+             commands::stop_capture,
++            commands::capture_status,
++            // 레코드와 파일이 어긋난 상태를 알리는 자리다 — 고치거나 지우지 않는다 (INV-4).
++            commands::list_missing_audio,
+         ])
+         .run(tauri::generate_context!());
+ 
+diff --git a/src-tauri/src/platform/mod.rs b/src-tauri/src/platform/mod.rs
+index ba7e9e2..9293c57 100644
+--- a/src-tauri/src/platform/mod.rs
++++ b/src-tauri/src/platform/mod.rs
+@@ -1,6 +1,10 @@
+ //! 플랫폼 지식이 갇혀 있는 경계 (PRODUCT-SPEC §3.1 · INV-10).
+ //!
+ //! OS별 경로 규약이나 `cfg(target_os)` 분기는 이 모듈 안에만 존재한다.
+-//! 나머지 코드는 여기서 노출되는 개념(예: 앱 데이터 디렉터리)만 안다.
++//! 나머지 코드는 여기서 노출되는 개념(예: 앱 데이터 디렉터리 · 흐르는 시간)만 안다.
++//!
++//! 여기 있는 것은 전부 **바깥 세계를 읽는 자리**다. 그래서 그 바깥을 값으로 바꿔 넣으면
++//! 나머지 코드가 하드웨어도 시계도 실제 디렉터리도 없이 검증된다 (§18).
+ 
+ pub mod app_data_dir;
++pub mod clock;
+diff --git a/src-tauri/tests/capture.rs b/src-tauri/tests/capture.rs
+index 828c810..f1ed1ed 100644
+--- a/src-tauri/tests/capture.rs
++++ b/src-tauri/tests/capture.rs
+@@ -14,11 +14,10 @@
+ 
+ use std::path::{Path, PathBuf};
+ use std::sync::atomic::{AtomicUsize, Ordering};
+-use std::sync::mpsc::SyncSender;
+ use std::thread;
+ 
+-use molt_note_lib::audio::{CaptureFormat, OpenCapture, SampleSource};
+-use molt_note_lib::commands::Capture;
++use molt_note_lib::audio::{CaptureFormat, OpenCapture, SampleSink, SampleSource};
++use molt_note_lib::commands::Recorder;
+ use molt_note_lib::domain::{Failure, FailureKind};
+ use molt_note_lib::platform::app_data_dir::AppDataDirectory;
+ 
+@@ -89,7 +88,7 @@ impl FakeMicrophone {
+ }
+ 
+ impl SampleSource for FakeMicrophone {
+-    fn open(&self, _device_key: &str, samples: SyncSender<Vec<i16>>) -> Result<OpenCapture, Failure> {
++    fn open(&self, _device_key: &str, samples: SampleSink) -> Result<OpenCapture, Failure> {
+         let chunks = self.chunks.clone();
+         let sending = thread::spawn(move || {
+             for chunk in chunks {
+@@ -118,7 +117,7 @@ impl SampleSource for FakeMicrophone {
+ struct UnavailableMicrophone;
+ 
+ impl SampleSource for UnavailableMicrophone {
+-    fn open(&self, _device_key: &str, _samples: SyncSender<Vec<i16>>) -> Result<OpenCapture, Failure> {
++    fn open(&self, _device_key: &str, _samples: SampleSink) -> Result<OpenCapture, Failure> {
+         Err(Failure::retryable(
+             FailureKind::AudioDevice,
+             "입력 장치를 열지 못했다. 다른 앱이 쓰고 있거나 마이크 권한이 없을 수 있다.",
+@@ -148,7 +147,7 @@ fn a_capture_that_stops_reports_the_device_the_path_the_format_and_the_size() {
+     let microphone = FakeMicrophone::speaking();
+     let expected_samples = microphone.sample_count();
+     let app_data_dir = temp.app_data_dir();
+-    let capture = Capture::with_source(app_data_dir.clone(), microphone);
++    let capture = Recorder::with_source(app_data_dir.clone(), microphone);
+ 
+     capture.start(DEVICE_KEY).expect("녹음을 시작할 수 있어야 한다");
+     let report = capture.stop().expect("녹음을 정지할 수 있어야 한다");
+@@ -186,7 +185,7 @@ fn the_output_file_lives_under_the_app_data_directory() {
+     // 경로는 AppDataDirectory에서 파생된다 — 캡처가 자기 마음대로 자리를 정하지 않는다.
+     let temp = TempRoot::new("app-data");
+     let app_data_dir = temp.app_data_dir();
+-    let capture = Capture::with_source(app_data_dir.clone(), FakeMicrophone::speaking());
++    let capture = Recorder::with_source(app_data_dir.clone(), FakeMicrophone::speaking());
+ 
+     capture.start(DEVICE_KEY).expect("녹음을 시작할 수 있어야 한다");
+     let report = capture.stop().expect("녹음을 정지할 수 있어야 한다");
+@@ -209,7 +208,7 @@ fn a_second_capture_does_not_overwrite_the_first() {
+     // 두 녹음이 같은 초에 끝나도 앞선 파일이 사라지지 않는다 (INV-1).
+     let temp = TempRoot::new("no-overwrite");
+     let app_data_dir = temp.app_data_dir();
+-    let capture = Capture::with_source(app_data_dir.clone(), FakeMicrophone::speaking());
++    let capture = Recorder::with_source(app_data_dir.clone(), FakeMicrophone::speaking());
+ 
+     capture.start(DEVICE_KEY).expect("첫 녹음 시작");
+     let first = capture.stop().expect("첫 녹음 정지");
+@@ -227,7 +226,7 @@ fn a_second_capture_does_not_overwrite_the_first() {
+ fn a_device_that_cannot_be_opened_reaches_the_user_as_the_shared_failure_contract() {
+     let temp = TempRoot::new("unavailable");
+     let app_data_dir = temp.app_data_dir();
+-    let capture = Capture::with_source(app_data_dir.clone(), UnavailableMicrophone);
++    let capture = Recorder::with_source(app_data_dir.clone(), UnavailableMicrophone);
+ 
+     let failure = capture.start(DEVICE_KEY).expect_err("장치를 열지 못한 것은 실패다");
+ 
+@@ -246,7 +245,7 @@ fn a_device_that_cannot_be_opened_reaches_the_user_as_the_shared_failure_contrac
+ #[test]
+ fn a_failure_to_open_serializes_into_the_shape_the_frontend_reads() {
+     let temp = TempRoot::new("serialized");
+-    let capture = Capture::with_source(temp.app_data_dir(), UnavailableMicrophone);
++    let capture = Recorder::with_source(temp.app_data_dir(), UnavailableMicrophone);
+ 
+     let failure = capture.start(DEVICE_KEY).expect_err("실패해야 한다");
+     let json = serde_json::to_value(&failure).expect("직렬화할 수 있어야 한다");
+@@ -262,7 +261,7 @@ fn a_capture_that_was_cut_short_says_so_and_keeps_what_was_recorded() {
+     // 끊긴 것을 성공으로 보고하지 않는다. 그렇다고 이미 녹음된 것을 숨기지도 않는다.
+     let temp = TempRoot::new("cut-short");
+     let app_data_dir = temp.app_data_dir();
+-    let capture = Capture::with_source(
++    let capture = Recorder::with_source(
+         app_data_dir.clone(),
+         FakeMicrophone::cut_short(
+             Failure::retryable(FailureKind::AudioDevice, "녹음이 중간에 끊겼다.")
+@@ -292,7 +291,7 @@ fn a_capture_that_was_cut_short_says_so_and_keeps_what_was_recorded() {
+ #[test]
+ fn stopping_without_starting_is_a_failure_not_a_panic() {
+     let temp = TempRoot::new("not-recording");
+-    let capture = Capture::with_source(temp.app_data_dir(), FakeMicrophone::speaking());
++    let capture = Recorder::with_source(temp.app_data_dir(), FakeMicrophone::speaking());
+ 
+     let failure = capture.stop().expect_err("녹음 중이 아니면 정지할 것이 없다");
+ 
+@@ -305,7 +304,7 @@ fn stopping_without_starting_is_a_failure_not_a_panic() {
+ fn starting_twice_does_not_throw_away_the_recording_already_running() {
+     let temp = TempRoot::new("already-recording");
+     let app_data_dir = temp.app_data_dir();
+-    let capture = Capture::with_source(app_data_dir.clone(), FakeMicrophone::speaking());
++    let capture = Recorder::with_source(app_data_dir.clone(), FakeMicrophone::speaking());
+ 
+     capture.start(DEVICE_KEY).expect("첫 녹음 시작");
+     let failure = capture.start(DEVICE_KEY).expect_err("이미 녹음 중이다");
+@@ -328,7 +327,7 @@ fn a_place_that_cannot_hold_recordings_becomes_a_failure_the_user_can_read() {
+     std::fs::write(app_data_dir.recordings_dir(), "디렉터리가 아니다")
+         .expect("사전 조건: 자리를 막는다");
+ 
+-    let capture = Capture::with_source(app_data_dir, FakeMicrophone::speaking());
++    let capture = Recorder::with_source(app_data_dir, FakeMicrophone::speaking());
+     let failure = capture.start(DEVICE_KEY).expect_err("파일 위에 녹음을 둘 수는 없다");
+ 
+     assert_eq!(failure.kind, FailureKind::Storage, "장치 실패와 구분된다");
+diff --git a/src/ipc/commands.ts b/src/ipc/commands.ts
+index 5bd864f..cc7c271 100644
+--- a/src/ipc/commands.ts
++++ b/src/ipc/commands.ts
+@@ -1,7 +1,7 @@
+ /**
+  * 프론트엔드가 부를 수 있는 동작의 전부.
+  *
+- * `src-tauri/src/lib.rs`가 등록한 아홉 개 command와 1:1이며, 그 밖의 경로는 없다 —
++ * `src-tauri/src/lib.rs`가 등록한 열두 개 command와 1:1이며, 그 밖의 경로는 없다 —
+  * **임의의 질의를 보낼 수단이 없다.** 저장소를 아는 코드는 Rust 안에만 있다
+  * (`docs/ADR-0001-local-persistence.md` · PRODUCT-SPEC §12).
+  *
+@@ -10,16 +10,28 @@
+  */
+ import { invoke } from '@tauri-apps/api/core';
+ import { toFailure } from './failure';
+-import type { CaptureReport, InputDevice, NewRecording, Recording, Settings } from './types';
++import type {
++  InputDevice,
++  MissingAudio,
++  NewRecording,
++  Recording,
++  SessionStatus,
++  Settings,
++  StoppedRecording,
++} from './types';
+ 
+ export type { Failure, FailureKind } from './failure';
+ export type {
+   CaptureReport,
+   InputDevice,
++  MissingAudio,
+   NewRecording,
+   ProcessingStatus,
+   Recording,
++  SessionState,
++  SessionStatus,
+   Settings,
++  StoppedRecording,
+ } from './types';
+ 
+ /** command 하나를 부른다. 거절된 값은 언제나 {@link Failure}로 바꿔 던진다. */
+@@ -72,23 +84,70 @@ export function listInputDevices(): Promise<InputDevice[]> {
+ }
+ 
+ /**
+- * 고른 장치를 열고 캡처를 시작한다 (Phase 2A spike).
++ * 고른 장치를 열고 녹음을 시작한다.
+  *
+  * `deviceKey`는 {@link listInputDevices}가 준 `key`다. 이미 녹음 중이면 실패한다 —
+  * 진행 중인 녹음이 조용히 버려지지 않는다.
+  *
+- * 시작은 아무것도 보고하지 않는다. 결과는 {@link stopCapture}가 돌려준다.
++ * **진행 중인 session을 소유하는 것은 backend다.** 이 함수는 핸들을 돌려주지 않으며,
++ * 화면이 사라져도 녹음은 계속된다 (R-001 · docs/ADR-0004-recording-session-lifecycle.md).
++ * 지금 상태는 {@link captureStatus}로 물어보고, 결과는 {@link stopCapture}가 돌려준다.
+  */
+ export function startCapture(deviceKey: string): Promise<void> {
+   return call<void>('start_capture', { deviceKey });
+ }
+ 
+ /**
+- * 캡처를 정지하고 파일을 확정한 뒤 결과를 받는다 (Phase 2A spike).
++ * 녹음을 일시정지한다.
++ *
++ * 장치도 파일도 열려 있는 채로 남는다 — 이 시점 이후의 소리는 파일에 들어가지 않고,
++ * 흐르는 시간도 녹음 길이에 더해지지 않는다. 녹음 중이 아니면 실패한다.
++ */
++export function pauseCapture(): Promise<void> {
++  return call<void>('pause_capture');
++}
++
++/**
++ * 일시정지한 녹음을 다시 시작한다. **같은 파일에 이어 쓴다.**
++ *
++ * 일시정지 상태가 아니면 실패한다.
++ */
++export function resumeCapture(): Promise<void> {
++  return call<void>('resume_capture');
++}
++
++/**
++ * 녹음을 정지한다. **성공은 파일이 확정된 것을 뜻한다** (PRODUCT-SPEC §6의 R-002).
++ *
++ * 이 함수가 값을 돌려줬다면 네 가지가 모두 성립한 것이다 — 파일이 존재하고, 크기가 유효
++ * 최소치를 넘고, 포맷을 알고 있고, Recording 레코드가 저장됐다. 그러지 못하면 실패이며,
++ * **그 실패는 확정된 파일이 어디 남아 있는지 함께 말한다** — 어떤 실패 경로도 이미 녹음된
++ * audio를 지우지 않는다 (INV-3 · INV-4 · docs/ADR-0004-recording-session-lifecycle.md).
++ *
++ * `title`은 사용자가 입력한 제목이다. 비어 있거나 없으면 Rust가 저장 시각에서 만든다 —
++ * 이름이 없다는 이유로 방금 녹음한 것이 유실되지 않게 한다.
++ */
++export function stopCapture(title?: string | null): Promise<StoppedRecording> {
++  return call<StoppedRecording>('stop_capture', { title: title ?? null });
++}
++
++/**
++ * **레코드는 있는데 오디오 파일이 없는** 녹음을 읽는다. 하나도 없으면 빈 배열이다.
++ *
++ * 정지 경로는 이 상태를 만들지 않는다 — 레코드는 파일이 확인된 뒤에만 저장된다. 이 목록은
++ * 파일이 앱 밖에서 옮겨지거나 지워졌을 때를 위한 **감지 수단**이며, 부른다고 해서 레코드가
++ * 지워지거나 고쳐지지 않는다.
++ */
++export function listMissingAudio(): Promise<MissingAudio[]> {
++  return call<MissingAudio[]>('list_missing_audio');
++}
++
++/**
++ * 지금 녹음이 어떤 상태이고 얼마나 진행됐는지 물어본다.
+  *
+- * 녹음 중이 아니면 실패한다. 이 호출은 어떤 Recording 레코드도 만들지 않는다 —
+- * 영속화는 Phase 2B의 일이다.
++ * 진행 중인 녹음이 없으면 `idle`과 `0:00`이 온다 — 오류가 아니다. 경과 시간 문자열은
++ * Rust가 만들어 보낸다. **화면이 길이를 계산하지 않는다.**
+  */
+-export function stopCapture(): Promise<CaptureReport> {
+-  return call<CaptureReport>('stop_capture');
++export function captureStatus(): Promise<SessionStatus> {
++  return call<SessionStatus>('capture_status');
+ }
+diff --git a/src/ipc/types.ts b/src/ipc/types.ts
+index 6cd50e8..c24bcb5 100644
+--- a/src/ipc/types.ts
++++ b/src/ipc/types.ts
+@@ -56,13 +56,14 @@ export interface InputDevice {
+ }
+ 
+ /**
+- * 정지한 캡처 하나의 보고 값 (Phase 2A spike · docs/ADR-0003-recording-engine.md §12).
++ * 정지한 녹음 하나의 보고 값 (docs/ADR-0003-recording-engine.md §12).
+  *
+- * Phase 2A의 성공 기준이 그대로 필드다 — 장치 이름 · 출력 경로 · 포맷 · 파일 크기(byte).
+- * `format`은 그대로 보여줄 수 있는 한 문장이고, 그 문장을 이루는 값도 따로 온다.
++ * 장치 이름 · 출력 경로 · 포맷 · 파일 크기(byte)에 **녹음 길이**가 더해진다.
++ * `format`과 `durationLabel`은 그대로 보여줄 수 있는 문장이고, 그 문장을 이루는 값도 따로
++ * 온다 — 화면이 문자열을 다시 뜯어보거나 길이를 다시 계산하지 않게 하기 위해서다.
+  *
+- * **저장된 {@link Recording}이 아니다.** 이 값은 어떤 레코드도 만들지 않는다 —
+- * 캡처 결과를 DB에 남기는 것은 Phase 2B의 일이다.
++ * **저장된 {@link Recording}이 아니다.** 저장된 레코드는 {@link StoppedRecording}의
++ * `recording` 쪽이며, 둘은 정지 한 번에 함께 온다.
+  */
+ export interface CaptureReport {
+   /** 실제로 열린 장치의 이름. */
+@@ -76,6 +77,68 @@ export interface CaptureReport {
+   readonly container: string;
+   /** 파일시스템에서 읽은 파일 크기(byte). */
+   readonly byteSize: number;
++  /** 일시정지 구간을 뺀 녹음 길이(밀리초). */
++  readonly durationMs: number;
++  /** Rust가 만든 표시용 길이(예: `52:31`). 화면은 이 값을 그대로 쓴다. */
++  readonly durationLabel: string;
++}
++
++/**
++ * 정지가 **성공했을 때** 오는 값 (PRODUCT-SPEC §6의 R-002).
++ *
++ * 이 값이 왔다는 것은 네 가지가 모두 성립했다는 뜻이다 — 파일이 존재하고, 크기가 유효
++ * 최소치를 넘고, 포맷을 알고 있고, Recording 레코드가 저장됐다. 하나라도 성립하지 않으면
++ * 이 값 대신 {@link Failure}가 오며, **그 실패는 확정된 파일이 어디 남아 있는지 말한다** —
++ * 어떤 실패도 이미 녹음된 audio를 지우지 않기 때문이다 (INV-3 · INV-4).
++ */
++export interface StoppedRecording {
++  /** 저장된 녹음. 목록 화면이 쓰는 값과 같은 모양이다. */
++  readonly recording: Recording;
++  /** 방금 확정된 파일에 대한 사실. */
++  readonly capture: CaptureReport;
++}
++
++/**
++ * **레코드는 있는데 오디오 파일이 없는** 녹음 하나.
++ *
++ * 정지 경로는 이 상태를 만들지 않는다 — 레코드는 파일이 확인된 뒤에만 저장된다. 그래도
++ * 파일은 앱 밖에서 옮겨지거나 지워질 수 있으므로 그것을 아는 수단이 있다.
++ *
++ * **보고일 뿐이다.** 이 상태가 레코드를 지우거나 파일을 새로 만들지 않는다
++ * (docs/ADR-0004-recording-session-lifecycle.md).
++ */
++export interface MissingAudio {
++  readonly recordingId: string;
++  readonly title: string;
++  /** 레코드가 가리키고 있지만 지금 그 자리에 없는 경로. */
++  readonly audioPath: string;
++  readonly createdAt: string;
++}
++
++/**
++ * 녹음 session이 있을 수 있는 상태.
++ *
++ * `src-tauri/src/audio/session.rs`의 네 상태와 1:1이다. 정지한 session은 backend에 남지
++ * 않고 다음 녹음이 새 session으로 시작하므로, 실제로 화면에 도달하는 것은 앞의 셋이다.
++ */
++export type SessionState = 'idle' | 'recording' | 'paused' | 'stopped';
++
++/**
++ * 지금 녹음이 어떤 상태인지 (PRODUCT-SPEC §6의 R-001).
++ *
++ * **진행 중인 session을 들고 있는 것은 backend다.** 화면은 그것을 소유하지 않고 물어본다 —
++ * 그래서 화면이 다시 그려지거나 사용자가 다른 화면에 다녀와도 같은 답이 온다
++ * (docs/ADR-0004-recording-session-lifecycle.md).
++ *
++ * 길이는 밀리초와 문장이 함께 온다. 초를 `0:07`로 바꾸는 규칙은 Rust 한 곳에만 있다
++ * (`tests/screen-boundary.test.ts`).
++ */
++export interface SessionStatus {
++  readonly state: SessionState;
++  /** 일시정지 구간을 뺀, 지금까지의 녹음 길이(밀리초). */
++  readonly elapsedMs: number;
++  /** 같은 길이를 사람이 읽는 문장으로 (예: `0:07`). */
++  readonly elapsedLabel: string;
+ }
+ 
+ /**
+diff --git a/src/screens/RecordingScreen.tsx b/src/screens/RecordingScreen.tsx
+index b24c09e..60c7e41 100644
+--- a/src/screens/RecordingScreen.tsx
++++ b/src/screens/RecordingScreen.tsx
+@@ -21,7 +21,7 @@ import {
+  * 실제 기기에서 확인한다 (docs/ADR-0003-recording-engine.md §12). 그 확인을 하려면 사람이
+  * 앱에서 장치를 고르고 시작·정지하고 결과를 볼 수 있어야 한다. 이 패널이 그 일만 한다.
+  *
+- * **최종 Recording 화면이 아니다.** 경과 시간 · pause/resume · 재생 · 레코드 저장은 여기에
++ * **최종 Recording 화면이 아니다.** 경과 시간 · pause/resume · 재생 · 제목 입력은 여기에
+  * 없고, 임시라는 사실이 화면 맨 위에 그대로 적혀 있다 — Phase 2B가 이 자리를 대체한다.
+  * 그래서 §19가 요구하는 최종 UX(가장 크고 명확한 상태·경과 시간)를 여기서 흉내내지 않는다.
+  *
+@@ -74,8 +74,10 @@ export function RecordingScreen() {
+   };
+ 
+   const stop = () => {
++    // 정지가 성공하면 레코드도 이미 저장돼 있다 (R-002). 이 임시 화면은 그 사실을 그리지
++    // 않고 파일에 대한 사실만 보여준다 — 저장된 녹음을 보여주는 것은 Recordings 화면이다.
+     stopCapture().then(
+-      (report) => setView((state) => finishedCapture(state, report)),
++      (stopped) => setView((state) => finishedCapture(state, stopped.capture)),
+       (error: unknown) => setView((state) => failedCapture(state, error)),
+     );
+   };
+diff --git a/src/screens/captureSpikeView.test.ts b/src/screens/captureSpikeView.test.ts
+index 3f1bfc3..8537a0f 100644
+--- a/src/screens/captureSpikeView.test.ts
++++ b/src/screens/captureSpikeView.test.ts
+@@ -34,6 +34,10 @@ const REPORT: CaptureReport = {
+   bitsPerSample: 16,
+   container: 'WAV',
+   byteSize: 1_536_044,
++  // 길이는 Rust가 세고 Rust가 문장까지 만든다 — 화면은 그것을 다시 계산하지 않는다
++  // (docs/ADR-0004-recording-session-lifecycle.md §4).
++  durationMs: 16_000,
++  durationLabel: '0:16',
+ };
+ 
+ const deviceFailure: Failure = {
+diff --git a/tests/ipc-boundary.test.ts b/tests/ipc-boundary.test.ts
+index 25232c2..8b1f101 100644
+--- a/tests/ipc-boundary.test.ts
++++ b/tests/ipc-boundary.test.ts
+@@ -5,7 +5,7 @@
+ //
+ // 세 가지를 본다:
+ //   1. src/ 아래에 SQL이나 임의 질의 경로가 없다 — 저장소를 아는 것은 Rust뿐이다.
+-//   2. 등록된 command 목록과 frontend가 부르는 목록이 정확히 같고, Phase 1 범위를 넘지 않는다.
++//   2. 등록된 command 목록과 frontend가 부르는 목록이 정확히 같고, 지금 범위를 넘지 않는다.
+ //   3. Rust의 실패 종류가 frontend 타입에 전부 있다 — 실패가 조용히 어긋나지 않는다.
+ import { readFileSync, readdirSync, statSync } from 'node:fs';
+ import { fileURLToPath } from 'node:url';
+@@ -34,9 +34,11 @@ const rustFailureSource = readText('../src-tauri/src/domain/failure.rs');
+ /**
+  * 지금까지 노출하기로 한 command 전부.
+  *
+- * 앞의 여섯은 Phase 1(recording CRUD · settings)이고, 나머지 셋은 Phase 2A가 engine 검증을
+- * 위해 더한 spike 표면이다 — **입력 장치 열거**와 **캡처 시작 / 정지 한 쌍**
+- * (docs/ADR-0003-recording-engine.md §12).
++ * 앞의 여섯은 Phase 1(recording CRUD · settings)이고, 나머지는 녹음 표면이다 —
++ * **입력 장치 열거**와 **녹음 session**(시작 · 일시정지 · 재개 · 정지 · 상태 조회),
++ * 그리고 **레코드와 파일이 어긋난 상태의 감지**(`list_missing_audio`)다.
++ * 진행 중인 session을 소유하는 것은 backend이며, 화면은 이 command로만 그것을 다룬다
++ * (R-001 · docs/ADR-0004-recording-session-lifecycle.md).
+  *
+  * 이 목록에 없는 이름이 등록되면 그것은 Phase 범위가 넘쳤다는 뜻이다 — 그래서 이 검사는
+  * 부분집합이 아니라 **정확히 같은 집합**을 요구한다.
+@@ -50,7 +52,11 @@ const REGISTERED_COMMANDS = [
+   'update_settings',
+   'list_input_devices',
+   'start_capture',
++  'pause_capture',
++  'resume_capture',
+   'stop_capture',
++  'capture_status',
++  'list_missing_audio',
+ ];
+ 
+ /** lib.rs의 generate_handler![...]에 등록된 command 이름. */
+@@ -95,15 +101,15 @@ describe('command 표면', () => {
+   });
+ 
+   it('아직 만들지 않은 기능의 command가 등록되어 있지 않다', () => {
+-    // Phase 2A가 만드는 것은 **start / stop 한 쌍의 spike 캡처**까지다.
+-    // pause/resume · 재생 · Recording 영속화는 Phase 2B이고, 전사 · AI · Notion은
+-    // 각각 Phase 3 · 4 · 5다. 아래 정규식이 그 선을 지킨다 — `*_recording`은 Recording
+-    // 레코드를 만드는 영속화 표면의 이름이므로 여전히 막혀 있다.
++    // 녹음 표면은 **capture 계열 네 동작과 상태 조회**까지다. 재생은 아직 없고,
++    // 전사 · AI · Notion은 각각 Phase 3 · 4 · 5다. 아래 정규식이 그 선을 지킨다 —
++    // `*_recording`은 Recording 레코드를 만드는 영속화 표면의 이름이므로,
++    // 녹음 동작이 그 이름으로 새로 생기는 것은 여전히 막는다.
+     const outOfScope =
+-      /(start|stop|pause|resume)_recording|(pause|resume)_capture|play|transcri|whisper|\bai_|notion|ollama|export/i;
++      /(start|stop|pause|resume)_recording|play|transcri|whisper|\bai_|notion|ollama|export/i;
+ 
+     for (const command of registeredCommands()) {
+-      expect(command, `${command}는 Phase 1의 command가 아니다`).not.toMatch(outOfScope);
++      expect(command, `${command}는 아직 만들지 않은 기능의 command다`).not.toMatch(outOfScope);
+     }
+   });
+ 

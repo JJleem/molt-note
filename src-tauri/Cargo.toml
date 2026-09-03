@@ -18,7 +18,11 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+# `protocol-asset`는 저장된 녹음을 webview가 재생할 수 있게 하는 통로다 (Phase 2B 요구사항 7).
+# 이 feature가 켜져야 `asset:` 프로토콜과 `Manager::asset_protocol_scope()`가 존재한다.
+# **켠다고 파일이 열리는 것은 아니다** — 실제로 읽을 수 있는 자리는 scope가 정하며,
+# 이 앱은 녹음 디렉터리 하나만 허용한다 (`crate::run` · PRODUCT-SPEC §12 · INV-6).
+tauri = { version = "2", features = ["protocol-asset"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # 로컬 영속 저장소. persistence ownership을 Rust 경계 안에 둔다 (PRODUCT-SPEC §14.7 · docs/ADR-0001-local-persistence.md).

@@ -87,6 +87,10 @@ fn defaults_are_returned_when_nothing_has_been_saved() {
         !loaded.automatic_processing,
         "automatic 처리의 기본값은 OFF다 — 켜는 것은 사용자의 명시적 선택이다"
     );
+    assert_eq!(
+        loaded.default_microphone, None,
+        "default microphone의 기본값은 '아직 고르지 않음'이다 — 첫 장치를 대신 골라 두지 않는다"
+    );
     close(connection);
 }
 
@@ -113,6 +117,7 @@ fn saved_values_survive_closing_and_reopening_the_database() {
     let saved = Settings {
         recordings_directory: Some("/Users/tester/Molt Note/Recordings".to_string()),
         automatic_processing: true,
+        default_microphone: Some("0:Studio Mic".to_string()),
     };
 
     let first = open(&dir);
@@ -132,8 +137,116 @@ fn saved_values_survive_closing_and_reopening_the_database() {
         loaded.automatic_processing,
         "automatic 토글이 재시작 후에도 켜져 있어야 한다"
     );
+    assert_eq!(
+        loaded.default_microphone,
+        Some("0:Studio Mic".to_string()),
+        "고른 default microphone이 재시작 후에도 그대로여야 한다"
+    );
     assert_eq!(loaded, saved, "저장한 설정과 읽은 설정이 같아야 한다");
     close(second);
+}
+
+#[test]
+fn a_default_microphone_that_is_no_longer_plugged_in_is_still_the_saved_choice() {
+    // 저장소는 장치를 알지 않는다. 장치를 뽑아 둔 채 앱을 껐다 켜도 **저장된 선택은 그대로**이며,
+    // 읽는 김에 지우거나 다른 값으로 바꾸지 않는다. 지금 그 장치가 있는지를 말하는 것은
+    // 목록을 아는 쪽의 일이다 (`src/screens/defaultMicrophone.ts`).
+    let dir = TempDir::new("missing-microphone");
+
+    let first = open(&dir);
+    settings::save(
+        &first,
+        &Settings {
+            recordings_directory: None,
+            automatic_processing: false,
+            default_microphone: Some("0:USB Microphone".to_string()),
+        },
+    )
+    .expect("설정을 저장할 수 있어야 한다");
+    close(first);
+
+    let second = open(&dir);
+    let loaded = settings::load(&second).expect("다시 열어도 설정을 읽을 수 있어야 한다");
+
+    assert_eq!(
+        loaded.default_microphone,
+        Some("0:USB Microphone".to_string()),
+        "장치가 없다는 이유로 저장된 선택이 사라지거나 바뀌면 안 된다"
+    );
+    close(second);
+}
+
+#[test]
+fn clearing_the_default_microphone_is_remembered_as_not_chosen() {
+    // '고르지 않음'으로 되돌리는 것도 사용자의 선택이다. 이전 값이 남아 부활하면 안 된다.
+    let dir = TempDir::new("clear-microphone");
+
+    let first = open(&dir);
+    settings::save(
+        &first,
+        &Settings {
+            recordings_directory: None,
+            automatic_processing: false,
+            default_microphone: Some("0:Studio Mic".to_string()),
+        },
+    )
+    .expect("먼저 고른 값을 저장할 수 있어야 한다");
+    settings::save(&first, &Settings::DEFAULT).expect("다시 비운 값을 저장할 수 있어야 한다");
+    close(first);
+
+    let second = open(&dir);
+    let loaded = settings::load(&second).expect("다시 열어도 설정을 읽을 수 있어야 한다");
+
+    assert_eq!(loaded.default_microphone, None);
+    assert_eq!(rows(&second), 1, "설정은 여전히 한 행이다");
+    close(second);
+}
+
+#[test]
+fn a_database_written_before_the_default_microphone_existed_keeps_its_values() {
+    // version 3까지만 적용된 DB에 값이 이미 있는 상황이다. 새 migration이 그 행을 지우거나
+    // 다시 만들지 않고, 없던 열은 '아직 고르지 않음'으로 시작한다.
+    let dir = TempDir::new("older-schema");
+
+    let older = Connection::open(dir.database_path()).expect("빈 DB를 만들 수 있어야 한다");
+    older
+        .execute_batch(
+            "CREATE TABLE schema_migrations (
+                 version    INTEGER PRIMARY KEY,
+                 name       TEXT NOT NULL,
+                 applied_at TEXT NOT NULL
+             );
+             INSERT INTO schema_migrations (version, name, applied_at)
+             VALUES (3, 'create_settings', datetime('now'));
+             CREATE TABLE settings (
+                 id                   INTEGER PRIMARY KEY CHECK (id = 1),
+                 recordings_directory TEXT,
+                 automatic_processing INTEGER NOT NULL
+                     CHECK (automatic_processing IN (0, 1))
+             );
+             INSERT INTO settings (id, recordings_directory, automatic_processing)
+             VALUES (1, '/tmp/older-schema', 1);
+             PRAGMA user_version = 3;",
+        )
+        .expect("사전 조건: default microphone이 없던 스키마를 만든다");
+    close(older);
+
+    // 여기서 새 migration이 적용된다.
+    let upgraded = open(&dir);
+    let loaded = settings::load(&upgraded).expect("올린 뒤에도 설정을 읽을 수 있어야 한다");
+
+    assert_eq!(
+        loaded.recordings_directory,
+        Some("/tmp/older-schema".to_string()),
+        "이미 저장돼 있던 값이 그대로여야 한다"
+    );
+    assert!(loaded.automatic_processing, "토글도 그대로여야 한다");
+    assert_eq!(
+        loaded.default_microphone, None,
+        "새로 생긴 열은 '아직 고르지 않음'으로 시작한다"
+    );
+    assert_eq!(rows(&upgraded), 1, "행이 늘거나 다시 만들어지지 않았다");
+    close(upgraded);
 }
 
 #[test]
@@ -146,6 +259,7 @@ fn a_toggle_turned_off_is_remembered_and_not_mistaken_for_an_unsaved_value() {
         &Settings {
             recordings_directory: Some("/tmp/molt-note-recordings".to_string()),
             automatic_processing: true,
+            default_microphone: None,
         },
     )
     .expect("먼저 켠 상태를 저장할 수 있어야 한다");
@@ -154,6 +268,7 @@ fn a_toggle_turned_off_is_remembered_and_not_mistaken_for_an_unsaved_value() {
         &Settings {
             recordings_directory: Some("/tmp/molt-note-recordings".to_string()),
             automatic_processing: false,
+            default_microphone: None,
         },
     )
     .expect("다시 끈 상태를 저장할 수 있어야 한다");
@@ -195,6 +310,7 @@ fn saving_settings_does_not_disturb_other_stored_data() {
         &Settings {
             recordings_directory: Some("/tmp/elsewhere".to_string()),
             automatic_processing: true,
+            default_microphone: Some("0:Desk Mic".to_string()),
         },
     )
     .expect("설정을 저장할 수 있어야 한다");
@@ -235,7 +351,8 @@ fn the_settings_schema_has_no_secret_columns() {
         vec![
             "id".to_string(),
             "recordings_directory".to_string(),
-            "automatic_processing".to_string()
+            "automatic_processing".to_string(),
+            "default_microphone".to_string()
         ],
         "설정 테이블에는 이 Phase가 다루는 값만 있어야 한다"
     );

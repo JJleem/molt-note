@@ -15,13 +15,13 @@
 //! 스레드를 만들고, 바깥에는 **정지 신호와 결과만** 건넨다. 스트림은 그 스레드에서 태어나
 //! 그 스레드에서 닫힌다.
 
-use std::sync::mpsc::{self, SyncSender, TrySendError};
+use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
-use crate::audio::capture::{CaptureFormat, OpenCapture, SampleSource};
+use crate::audio::capture::{CaptureFormat, OpenCapture, SampleSink, SampleSource, SinkError};
 use crate::audio::devices::{catalog, selection_keys, ObservedInputDevice};
 use crate::audio::system_devices::name_of;
 use crate::domain::{Failure, FailureKind};
@@ -36,7 +36,7 @@ type Interrupted = Arc<Mutex<Option<Failure>>>;
 pub struct SystemSampleSource;
 
 impl SampleSource for SystemSampleSource {
-    fn open(&self, device_key: &str, samples: SyncSender<Vec<i16>>) -> Result<OpenCapture, Failure> {
+    fn open(&self, device_key: &str, samples: SampleSink) -> Result<OpenCapture, Failure> {
         let interrupted: Interrupted = Arc::new(Mutex::new(None));
 
         // 스트림을 소유할 스레드와 주고받는 두 통로: 열린 결과와 정지 신호.
@@ -124,7 +124,7 @@ struct OpenedStream {
 /// 고른 장치를 찾아 열고 캡처를 시작한다. **스트림을 소유한 스레드 안에서만 불린다.**
 fn open_stream(
     device_key: &str,
-    samples: SyncSender<Vec<i16>>,
+    samples: SampleSink,
     interrupted: Interrupted,
 ) -> Result<OpenedStream, Failure> {
     let host = cpal::default_host();
@@ -228,7 +228,7 @@ fn open_stream(
 
 /// 장치가 16-bit 정수로 주는 경우. 그대로 넘긴다.
 fn forward_i16(
-    samples: SyncSender<Vec<i16>>,
+    samples: SampleSink,
     interrupted: Interrupted,
 ) -> impl FnMut(&[i16], &cpal::InputCallbackInfo) + Send + 'static {
     move |data, _| deliver(&samples, &interrupted, data.to_vec())
@@ -236,7 +236,7 @@ fn forward_i16(
 
 /// 장치가 32-bit 실수로 주는 경우(macOS CoreAudio의 흔한 경우). 16-bit PCM으로 옮긴다.
 fn forward_f32(
-    samples: SyncSender<Vec<i16>>,
+    samples: SampleSink,
     interrupted: Interrupted,
 ) -> impl FnMut(&[f32], &cpal::InputCallbackInfo) + Send + 'static {
     move |data, _| {
@@ -260,11 +260,14 @@ fn note_stream_error(interrupted: &Interrupted, error: impl std::fmt::Display) {
 }
 
 /// 받은 샘플을 파일에 쓰는 쪽으로 넘긴다.
-fn deliver(samples: &SyncSender<Vec<i16>>, interrupted: &Interrupted, chunk: Vec<i16>) {
+///
+/// **일시정지 중에도 이 함수는 계속 불린다.** 장치는 열려 있고 샘플도 계속 온다 —
+/// 그것을 파일에 쓰지 않는 것은 통로 반대편의 일이다 (`super::capture`).
+fn deliver(samples: &SampleSink, interrupted: &Interrupted, chunk: Vec<i16>) {
     match samples.try_send(chunk) {
         Ok(()) => {}
         // 큐가 찼다. **버렸다는 사실을 숨기지 않는다** — 정지할 때 사용자에게 알린다 (R-005).
-        Err(TrySendError::Full(_)) => note(
+        Err(SinkError::Full) => note(
             interrupted,
             Failure::retryable(
                 FailureKind::AudioDevice,
@@ -272,7 +275,7 @@ fn deliver(samples: &SyncSender<Vec<i16>>, interrupted: &Interrupted, chunk: Vec
             ),
         ),
         // 받는 쪽이 이미 끝났다. 정지 중이라는 뜻이며 실패가 아니다.
-        Err(TrySendError::Disconnected(_)) => {}
+        Err(SinkError::Closed) => {}
     }
 }
 

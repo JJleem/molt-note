@@ -1,0 +1,67 @@
+# Attempt 2 (RUN-20260902T102454Z-TASK-021) 재확인.
+# Attempt 1은 worker timeout으로 중단됐으나 구현과 evidence는 이미 작업 트리에 남아 있었다.
+# Attempt 2는 코드를 바꾸지 않고 같은 subject 위에서 세 Gate를 그대로 다시 돌려 확인했다.
+$ node tools/loop-runtime/loopctl.mjs self-check build lint test
+build: PASS  exit=0  0.8s
+lint:  PASS  exit=0  1.3s
+test:  PASS  exit=0  1.0s
+Self-check: all gates passed
+# (exit=0. build/lint/test 모두 warm cache라 시간이 짧다 — Attempt 1의 cold 실행은 아래에 있다.)
+
+# --- 아래부터는 Attempt 1이 남긴 기록이다 -----------------------------------------
+
+# 마지막 실행 (주석 두 곳을 고친 뒤 다시 돌린 것). 이 Run이 남긴 최종 상태다.
+$ node tools/loop-runtime/loopctl.mjs self-check build lint test
+build: PASS  exit=0  0.9s
+lint:  PASS  exit=0  1.3s
+test:  PASS  exit=0  8.8s
+Self-check: all gates passed
+
+# 아래는 그 직전 실행의 전체 출력이다 (Gate 명령과 각 명령의 출력이 함께 남아 있다).
+$ node tools/loop-runtime/loopctl.mjs self-check build lint test
+Self-check (advisory — the runtime reruns gates independently after the worker finishes)
+Gates: build, lint, test
+
+[build] npm run build
+[lint] npm run lint
+[test] npm run test
+
+build: PASS  exit=0  0.9s
+
+lint: PASS  exit=0  2.3s
+
+test: PASS  exit=0  15.2s
+
+Self-check: all gates passed
+Artifacts: .loop-local/self-check/  (advisory only — not a gate report)
+
+[exited with code 0]
+
+--- [build] npm run build → tsc && vite build ------------------------------------
+
+> molt-note@0.1.0 build
+> tsc && vite build
+
+vite v7.3.6 building client environment for production...
+transforming...
+✓ 46 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                   0.40 kB │ gzip:  0.26 kB
+dist/assets/index-BYKmgwJd.css    4.18 kB │ gzip:  1.30 kB
+dist/assets/index-BueuPG8k.js   212.63 kB │ gzip: 66.17 kB
+✓ built in 274ms
+
+--- [lint] npm run lint → eslint . && cargo clippy --all-targets -- -D warnings ---
+
+> molt-note@0.1.0 lint
+> npm run lint:web && npm run lint:rust
+
+> molt-note@0.1.0 lint:web
+> eslint .
+
+> molt-note@0.1.0 lint:rust
+> cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+
+    Checking molt-note v0.1.0 (/Users/molt/orca/projects/molt-note/src-tauri)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.08s

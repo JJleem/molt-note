@@ -1,0 +1,46 @@
+$ npm run test   →   vitest run && cargo test --manifest-path src-tauri/Cargo.toml
+
+--- vitest (frontend) -------------------------------------------------------------
+
+ RUN  v4.1.11 /Users/molt/orca/projects/molt-note
+
+ Test Files  14 passed (14)
+      Tests  154 passed (154)
+   Start at  19:21:18
+   Duration  225ms (transform 330ms, setup 0ms, import 444ms, tests 99ms, environment 1ms)
+
+이 Task가 추가한 테스트 파일:
+  src/screens/recordingDetailView.test.ts   상세 화면의 다섯 상태를 DOM 없이 판정한다
+      - 로딩        "첫 상태는 로딩이다"
+      - 재생 가능    "레코드도 파일도 있으면 재생할 수 있는 상태가 된다" 외 4건
+      - 파일 없음    "감지된 녹음은 재생 가능한 상태가 되지 않는다" 외 5건
+      - 조회 실패    "저장소가 거절하면 화면이 실패 상태가 된다" 외 2건
+      - 그런 녹음 없음 "저장소가 null로 답하면 찾던 id를 담은 상태가 된다" 외 1건
+
+이 Task가 테스트를 추가한 기존 파일:
+  tests/audio-boundary.test.ts              재생 통로가 녹음 디렉터리 하나만 연다 (5건)
+
+--- cargo test (backend) ----------------------------------------------------------
+
+   Compiling tauri v2.11.5
+   Compiling http-range v0.1.5
+   Compiling molt-note v0.1.0 (/Users/molt/orca/projects/molt-note/src-tauri)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 8.75s
+
+lib unittests                    104 passed; 0 failed
+tests/capture.rs                   9 passed; 0 failed
+tests/command_boundary.rs         13 passed; 0 failed
+tests/domain_invariants.rs         5 passed; 0 failed
+tests/domain_model.rs             16 passed; 0 failed
+tests/input_devices.rs             6 passed; 0 failed
+tests/microphone_permission.rs     7 passed; 0 failed
+tests/recording_lifecycle.rs       5 passed; 0 failed
+tests/recording_repository.rs     13 passed; 0 failed
+tests/recording_session.rs         4 passed; 0 failed
+tests/settings_repository.rs      (포함) 0 failed
+tests/stop_persistence.rs         (포함) 0 failed
+
+Rust 쪽에는 이 Task가 새 테스트를 추가하지 않았다 — 새 command도 새 저장소 동작도 만들지
+않았기 때문이다. Rust의 변경은 asset protocol scope를 여는 세 줄과 설정이며, 그것이 실제로
+컴파일되고 동작 범위가 어디까지인지는 `protocol-asset-verification.md`와
+`tests/audio-boundary.test.ts`가 본다.

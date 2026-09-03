@@ -14,13 +14,13 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::mpsc::SyncSender;
 use std::thread;
 
-use molt_note_lib::audio::{CaptureFormat, OpenCapture, SampleSource};
-use molt_note_lib::commands::Capture;
+use molt_note_lib::audio::{CaptureFormat, OpenCapture, SampleSink, SampleSource};
+use molt_note_lib::commands::Recorder;
 use molt_note_lib::domain::{Failure, FailureKind};
 use molt_note_lib::platform::app_data_dir::AppDataDirectory;
+use molt_note_lib::platform::microphone::{MicrophoneAccess, MicrophonePermission};
 
 /// 테스트가 고른 장치 키. 가짜 마이크는 어떤 키를 줘도 같은 값을 낸다.
 const DEVICE_KEY: &str = "0:가짜 마이크";
@@ -89,7 +89,7 @@ impl FakeMicrophone {
 }
 
 impl SampleSource for FakeMicrophone {
-    fn open(&self, _device_key: &str, samples: SyncSender<Vec<i16>>) -> Result<OpenCapture, Failure> {
+    fn open(&self, _device_key: &str, samples: SampleSink) -> Result<OpenCapture, Failure> {
         let chunks = self.chunks.clone();
         let sending = thread::spawn(move || {
             for chunk in chunks {
@@ -114,11 +114,28 @@ impl SampleSource for FakeMicrophone {
     }
 }
 
+/// 마이크 접근이 허용돼 있다고 답하는 권한 경계.
+///
+/// **장치 실패를 보는 테스트가 권한 상태를 명시하기 위해 쓴다.** 권한을 확정하지 못한 상태에서
+/// 장치를 열지 못하면 그 실패는 권한 안내로 분류된다(`platform::microphone` §4.2 폴백). 여기서
+/// 보려는 것은 그 분류가 아니라 **장치 실패 자체**이므로 상태를 값으로 못박는다.
+struct GrantedPermission;
+
+impl MicrophonePermission for GrantedPermission {
+    fn status(&self) -> MicrophoneAccess {
+        MicrophoneAccess::Granted
+    }
+
+    fn request(&self) -> MicrophoneAccess {
+        MicrophoneAccess::Granted
+    }
+}
+
 /// 장치를 열지 못하는 경계 구현. 실제 원인은 권한이거나 다른 앱의 점유다.
 struct UnavailableMicrophone;
 
 impl SampleSource for UnavailableMicrophone {
-    fn open(&self, _device_key: &str, _samples: SyncSender<Vec<i16>>) -> Result<OpenCapture, Failure> {
+    fn open(&self, _device_key: &str, _samples: SampleSink) -> Result<OpenCapture, Failure> {
         Err(Failure::retryable(
             FailureKind::AudioDevice,
             "입력 장치를 열지 못했다. 다른 앱이 쓰고 있거나 마이크 권한이 없을 수 있다.",
@@ -148,7 +165,7 @@ fn a_capture_that_stops_reports_the_device_the_path_the_format_and_the_size() {
     let microphone = FakeMicrophone::speaking();
     let expected_samples = microphone.sample_count();
     let app_data_dir = temp.app_data_dir();
-    let capture = Capture::with_source(app_data_dir.clone(), microphone);
+    let capture = Recorder::with_source(app_data_dir.clone(), microphone);
 
     capture.start(DEVICE_KEY).expect("녹음을 시작할 수 있어야 한다");
     let report = capture.stop().expect("녹음을 정지할 수 있어야 한다");
@@ -186,7 +203,7 @@ fn the_output_file_lives_under_the_app_data_directory() {
     // 경로는 AppDataDirectory에서 파생된다 — 캡처가 자기 마음대로 자리를 정하지 않는다.
     let temp = TempRoot::new("app-data");
     let app_data_dir = temp.app_data_dir();
-    let capture = Capture::with_source(app_data_dir.clone(), FakeMicrophone::speaking());
+    let capture = Recorder::with_source(app_data_dir.clone(), FakeMicrophone::speaking());
 
     capture.start(DEVICE_KEY).expect("녹음을 시작할 수 있어야 한다");
     let report = capture.stop().expect("녹음을 정지할 수 있어야 한다");
@@ -209,7 +226,7 @@ fn a_second_capture_does_not_overwrite_the_first() {
     // 두 녹음이 같은 초에 끝나도 앞선 파일이 사라지지 않는다 (INV-1).
     let temp = TempRoot::new("no-overwrite");
     let app_data_dir = temp.app_data_dir();
-    let capture = Capture::with_source(app_data_dir.clone(), FakeMicrophone::speaking());
+    let capture = Recorder::with_source(app_data_dir.clone(), FakeMicrophone::speaking());
 
     capture.start(DEVICE_KEY).expect("첫 녹음 시작");
     let first = capture.stop().expect("첫 녹음 정지");
@@ -227,7 +244,8 @@ fn a_second_capture_does_not_overwrite_the_first() {
 fn a_device_that_cannot_be_opened_reaches_the_user_as_the_shared_failure_contract() {
     let temp = TempRoot::new("unavailable");
     let app_data_dir = temp.app_data_dir();
-    let capture = Capture::with_source(app_data_dir.clone(), UnavailableMicrophone);
+    let capture = Recorder::with_source(app_data_dir.clone(), UnavailableMicrophone)
+        .with_microphone(GrantedPermission);
 
     let failure = capture.start(DEVICE_KEY).expect_err("장치를 열지 못한 것은 실패다");
 
@@ -246,7 +264,8 @@ fn a_device_that_cannot_be_opened_reaches_the_user_as_the_shared_failure_contrac
 #[test]
 fn a_failure_to_open_serializes_into_the_shape_the_frontend_reads() {
     let temp = TempRoot::new("serialized");
-    let capture = Capture::with_source(temp.app_data_dir(), UnavailableMicrophone);
+    let capture = Recorder::with_source(temp.app_data_dir(), UnavailableMicrophone)
+        .with_microphone(GrantedPermission);
 
     let failure = capture.start(DEVICE_KEY).expect_err("실패해야 한다");
     let json = serde_json::to_value(&failure).expect("직렬화할 수 있어야 한다");
@@ -262,7 +281,7 @@ fn a_capture_that_was_cut_short_says_so_and_keeps_what_was_recorded() {
     // 끊긴 것을 성공으로 보고하지 않는다. 그렇다고 이미 녹음된 것을 숨기지도 않는다.
     let temp = TempRoot::new("cut-short");
     let app_data_dir = temp.app_data_dir();
-    let capture = Capture::with_source(
+    let capture = Recorder::with_source(
         app_data_dir.clone(),
         FakeMicrophone::cut_short(
             Failure::retryable(FailureKind::AudioDevice, "녹음이 중간에 끊겼다.")
@@ -292,7 +311,7 @@ fn a_capture_that_was_cut_short_says_so_and_keeps_what_was_recorded() {
 #[test]
 fn stopping_without_starting_is_a_failure_not_a_panic() {
     let temp = TempRoot::new("not-recording");
-    let capture = Capture::with_source(temp.app_data_dir(), FakeMicrophone::speaking());
+    let capture = Recorder::with_source(temp.app_data_dir(), FakeMicrophone::speaking());
 
     let failure = capture.stop().expect_err("녹음 중이 아니면 정지할 것이 없다");
 
@@ -305,7 +324,7 @@ fn stopping_without_starting_is_a_failure_not_a_panic() {
 fn starting_twice_does_not_throw_away_the_recording_already_running() {
     let temp = TempRoot::new("already-recording");
     let app_data_dir = temp.app_data_dir();
-    let capture = Capture::with_source(app_data_dir.clone(), FakeMicrophone::speaking());
+    let capture = Recorder::with_source(app_data_dir.clone(), FakeMicrophone::speaking());
 
     capture.start(DEVICE_KEY).expect("첫 녹음 시작");
     let failure = capture.start(DEVICE_KEY).expect_err("이미 녹음 중이다");
@@ -328,7 +347,7 @@ fn a_place_that_cannot_hold_recordings_becomes_a_failure_the_user_can_read() {
     std::fs::write(app_data_dir.recordings_dir(), "디렉터리가 아니다")
         .expect("사전 조건: 자리를 막는다");
 
-    let capture = Capture::with_source(app_data_dir, FakeMicrophone::speaking());
+    let capture = Recorder::with_source(app_data_dir, FakeMicrophone::speaking());
     let failure = capture.start(DEVICE_KEY).expect_err("파일 위에 녹음을 둘 수는 없다");
 
     assert_eq!(failure.kind, FailureKind::Storage, "장치 실패와 구분된다");

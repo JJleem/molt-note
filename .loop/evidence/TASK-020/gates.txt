@@ -1,0 +1,40 @@
+Gate 실행 결과 (worker self-check — 참고용. Runtime이 종료 후 독립적으로 다시 돌린다)
+
+명령: node tools/loop-runtime/loopctl.mjs self-check build lint test
+시각: 2026-09-02 19:06 (로컬)
+
+  build: PASS  exit=0   npm run build   (tsc && vite build)
+  lint:  PASS  exit=0   npm run lint    (eslint . && cargo clippy --all-targets -- -D warnings)
+  test:  PASS  exit=0   npm run test    (vitest run && cargo test)
+
+--- build (stdout 요약) ---
+vite v7.3.6 building client environment for production...
+✓ 45 modules transformed.
+dist/index.html                   0.40 kB │ gzip:  0.27 kB
+dist/assets/index-BOPIDBHs.css    3.79 kB │ gzip:  1.23 kB
+dist/assets/index-eHo0QYPA.js   210.16 kB │ gzip: 65.53 kB
+✓ built in 271ms
+
+tsc는 tsconfig.json의 include("src")를 그대로 쓰므로 새 모듈과 그 테스트가 함께 타입 검사됐다.
+
+--- lint (stdout 요약) ---
+> eslint .
+(출력 없음 — 오류도 경고도 없다)
+> cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.29s
+
+--- test (stdout 요약) ---
+> vitest run
+ Test Files  13 passed (13)
+      Tests  132 passed (132)
+
+> cargo test --manifest-path src-tauri/Cargo.toml
+14개 test 대상 전부 ok (unit 104 + 통합 test 바이너리들: 9 · 13 · 5 · 16 · 6 · 7 · 5 · 13 · 4 · 10 · 6)
+failed 0 · ignored 0
+
+vitest 파일 수는 13으로 그대로다 — 삭제된 captureSpikeView.test.ts 자리에
+새 recordingView.test.ts가 들어갔고, 남은 12개 파일(화면 경계 · IPC 경계 · 오디오 경계 포함)은
+그대로 통과한다.
+
+원본 로그: .loop-local/self-check/gates/{build,lint,test}/{stdout,stderr}.log
+(self-check 디렉터리는 Runtime 소유이며 실행할 때마다 덮어써진다)

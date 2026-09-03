@@ -3,9 +3,13 @@
 이 문서는 프로젝트의 **최상위 지도**다. 상세 구현 문서가 아니라 진입점이다.
 상세는 §8의 문서로 넘긴다.
 
-> **현재 상태: Phase 1 완료 (2026-09-02).** 앱 셸 · 로컬 영속성 · §7 데이터 모델 ·
-> 네 화면 navigation이 실제로 존재하고 검증을 통과했다.
-> **아직 녹음도 전사도 AI도 없다** — Phase 2 이후다.
+> **현재 상태: Phase 2B 완료 (2026-09-03).** 앱 셸 · 로컬 영속성 · §7 데이터 모델 ·
+> 네 화면 navigation에 더해, **녹음 lifecycle(Record/Pause/Resume/Stop) · 파일 확정 ·
+> Recording 영속화 · 재생**이 구현되고 자동 검증을 통과했다.
+>
+> ⚠️ **그러나 실제 마이크에서 확인된 적이 없다.** recording engine은 `PROVISIONAL`이며
+> 장치 검증은 Final Integration으로 연기됐다 (`ADR-0003` §12 · `ASSUMPTION A-REC-001`).
+> **아직 전사도 AI도 없다** — Phase 3 이후다.
 >
 > 갱신 이력:
 > - 2026-09-01 Bootstrap — 개발 baseline과 Gate 확보
@@ -48,8 +52,9 @@ Linux와 모바일은 범위 밖이다 (`PRODUCT-SPEC.md` §3).
 
 | | |
 | --- | --- |
-| **지금 동작한다 (DONE)** | 앱이 실행되고 네 화면 사이를 이동한다. Recording·Transcript·AINote·NotionSync 스키마가 로컬 SQLite에 있고, Recording 목록·Settings가 재시작 후에도 유지된다. 저장소 실패가 화면에 표시되고 재시도된다. macOS 번들에 마이크 권한 문구가 병합된다 |
-| **다음 단계 (PLANNED)** | Phase 2 — 실제 녹음 (engine 결정 · Record/Pause/Resume/Stop · 재생) |
+| **지금 동작한다 (DONE · 자동 검증 기준)** | 앱이 실행되고 네 화면 사이를 이동한다. 로컬 SQLite에 §7 스키마가 있고 Recording 목록·Settings가 재시작 후에도 유지된다. **backend가 소유하는 녹음 session으로 Record/Pause/Resume/Stop이 동작하고, Stop은 파일 확정 후 Recording을 영속화하며, Detail에서 재생한다.** 실패가 화면에 표시되고 재시도된다 |
+| **⚠️ 자동 검증됐으나 장치 미확인** | 위 녹음 경로 전체. 실제 마이크·권한 프롬프트·음질로 확인된 적이 **없다** (`ASSUMPTION A-REC-001`) |
+| **다음 단계 (PLANNED)** | Phase 3 — 로컬 whisper 전사 |
 | **미룬 것 (DEFERRED)** | **Cloud AI Providers (Claude · Gemini · Groq)** · search · tags · processing queue · menu bar (`PRODUCT-SPEC.md` §16) |
 | **후보 (CANDIDATE)** | recording engine (§4) · whisper 통합 방식 (§4) · persistence crate (§4) |
 
@@ -62,20 +67,23 @@ Linux와 모바일은 범위 밖이다 (`PRODUCT-SPEC.md` §3).
 ```text
 앱 시작
   ↓
-AppDataDirectory 결정 (플랫폼별 경로를 이 모듈 하나가 안다)
-  ↓
-SQLite 열기 → migration 적용 (PRAGMA user_version 기준, 미적용분만)
+AppDataDirectory 결정 → SQLite 열기 → migration 적용 (미적용분만)
   ↓  실패하면 panic하지 않고 Failure로 보존된다
 React 셸 (sidebar + 4 화면)
   ↓
-Recordings 화면 → Tauri command `list_recordings` → repository → SQLite
-Settings 화면   → `get_settings` / `update_settings`
+Recording 화면
   ↓
-실패는 화면 상태로 표현되고 재시도 버튼을 가진다
+입력 장치 열거 → 마이크 선택 (Settings의 default microphone 반영)
+  ↓
+Record → Pause → Resume → Stop      ← 상태 기계는 순수 모듈, session은 backend 소유
+  ↓
+Stop = 캡처 정지 → writer 확정 → 파일 존재·크기 확인 → Recording 영속화
+  ↓  DB 실패 시 **audio를 지우지 않고** 경로를 담은 실패를 돌려준다 (INV-3 · INV-4)
+Recordings 목록 → Recording Detail → 재생
+                                   ↓ 파일이 없으면 레코드를 지우지 않고 알린다
 ```
 
-**아직 없는 것(PLANNED):** 마이크 캡처 · 오디오 파일 · 재생 · 전사 · AI Note · Notion.
-Recording 레코드는 만들 수 있으나 **오디오를 만드는 경로가 없다** — Phase 2가 만든다.
+**아직 없는 것(PLANNED):** 전사 · AI Note · Notion · Markdown export.
 
 전체 목표 흐름은 `docs/PRODUCT-SPEC.md` §4에 있다.
 
@@ -91,9 +99,13 @@ Recording 레코드는 만들 수 있으나 **오디오를 만드는 경로가 �
 | `domain/` (duration · failure · settings) | 순수 도메인 로직. 하드웨어·DB 없이 테스트된다 | **DONE** |
 | `commands/` (Tauri command 경계) | `list_recordings` · `get_recording` · `create_recording` · `delete_recording` · `get_settings` · `update_settings`. **임의 SQL을 받는 command는 없다** | **DONE** |
 | `src/navigation/` · `src/screens/` | 4화면 라우팅 · 화면별 view 로직(순수 모듈, DOM 없이 테스트) | **DONE** |
+| `domain/session` (상태 기계) | idle→recording→paused→recording→stopped · 잘못된 전이 거부 · pause 제외 duration. 하드웨어 없이 테스트된다 | **DONE** |
+| `audio/` (capture · devices · finalized) | 장치 열거 · cpal 캡처 · hound WAV writer · 파일 확정 | **DONE** (⚠️ 장치 미검증) |
+| backend 소유 recording session | Tauri managed state가 session을 소유한다. 화면 컴포넌트가 소유하지 않는다 (R-001) | **DONE** |
+| `platform/microphone` | 권한 상태 경계. 신뢰할 판정 수단이 없는 구간은 UNVERIFIED로 남긴다 | **DONE** (한계 명시됨) |
 | `src/ipc/` | 타입 있는 command client · 실패 매핑 | **DONE** |
 | `src-tauri/Info.plist` | macOS 마이크 권한 **선언** (packaging 요구사항이지 권한 구현이 아니다) | **DONE** |
-| Recording engine | 마이크 캡처 · pause/resume · 파일 생성 | **PLANNED** (Phase 2) |
+
 | Transcription 엔진 통합 | whisper 실행 · JSON 파싱 | **PLANNED** (Phase 3) |
 | **`NoteAIProvider` 경계** | **vendor 중립 AI 계약. domain은 벤더를 모른다 (INV-9)** | **PLANNED** (Phase 4) |
 | **Ollama adapter** | **로컬 Ollama → Structured Note. 첫 provider 구현** | **PLANNED** (Phase 4) |
@@ -107,7 +119,7 @@ Recording 레코드는 만들 수 있으나 **오디오를 만드는 경로가 �
 | 구분 | 항목 | 비고 |
 | --- | --- | --- |
 | **선택됨 · 현재 사용 중** | Tauri v2 (2.11.5) · React 19 · Vite 7 · TypeScript 5.8 · ESLint · Vitest<br>**`rusqlite` 0.40.2 (`bundled`, SQLite 3.53.2)** — 제품 경로에서 실제로 쓰인다 | persistence 선택 근거는 `docs/ADR-0001-local-persistence.md` |
-| **잠정 선택 · 장치 미검증** | **`cpal` 0.18.2 + `hound` 3.5.1** — spike 경로에서 쓰인다 | ⚠️ `ADR-0003`은 **PROVISIONAL**이다. 실제 마이크에서 확인된 적이 없다 (`ASSUMPTION A-REC-001`) |
+| **잠정 선택 · 장치 미검증** | **`cpal` 0.18.2 + `hound` 3.5.1** — **제품 녹음 경로에서 쓰인다** | ⚠️ `ADR-0003`은 **PROVISIONAL**이다. 실제 마이크에서 확인된 적이 없다 (`ASSUMPTION A-REC-001`) |
 | **설치됨 · 미통합** | (없음) | scaffold의 `tauri-plugin-opener`는 Phase 1에서 **제거**했다 |
 | **후보 · 미선택** | recording: `cpal`+`hound` / webview MediaRecorder / 커뮤니티 플러그인<br>transcription: whisper.cpp sidecar / `whisper-rs`<br>AI: 로컬 Ollama REST (`reqwest` 또는 `ollama-rs`)<br>Notion: `@notionhq/client` | **설치되지 않았다.** 각각 이를 필요로 하는 Phase에서 검증과 함께 선택한다. 확인된 사실은 `PRODUCT-SPEC.md` §14 |
 | **탈락** | `tauri-plugin-sql` | frontend가 임의 SQL executor가 된다. INV-7 · repository 경계와 어긋난다 (ADR-0001) |
@@ -228,10 +240,45 @@ production recording lifecycle 완성
 운영자가 2026-09-02에 장치 검증을 **Final Integration으로 연기**하고 위험을 수용했다
 (`ADR-0003` §12 · §12.A — `ASSUMPTION A-REC-001`). §12의 8개 항목은 전부 `DEFERRED`다.
 
-### Phase 2B — Reliable Recording · **PLANNED**
+### Phase 2B — Reliable Recording · 2026-09-03 · **engineering DONE · 장치 검증 DEFERRED**
 
-> 잠정 engine 전제 위에서 production recording을 구현한다. ADR-0003을 `CONFIRMED`로
-> 승격시키지 않는다 — 확정은 Final Integration의 hard human gate에서만 일어난다.
+Task 8개, 전부 Gate PASS + 독립 Verifier PASS.
+
+| Task | 결과물 |
+| --- | --- |
+| TASK-015 | recording state machine (순수 모듈, 하드웨어 없이 테스트) |
+| TASK-016 | backend가 소유하는 녹음 session — Record/Pause/Resume/Stop (R-001) |
+| TASK-017 | Stop = 파일 확정 + Recording 영속화 · 보상 정책 (`ADR-0004`) |
+| TASK-018 | Settings의 default microphone · 사라진 장치 처리 |
+| TASK-019 | macOS 마이크 권한 경계 · 실패 매핑 (`ADR-0005`) |
+| TASK-020 | Recording 화면 — Phase 2A 임시 spike 표면을 **남김없이** 대체 |
+| TASK-021 | Recording Detail 재생 · 파일 없음 상태 |
+| TASK-022 | 결정 기록 · 남은 UNVERIFIED 정리 |
+
+검증: build/lint/test Gate green · **자동 테스트 285개** (vitest 154 · Rust 131).
+
+핵심 성질:
+
+```text
+녹음 session은 backend가 소유한다 — 화면 이동이 캡처를 끊지 않는다 (R-001)
+Stop 성공 = 파일 존재·크기 확인 + 영속화 (R-002)
+DB 실패 시 audio를 지우지 않는다 — 경로를 담은 실패를 돌려준다 (INV-3 · INV-4)
+파일이 사라져도 레코드를 지우지 않는다 — 알리기만 한다
+권한 판정 수단이 없는 구간은 단정하지 않고 UNVERIFIED로 남긴다
+```
+
+**⚠️ IMPLEMENTED / VERIFIED로 기록하지 않는 것:**
+
+```text
+실제 마이크가 이 Mac에서 동작한다
+실제 TCC 권한 프롬프트
+선택한 물리 마이크가 실제로 쓰인다
+실제 녹음 음질 · 재생 음질
+장시간 녹음 안정성
+```
+
+전부 Final Integration의 hard human gate로 연기됐다.
+Runtime 관찰은 `LOOP-RUNTIME-FIELD-NOTES.md` OBS-020 · OBS-021.
 
 > Phase 2는 두 단계다. engine 확정에 필요한 증거 일부(실제 권한 프롬프트 · 실제 코덱 ·
 > 실제 음질)는 자동 검증이 불가능해 사람이 앱을 실행해야 한다. 그래서 잠정 선택 + 최소
@@ -247,7 +294,7 @@ production recording lifecycle 완성
 
 | | 무엇을 보장하는가 | 수단 |
 | --- | --- | --- |
-| **Automated validation** | 앱 데이터 경로 결정 · migration 멱등성과 데이터 보존 · §7 스키마와 카디널리티 · repository CRUD · duration 포맷 · Settings 영속성 · 재시작 생존 · command 실패 계약 · 라우팅 · 화면 view 상태 — **자동 테스트 131개** | `build` · `lint` · `test` Gate + 독립 Verifier |
+| **Automated validation** | Phase 1의 전부 + **녹음 상태 기계 · pause 제외 duration · 캡처 경계 · 파일 확정 계약 · 보상 정책 · 권한 실패 매핑 · 재생 view 상태** — **자동 테스트 285개** | `build` · `lint` · `test` Gate + 독립 Verifier |
 | **Human validation / witness** | 실제 마이크 음질 · 재생 음질 · AI Note의 유용성 · Notion 페이지 품질 · **화면의 시각적 완성도** · **Windows 실동작** · **연기된 recording 장치 검증(ADR-0003 §12)** | 사람이 직접 확인 |
 
 > Phase 1에서 사람이 확인한 것: 번들 `.app`의 Info.plist 병합(확인됨) ·
@@ -294,6 +341,8 @@ production recording lifecycle 완성
 | `docs/ADR-0001-local-persistence.md` | persistence 엔진 선택 근거 · crate 확인 상태 · migration 모델 |
 | `docs/ADR-0002-macos-microphone-usage-description.md` | 마이크 권한 선언의 위치와 성격 · 구현하지 않은 것의 경계 |
 | `docs/ADR-0003-recording-engine.md` | recording engine 잠정 선택 · **연기된 장치 검증 기록표(§12)** · 실행 절차(§12.1) |
+| `docs/ADR-0004-recording-session-lifecycle.md` | session 소유권 · Stop 확정 계약 · 어긋난 상태의 보상 정책 |
+| `docs/ADR-0005-microphone-permission.md` | 권한 판정의 VERIFIED / UNVERIFIED 경계 |
 | `docs/GIT-WORKFLOW.md` | Git/GitHub 운영 정책 — Phase 단위 commit · public 저장소 안전 규칙 |
 | `docs/LOOP-RUNTIME-FIELD-NOTES.md` | Runtime 운용 관찰 기록 |
 | `CLAUDE.local.md` | 대화형 세션 운영 지침 |

@@ -1,0 +1,21 @@
+# TASK-021이 손댄 파일 (commit하지 않았다 — docs/GIT-WORKFLOW.md · Phase prompt)
+
+## 재생 통로를 여는 쪽 (backend · 설정)
+M  src-tauri/Cargo.toml            protocol-asset feature를 켠다
+M  src-tauri/Cargo.lock            http-range 0.1.5가 추가됐다 (cargo가 갱신)
+M  src-tauri/tauri.conf.json       assetProtocol enable=true · scope=[]
+M  src-tauri/src/lib.rs            녹음 디렉터리 하나만 asset protocol scope에 허용한다
+
+   변경 없음: src-tauri/capabilities/default.json (asset 관련 permission이 이 버전에 없다)
+   변경 없음: command 표면 — 새 command를 만들지 않았다
+
+## 화면 (frontend)
+M  src/ipc/commands.ts             recordingAudioSource() — 경로를 재생 주소로 바꾸는 유일한 자리
+A  src/screens/recordingDetailView.ts       다섯 상태를 만드는 순수 모듈 (DOM · Tauri 없음)
+A  src/screens/recordingDetailView.test.ts  그 상태들을 판정하는 테스트
+M  src/screens/RecordingDetailScreen.tsx    get_recording + list_missing_audio를 읽고 그린다
+M  src/App.css                     재생 막대와 "파일 없음" 표시의 스타일
+
+## 경계 테스트 · 문서
+M  tests/audio-boundary.test.ts    접근 범위가 녹음 디렉터리를 넘지 않는지 소스와 설정에서 본다
+A  docs/ADR-0006-audio-playback.md 결정 · 대안 · VERIFIED/UNVERIFIED 경계

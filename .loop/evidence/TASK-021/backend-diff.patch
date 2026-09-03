@@ -1,0 +1,90 @@
+# 이 Task가 파일 접근 범위에 대해 실제로 바꾼 것 전부.
+# (lib.rs의 다른 hunk — command 등록 목록 등 — 은 이전 Task의 변경이라 여기서 뺐다.)
+
+diff --git a/src-tauri/Cargo.toml b/src-tauri/Cargo.toml
+--- a/src-tauri/Cargo.toml
++++ b/src-tauri/Cargo.toml
+@@ -18,7 +18,11 @@ crate-type = ["staticlib", "cdylib", "rlib"]
+ tauri-build = { version = "2", features = [] }
+
+ [dependencies]
+-tauri = { version = "2", features = [] }
++# `protocol-asset`는 저장된 녹음을 webview가 재생할 수 있게 하는 통로다 (Phase 2B 요구사항 7).
++# 이 feature가 켜져야 `asset:` 프로토콜과 `Manager::asset_protocol_scope()`가 존재한다.
++# **켠다고 파일이 열리는 것은 아니다** — 실제로 읽을 수 있는 자리는 scope가 정하며,
++# 이 앱은 녹음 디렉터리 하나만 허용한다 (`crate::run` · PRODUCT-SPEC §12 · INV-6).
++tauri = { version = "2", features = ["protocol-asset"] }
+ serde = { version = "1", features = ["derive"] }
+ serde_json = "1"
+
+diff --git a/src-tauri/tauri.conf.json b/src-tauri/tauri.conf.json
+--- a/src-tauri/tauri.conf.json
++++ b/src-tauri/tauri.conf.json
+@@ -18,7 +18,11 @@
+       }
+     ],
+     "security": {
+-      "csp": null
++      "csp": null,
++      "assetProtocol": {
++        "enable": true,
++        "scope": []
++      }
+     }
+   },
+   "bundle": {
+
+diff --git a/src-tauri/src/lib.rs b/src-tauri/src/lib.rs
+--- a/src-tauri/src/lib.rs
++++ b/src-tauri/src/lib.rs
+@@ -6,7 +6,8 @@ pub mod platform;
+
+ use tauri::Manager;
+
+ use commands::{AudioDevices, Recorder, Storage};
++use platform::app_data_dir::AppDataDirectory;
+
+@@ (setup 안, Recorder를 manage한 직후)
++            // 저장된 녹음을 재생하려면 webview가 그 파일을 읽을 수 있어야 한다.
++            // 그 통로는 Tauri v2의 asset protocol이고(`protocol-asset` feature),
++            // **열어 주는 자리는 녹음 디렉터리 하나뿐이다** — 사용자의 홈도, 앱 데이터
++            // 루트도 아니다 (PRODUCT-SPEC §12). 경로는 여기서 짓지 않고 파일을 쓰는 쪽과
++            // 같은 자리에서 받는다 ([`AppDataDirectory::recordings_dir`] · INV-10).
++            //
++            // 이 통로는 로컬 webview로만 향한다. 오디오를 밖으로 보내는 경로는 이 앱에
++            // 없다 (INV-6).
++            //
++            // 열지 못해도 앱은 뜬다 — 재생만 되지 않으며, 그 사실은 화면에서 드러난다.
++            // 여기서 죽으면 녹음도 목록도 함께 잃는다 (§13).
++            if let Ok(app_data_dir) = AppDataDirectory::from_manager(app) {
++                if let Ok(recordings_dir) = app_data_dir.ensure_recordings_dir() {
++                    // 하위 디렉터리까지 열지 않는다(`recursive: false`) — 녹음 파일은
++                    // 이 디렉터리에 바로 놓인다 (`capture::output_path`).
++                    let _ = app
++                        .asset_protocol_scope()
++                        .allow_directory(&recordings_dir, false);
++                }
++            }
++
+
+diff --git a/src-tauri/Cargo.lock b/src-tauri/Cargo.lock
+--- a/src-tauri/Cargo.lock
++++ b/src-tauri/Cargo.lock
+@@ -1385,6 +1385,12 @@ dependencies = [
+  "pin-project-lite",
+ ]
+
++[[package]]
++name = "http-range"
++version = "0.1.5"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "21dec9db110f5f872ed9699c3ecf50cf16f423502706ba5c72462e28d3157573"
++
+ [[package]]
+ name = "httparse"
+@@ -3360,6 +3366,7 @@ dependencies = [
+  "gtk",
+  "heck 0.5.0",
+  "http",
++ "http-range",
+  "jni 0.21.1",

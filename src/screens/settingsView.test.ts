@@ -17,7 +17,11 @@ import {
   toSettings,
 } from './settingsView';
 
-const DEFAULT_SETTINGS: Settings = { recordingsDirectory: null, automaticProcessing: false };
+const DEFAULT_SETTINGS: Settings = {
+  recordingsDirectory: null,
+  automaticProcessing: false,
+  defaultMicrophone: null,
+};
 
 const storageFailure: Failure = {
   kind: 'storage',
@@ -42,19 +46,28 @@ describe('설정 읽기', () => {
 
     expect(view.kind).toBe('ready');
     if (view.kind !== 'ready') return;
-    // 고르지 않은 디렉터리(null)는 빈 입력이다.
-    expect(view.form).toEqual({ recordingsDirectory: '', automaticProcessing: false });
+    // 고르지 않은 디렉터리(null)는 빈 입력이다. 고르지 않은 마이크도 마찬가지다.
+    expect(view.form).toEqual({
+      recordingsDirectory: '',
+      automaticProcessing: false,
+      defaultMicrophone: '',
+    });
     expect(view.saving).toBe(false);
     expect(view.saved).toBe(false);
     expect(view.failure).toBeNull();
   });
 
   it('저장된 값이 폼에 그대로 들어온다', () => {
-    const view = ready({ recordingsDirectory: '/Users/someone/Recordings', automaticProcessing: true });
+    const view = ready({
+      recordingsDirectory: '/Users/someone/Recordings',
+      automaticProcessing: true,
+      defaultMicrophone: '0:Studio Mic',
+    });
 
     expect(view.kind === 'ready' && view.form).toEqual({
       recordingsDirectory: '/Users/someone/Recordings',
       automaticProcessing: true,
+      defaultMicrophone: '0:Studio Mic',
     });
   });
 
@@ -89,6 +102,20 @@ describe('편집', () => {
     expect(edited.kind === 'ready' && edited.form).toEqual({
       recordingsDirectory: '/tmp/notes',
       automaticProcessing: true,
+      defaultMicrophone: '',
+    });
+  });
+
+  it('마이크를 고르는 것이 다른 값을 건드리지 않는다', () => {
+    const edited = editedSettings(
+      editedSettings(ready(), { recordingsDirectory: '/tmp/notes' }),
+      { defaultMicrophone: '1:USB Microphone' },
+    );
+
+    expect(edited.kind === 'ready' && edited.form).toEqual({
+      recordingsDirectory: '/tmp/notes',
+      automaticProcessing: false,
+      defaultMicrophone: '1:USB Microphone',
     });
   });
 
@@ -118,23 +145,48 @@ describe('저장', () => {
   });
 
   it('빈 입력은 "고르지 않음"으로 보낸다', () => {
-    expect(toSettings({ recordingsDirectory: '', automaticProcessing: true })).toEqual({
+    expect(
+      toSettings({ recordingsDirectory: '', automaticProcessing: true, defaultMicrophone: '' }),
+    ).toEqual({
       recordingsDirectory: null,
       automaticProcessing: true,
+      defaultMicrophone: null,
     });
-    expect(toSettings({ recordingsDirectory: '   ', automaticProcessing: false })).toEqual({
+    expect(
+      toSettings({ recordingsDirectory: '   ', automaticProcessing: false, defaultMicrophone: '' }),
+    ).toEqual({
       recordingsDirectory: null,
       automaticProcessing: false,
+      defaultMicrophone: null,
     });
+  });
+
+  it('고른 마이크 키는 그대로 저장하러 간다', () => {
+    // 지금 없는 장치의 키라도 화면이 바꾸지 않는다 — 사용자가 고른 값이다.
+    expect(
+      toSettings({
+        recordingsDirectory: '',
+        automaticProcessing: false,
+        defaultMicrophone: '0:Studio Mic',
+      }).defaultMicrophone,
+    ).toBe('0:Studio Mic');
   });
 
   it('저장 뒤 폼은 저장소가 돌려준 값으로 다시 채워진다', () => {
     // Rust가 정규화한 값이 있으면 화면은 그 값을 본다 — 보낸 값을 그대로 믿지 않는다.
-    const view = savedSettings({ recordingsDirectory: '/tmp/notes', automaticProcessing: true });
+    const view = savedSettings({
+      recordingsDirectory: '/tmp/notes',
+      automaticProcessing: true,
+      defaultMicrophone: '0:Studio Mic',
+    });
 
     expect(view.kind).toBe('ready');
     if (view.kind !== 'ready') return;
-    expect(view.form).toEqual({ recordingsDirectory: '/tmp/notes', automaticProcessing: true });
+    expect(view.form).toEqual({
+      recordingsDirectory: '/tmp/notes',
+      automaticProcessing: true,
+      defaultMicrophone: '0:Studio Mic',
+    });
     expect(view.saving).toBe(false);
     expect(view.saved).toBe(true);
     expect(view.failure).toBeNull();
@@ -171,7 +223,13 @@ describe('폼과 설정의 변환', () => {
   it('읽은 값을 그대로 돌려보낼 수 있다', () => {
     for (const settings of [
       DEFAULT_SETTINGS,
-      { recordingsDirectory: '/tmp/notes', automaticProcessing: true },
+      { recordingsDirectory: '/tmp/notes', automaticProcessing: true, defaultMicrophone: null },
+      // 지금 목록에 없는 장치의 키도 돌려보낼 때 그대로여야 한다.
+      {
+        recordingsDirectory: null,
+        automaticProcessing: false,
+        defaultMicrophone: '3:USB Microphone',
+      },
     ] satisfies Settings[]) {
       expect(toSettings(toForm(settings))).toEqual(settings);
     }

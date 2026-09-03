@@ -10,7 +10,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::audio::{CaptureReport, InputDevice};
+use crate::audio::{CaptureReport, InputDevice, SessionState, SessionSummary};
 use crate::domain::{ProcessingStatus, Recording, RecordingId, RecordingView, Settings};
 
 /// 조회된 녹음 하나. 목록 화면과 상세 화면이 그대로 쓴다 (§5 A · C).
@@ -124,17 +124,18 @@ impl From<InputDevice> for InputDevicePayload {
     }
 }
 
-/// 정지한 캡처 하나의 보고 값 (Phase 2A spike).
+/// 정지한 녹음 하나의 보고 값.
 ///
-/// **Phase 2A의 성공 기준이 그대로 필드다** —
-/// 장치 이름 · 출력 경로 · 포맷 · 파일 크기(byte).
-/// 사람이 이 값을 보고 잠정 결정을 지지할지 반박할지 판단한다 (ADR-0003 §12).
+/// 장치 이름 · 출력 경로 · 포맷 · 파일 크기(byte)는 ADR-0003 §12가 사람에게 보여 주기로 한
+/// 네 값 그대로다. 여기에 **녹음 길이**가 더해진다 — 일시정지 구간을 뺀 값이며, 그것을 세는
+/// 곳은 [`crate::audio::RecordingSession`] 한 곳뿐이다.
 ///
-/// `format`은 사람이 읽는 한 문장이고, 그 문장을 이루는 값도 따로 보낸다 — 화면이 문자열을
-/// 다시 뜯어보지 않아도 되게 하기 위해서다 ([`RecordingPayload::duration_label`]과 같은 이유).
+/// `format`과 `duration_label`은 사람이 읽는 문장이고, 그 문장을 이루는 값도 따로 보낸다 —
+/// 화면이 문자열을 다시 뜯어보거나 같은 계산을 TypeScript에 다시 만들지 않게 하기 위해서다
+/// ([`RecordingPayload::duration_label`]과 같은 이유).
 ///
-/// **이것은 저장된 Recording이 아니다.** 캡처 결과를 DB에 남기는 것은 Phase 2B의 일이며,
-/// 이 값은 어떤 레코드도 만들지 않는다.
+/// **이것은 저장된 Recording이 아니다.** 저장된 레코드는 [`StoppedRecordingPayload::recording`]
+/// 쪽이며, 둘은 [`StoppedRecordingPayload`]에서 함께 온다.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CaptureReportPayload {
@@ -150,10 +151,19 @@ pub struct CaptureReportPayload {
     pub container: String,
     /// 파일시스템에서 읽은 파일 크기(byte).
     pub byte_size: u64,
+    /// 일시정지 구간을 뺀 녹음 길이(밀리초).
+    pub duration_ms: i64,
+    /// Rust가 만든 표시용 길이(예: `52:31`).
+    pub duration_label: String,
 }
 
-impl From<CaptureReport> for CaptureReportPayload {
-    fn from(report: CaptureReport) -> Self {
+impl CaptureReportPayload {
+    /// 확정된 파일에 대한 사실과 session이 센 길이를 한 값으로 합친다.
+    ///
+    /// 둘을 여기서 합치는 이유는 **각자가 답할 수 없는 질문이 있기 때문이다** — 파일은
+    /// 자신이 몇 초짜리 녹음인지 모르고(일시정지 구간을 알지 못한다), session은 파일이
+    /// 실제로 얼마나 쓰였는지 모른다.
+    pub(super) fn new(report: CaptureReport, summary: SessionSummary) -> Self {
         Self {
             device_label: report.device_label,
             output_path: report.output_path.display().to_string(),
@@ -163,6 +173,89 @@ impl From<CaptureReport> for CaptureReportPayload {
             bits_per_sample: report.format.bits_per_sample,
             container: report.format.container().to_string(),
             byte_size: report.byte_size,
+            duration_ms: summary.duration_ms,
+            duration_label: summary.duration_label,
+        }
+    }
+}
+
+/// 정지가 **성공했을 때** 돌아오는 값 (Phase 2B 요구사항 5 · 6 · R-002).
+///
+/// 두 가지가 함께 온다 — **저장된 레코드**와 **확정된 파일에 대한 사실**이다.
+///
+/// ```text
+/// recording  목록에 나타나는 Recording 그 자체 (Phase 1의 저장소를 지나 저장됐다)
+/// capture    그 레코드가 가리키는 파일에 대한 사실 (장치 이름 · 포맷 · 크기)
+/// ```
+///
+/// 이 값이 돌아왔다는 것은 **파일이 확정되고 확인됐으며 레코드가 저장됐다**는 뜻이다.
+/// 넷 중 하나라도 성립하지 않으면 이 값 대신 [`Failure`]가 간다 —
+/// 그때 그 실패는 확정된 파일이 어디에 남아 있는지 함께 말한다 (INV-4).
+///
+/// [`Failure`]: crate::domain::Failure
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoppedRecordingPayload {
+    /// 저장된 녹음. 목록 화면이 그대로 쓰는 값과 같은 모양이다.
+    pub recording: RecordingPayload,
+    /// 방금 확정된 파일에 대한 사실.
+    pub capture: CaptureReportPayload,
+}
+
+/// **레코드는 있는데 오디오 파일이 없는** 녹음 하나 (Phase 2B 요구사항 6).
+///
+/// 이 값은 **보고일 뿐이다.** 이런 상태를 발견해도 레코드를 지우거나 고치지 않고, 파일을
+/// 새로 만들지도 않는다 (INV-3 · INV-4). 무엇을 할지는 사용자가 정한다 — 이 앱이 대신
+/// 정리하지 않는다는 것이 정책이다
+/// (`docs/ADR-0004-recording-session-lifecycle.md`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MissingAudioPayload {
+    pub recording_id: String,
+    pub title: String,
+    /// 레코드가 가리키고 있지만 지금 그 자리에 없는 경로.
+    pub audio_path: String,
+    pub created_at: String,
+}
+
+impl From<&RecordingPayload> for MissingAudioPayload {
+    fn from(recording: &RecordingPayload) -> Self {
+        Self {
+            recording_id: recording.id.clone(),
+            title: recording.title.clone(),
+            audio_path: recording.audio_path.clone(),
+            created_at: recording.created_at.clone(),
+        }
+    }
+}
+
+/// 지금 녹음이 어떤 상태인지 (Phase 2B 요구사항 4 · R-001).
+///
+/// 화면은 이 값을 **물어봐서** 안다. 진행 중인 session을 들고 있는 것은 backend이므로,
+/// 화면이 다시 그려지거나 사용자가 다른 화면에 다녀와도 여기서 같은 답이 나온다
+/// (`docs/ADR-0004-recording-session-lifecycle.md`).
+///
+/// **길이는 Rust가 세고 Rust가 문장까지 만든다.** `elapsed_ms`와 `elapsed_label`을 함께
+/// 보내는 이유가 그것이다 — TypeScript에 길이 계산을 만들지 않는다
+/// (`tests/screen-boundary.test.ts` · [`RecordingPayload::duration_label`]).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionStatusPayload {
+    /// `idle · recording · paused · stopped` 중 하나.
+    pub state: String,
+    /// 일시정지 구간을 뺀, 지금까지의 녹음 길이(밀리초).
+    pub elapsed_ms: i64,
+    /// 같은 길이를 사람이 읽는 문장으로 (예: `0:07`).
+    pub elapsed_label: String,
+}
+
+impl SessionStatusPayload {
+    /// 상태와 경과 시간 하나를 값으로 만든다.
+    pub(super) fn new(state: SessionState, elapsed_ms: i64, elapsed_label: String) -> Self {
+        Self {
+            state: state.as_str().to_string(),
+            elapsed_ms,
+            elapsed_label,
         }
     }
 }
@@ -177,6 +270,13 @@ pub struct SettingsPayload {
     #[serde(default)]
     pub recordings_directory: Option<String>,
     pub automatic_processing: bool,
+    /// 기본으로 고를 입력 장치의 **선택 키** ([`InputDevicePayload::key`]).
+    ///
+    /// 고르지 않은 상태(`null`)도 정상이다. 이 값이 가리키는 장치가 지금 목록에 있는지는
+    /// 여기서 말하지 않는다 — 목록과 함께 봐야 알 수 있고, 그 해석은 화면 쪽에 있다
+    /// (`src/screens/defaultMicrophone.ts`).
+    #[serde(default)]
+    pub default_microphone: Option<String>,
 }
 
 impl From<Settings> for SettingsPayload {
@@ -184,6 +284,7 @@ impl From<Settings> for SettingsPayload {
         Self {
             recordings_directory: settings.recordings_directory,
             automatic_processing: settings.automatic_processing,
+            default_microphone: settings.default_microphone,
         }
     }
 }
@@ -198,6 +299,13 @@ impl From<SettingsPayload> for Settings {
                 .map(|directory| directory.trim().to_string())
                 .filter(|directory| !directory.is_empty()),
             automatic_processing: payload.automatic_processing,
+            // 같은 이유로 빈 선택은 '고르지 않음'이다. **다만 그것뿐이다** — 알아볼 수 없는
+            // 키가 와도 여기서 다른 장치로 바꾸지 않는다. 저장된 값과 지금 있는 장치를
+            // 맞춰 보는 일은 목록을 아는 쪽의 일이고, 그 결과는 값으로 구분된다.
+            default_microphone: payload
+                .default_microphone
+                .map(|key| key.trim().to_string())
+                .filter(|key| !key.is_empty()),
         }
     }
 }

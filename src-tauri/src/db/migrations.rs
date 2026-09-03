@@ -143,6 +143,23 @@ pub const MIGRATIONS: &[Migration] = &[
                   CHECK (automatic_processing IN (0, 1))
           );",
     },
+    // PRODUCT-SPEC §5 D의 default microphone. 위의 `create_settings`를 고치지 않고 **열을 더한다** —
+    // version 3까지 적용된 사용자 DB가 이미 있을 수 있고, 그 행의 값은 그대로 남아야 한다.
+    // 이미 있는 행의 새 열은 NULL, 즉 '아직 고르지 않음'으로 시작한다.
+    //
+    // 담는 값은 장치가 보여 주는 **이름이 아니라 선택 키**다 (`crate::audio::devices`).
+    // 이름이 같은 장치가 둘 있을 수 있어서 이름으로는 어느 것인지 말할 수 없다.
+    //
+    // 저장된 키가 다음 열거 목록에 없을 수 있다 — 장치를 뽑으면 그렇게 된다. 그것은
+    // 스키마가 막을 일이 아니라 **해석하는 쪽이 구분해서 말해야 하는 상태**이며,
+    // 조용히 다른 장치로 바꾸지 않는다 (`src/screens/defaultMicrophone.ts`).
+    //
+    // INV-7: 여기서도 secret 열은 만들지 않는다.
+    Migration {
+        version: 4,
+        name: "add_default_microphone_to_settings",
+        sql: "ALTER TABLE settings ADD COLUMN default_microphone TEXT;",
+    },
 ];
 
 /// 코드가 알고 있는 최신 스키마 버전. migration이 없으면 0이다.

@@ -4,13 +4,19 @@
 Status:   PROVISIONAL — pending human device validation
 Date:     2026-09-02
 Phase:    Phase 2A — Recording Engine Validation
-Task:     TASK-010 (작성) · TASK-011 · TASK-012 · TASK-013 (자동 검증 근거) · TASK-014 (실행 절차 · 기록표)
+Task:     TASK-010 (작성) · TASK-011 · TASK-012 · TASK-013 (자동 검증 근거) · TASK-014 (실행 절차 · 기록표) ·
+          TASK-022 (Phase 2B 추가 기록 — §15)
 Scope:    recording engine 후보 비교 · 잠정 선택 · 근거의 종류 구분 · 사람이 확인해야 할 것과 그 확인 절차
 ```
 
 Status가 `PROVISIONAL`인 이유는 §2에 있다. 확정되려면 무엇이 필요한지는 §12,
 그것을 사람이 어떻게 확인하는지는 §12.1이다.
 **§12의 8개 항목은 하나도 확인되지 않았다** (§4.2.4).
+
+> **2026-09-03 — Phase 2B가 이 잠정 선택을 구현 전제로 소비했다.** 무엇을 소비했고, 무엇이
+> [A✓]가 됐고, 무엇이 여전히 [H]/[U]인지는 **§15**에 있다.
+> **그 구현은 이 문서의 상태를 바꾸지 않는다** — Status는 `PROVISIONAL`이고 §12의 8개 항목은
+> 전부 `DEFERRED`다.
 
 > **2026-09-02 — 장치 검증이 Final Integration으로 연기됐다.** 자세한 것은 §12의 머리말과
 > §12.A(ASSUMPTION A-REC-001)에 있다. 이 문서는 **PROVISIONAL로 남는다** —
@@ -939,3 +945,95 @@ ffprobe -hide_banner "$FILE"    # ffmpeg가 있는 경우 (§14.1 기준 이 기
 - whisper 통합 · 전사 · AI Provider · Notion · Markdown export — Phase 3 이후.
 - Windows 빌드 · 실행 · 권한 로직 — Phase 6. 이 문서는 Windows를 **평가 근거로만** 다뤘다 (§10).
 - macOS entitlements · 코드 서명 · 공증 — ADR-0002 §7과 같은 이유로 여기서도 다루지 않는다.
+
+> §14가 Phase 2B로 미뤄 둔 것들은 그 사이에 만들어졌다. 무엇이 만들어졌고 그것이 이 문서의
+> 어느 칸을 채웠는지(그리고 채우지 **못했는지**)는 §15다.
+
+---
+
+## 15. Phase 2B 추가 기록 — production 구현이 이 잠정 선택에서 무엇을 소비했는가
+
+```text
+기록 일자:  2026-09-03
+기록 Task:  TASK-022 (문서만)
+기록 대상:  TASK-016 · 017 · 018 · 019 · 020 · 021의 구현
+Status:     바뀌지 않았다 — 이 문서는 여전히 PROVISIONAL이고 §12의 8개 항목은 전부 DEFERRED다
+```
+
+> **이 절은 승격이 아니다.** `phase-prompt/02-reliable-recording.md`는 Phase 2B가 engine을
+> 다시 고르지 않고 **잠정 선택을 구현 전제로 소비한다**고 못박았고, 동시에
+> **"ADR-0003의 상태를 이 단계에서 `CONFIRMED`로 바꾸지 않는다"** 고 적었다.
+> Phase 2B는 코드를 만들었지 **장치 증거를 만들지 않았다.** 그러므로 §12의 표는
+> 이 절 뒤에도 그대로 `DEFERRED`다.
+
+**이 절의 [A✓]도 §3의 규칙을 따른다** — 이 Task는 문서만 바꾸므로 Gate를 실행하지 않았다
+(`.loop/tasks/TASK-022.yaml`의 `stop_condition.gates`가 비어 있다). 여기서 [A✓]는
+**저장소 파일을 직접 읽어 확인했다**는 뜻이다. "그 테스트가 실제로 green이었다"는 판정은
+각 Task의 Gate에 속하며, 그 Task들이 `status: DONE`으로 남아 있다는 사실이 그 자리를 가리킨다
+(`.loop/tasks/TASK-016.yaml` … `TASK-021.yaml`).
+
+### 15.1 Phase 2B가 이 문서에서 소비한 것
+
+| 소비한 것 | 어디로 갔는가 | 이 문서의 자리 |
+| --- | --- | --- |
+| 잠정 선택 그 자체 — `cpal` 0.18.2 + `hound` 3.5.1 | engine을 다시 고르지 않았다. 후보 A·C를 재검토한 Task가 없다 | §6 |
+| `SampleSource` 경계 (하드웨어를 아는 코드를 두 파일에 가둔다) | production `Recorder`가 그대로 쓴다 (`src-tauri/src/commands/mod.rs`) | §5.13 |
+| 장치 열거와 **선택 키를 만드는 규칙** | 목록을 만들 때와 장치를 열 때가 같은 규칙을 쓴다 (`audio/devices.rs`의 `selection_keys`를 `audio/system_capture.rs`가 다시 부른다) | §5.2 · §5.3 |
+| **코드가 고정하는 포맷** — WAV(RIFF) · 16-bit 정수 PCM | 그대로다. Phase 2B가 컨테이너도 비트 심도도 바꾸지 않았다 | §4.2.3 |
+| 이미 있는 경계 — Tauri command · `AppDataDirectory` · `Failure`/`FailureKind` | 새 경계를 만들지 않았다. 늘어난 것은 `FailureKind::MicrophonePermission` 하나다 | §5.11 · §9 |
+
+Phase 2B가 그 위에 **새로 얹은 것**은 이 문서의 결정이 아니라 별도 ADR에 있다 —
+session의 소유자와 정지의 순서·보상은 `docs/ADR-0004-recording-session-lifecycle.md`,
+권한 경계는 `docs/ADR-0005-microphone-permission.md`, 재생 통로는
+`docs/ADR-0006-audio-playback.md`다.
+
+### 15.2 [A?] → [A✓] — Phase 2B가 실제로 확인한 것
+
+§5가 "자동으로 확인할 수 있으나 아직 하지 않았다"로 남겨 둔 항목 중 답이 나온 것들이다.
+**전부 "코드가 그렇게 되어 있다"에 대한 확인이며, "이 기기의 마이크가 그렇더라"가 아니다.**
+
+| §5의 항목 | 무엇이 됐는가 | 근거 파일 |
+| --- | --- | --- |
+| **5.4** pause/resume — "일시정지 구간의 샘플을 파일에 쓰지 않는 방식으로 구현할 수 있다" [A?] | **[A✓]** — 그 방식으로 구현됐다. 일시정지 표시가 샘플과 **같은 통로**로 흐르므로(`Packet::Paused` · `Resumed`) 이미 큐에 있던 샘플이 표시에 휩쓸리지 않고, 재개는 **같은 파일**에 이어 쓰며, 일시정지 구간은 길이에 더해지지 않는다 | `src-tauri/src/audio/capture.rs` · `src-tauri/src/audio/session.rs` · `src-tauri/tests/recording_lifecycle.rs` |
+| **5.4** pause/resume — "`cpal`이 스트림 일시정지 API를 제공하는가" [A?] | **[U] 그대로.** 그 경로를 쓰지 않기로 했으므로 확인하지 않았다. 확인하지 않은 것을 확인한 것으로 적지 않는다 | — |
+| **5.5** file finalization | TASK-012의 [A✓](`finalize()`가 파일을 확정한다) 위에 **확정된 파일을 다시 열어 형식과 프레임 수를 읽는 확인 단계**가 더해졌다 — 크기만으로 판정하지 않는다 | `src-tauri/src/audio/finalized.rs` (`verify`) |
+| **5.6** data-loss | 큐 한도 초과를 조용히 버리지 않고 실패로 알린다는 TASK-012의 정책 위에, **어떤 실패 경로도 이미 쓰인 오디오 파일을 지우지 않는다**가 판정 대상이 됐다 (INV-4) | `src-tauri/tests/stop_persistence.rs` |
+| **5.12** packaging — "`rusqlite`의 `bundled`처럼 C 툴체인을 추가로 요구하는가" [A?] | **[A✓ — 이 기기에 한해]** §4.2.1이 적은 컴파일 사실이 이 질문의 답이기도 하다. 추가 툴체인 요구가 드러나지 않았다. **다른 빌드 환경은 여전히 [U]다** (§9) | §4.2.1 |
+| **5.13** testability | `idle → recording → paused → recording → stopped` 전체 경로가 **마이크 없이, 시간을 실제로 흘려보내지 않고** 지나간다 — 시계도 경계 뒤에 있다 (`platform/clock.rs`) | `src-tauri/tests/recording_session.rs` · `recording_lifecycle.rs` · `stop_persistence.rs` · `microphone_permission.rs` |
+
+**§8의 결정은 그대로다.** 5.13이 더 단단해졌다는 사실을 §6의 선택 근거로 세지 않는다 —
+그것은 후보의 성질이 아니라 **우리 도구의 성질**이기 때문이다.
+
+### 15.3 확인되지 않은 채로 남은 것
+
+| 항목 | 태그 | 어디에 있는가 |
+| --- | --- | --- |
+| **§12의 8개 항목 전부** — 권한 프롬프트 · 선택한 마이크 · 장치 열림 · 녹음 성공 · 파일 존재 · 음질 · 실제 포맷 · Stop 손상 여부 | **[H] · 전부 `DEFERRED`** | §12 (Final Integration) |
+| **샘플레이트와 채널 수는 여전히 장치가 정한다.** Phase 2B는 리샘플링도 다운믹스도 추가하지 않았다 — 장치가 알려준 값을 그대로 쓴다 | **[A✓ — 코드에 대해] + [H]** | `audio/system_capture.rs`의 `default_input_config()` → `CaptureFormat::pcm_16bit(...)` · §4.2.3 · §12 항목 7 |
+| 그래서 **§6의 근거 1("변환 없이")의 상태도 그대로다** — `16-bit WAV`는 코드가 고정하고 `16kHz mono`는 장치가 정한다 | **변화 없음** | §6의 2026-09-02 주석 · §11 |
+| 이 기기의 장치가 실제로 주는 **샘플 형식**(`I16` / `F32` / 그 밖) | **[U]** | 코드는 두 가지를 다루고 그 밖은 거절한다 (`audio/system_capture.rs`) |
+| macOS **TCC 상태를 실제로 조회하는 수단** | **[U]** | ADR-0005 §4 — `SystemMicrophonePermission`은 macOS에서 `Undetermined`를 돌려준다. §5.9의 B행 [U]가 그대로 남았다 |
+| 번들된 `.app`의 `Info.plist` 병합 · 실제 TCC 프롬프트 | **[H]** | ADR-0002 §5.2 · §12 항목 1. `tauri build`는 여전히 Gate가 아니다 |
+| **장시간(1시간) 녹음 안정성 · crash 내성** | **[U] → Human Review** | §9. 사람이 **한 번** 수행하는 항목으로 옮겨 적었다 (ADR-0004 §17) |
+| **재생이 실제로 소리를 내는가 · 음질** | **[H]** | ADR-0006 §4 · ADR-0004 §17 |
+| Windows 실동작 | **[R §14.3][U]** | §10 · Phase 6 |
+
+### 15.4 그래서 이 문서의 상태는 어떻게 되는가
+
+```text
+Status:                  PROVISIONAL   (바뀌지 않았다)
+§12의 8개 항목:           DEFERRED      (하나도 PASS/FAIL이 되지 않았다)
+Human Review:            Final Integration
+ASSUMPTION A-REC-001:    유효 — 운영자가 2026-09-02에 수용한 위험 위에서 Phase 2B가 진행됐다
+```
+
+**§13의 첫 줄("Phase 2B는 이 문서가 확정되기 전에 시작하지 않는다")은 2026-09-02의 운영자
+결정으로 대체됐다** — 장치 검증이 Final Integration으로 **연기**됐고 그 위험이 A-REC-001로
+수용됐다 (§12의 머리말 · §12.A · `phase-prompt/02-reliable-recording.md`).
+**순서가 바뀐 것이지 항목이 사라진 것이 아니다.** §12의 8개는 그대로 남아 있고,
+§12.1의 실행 절차도 그대로 유효하다.
+
+§6.1의 반증 조건도 그대로다. 달라진 것은 **그 반증이 나왔을 때 되돌릴 코드가 생겼다**는 점이며,
+그 범위는 `src-tauri/src/audio/**` · `src-tauri/src/commands/**`와 ADR-0004 · 0005 · 0006이다.
+그때 임의로 다른 engine으로 갈아타지 않고 `engine assumption invalidated`로 사람에게 올린다
+(§12.A).

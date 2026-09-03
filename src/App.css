@@ -211,6 +211,13 @@ input {
   border-radius: 5px;
 }
 
+/* 무엇을 하다 실패했는가 — 원인 문장 위에 놓인다. */
+
+.failure__headline {
+  margin: 0 0 4px;
+  font-weight: 600;
+}
+
 .failure__message {
   margin: 0 0 4px;
   font-weight: 500;
@@ -228,7 +235,22 @@ input {
   word-break: break-word;
 }
 
-/* recording */
+/*
+ * recording (§5 B · §19)
+ *
+ * 화면에서 가장 큰 것은 경과 시간이고, 그 위에 녹음 중이라는 사실이 있다. 깜빡임 ·
+ * 그림자 · 파형 같은 장식은 두지 않는다 — 여기서 중요한 것은 그 두 값뿐이다.
+ */
+
+/* 제목 입력이 경과 시간보다 눈에 띄지 않도록 폭을 제한한다. */
+
+.recording__title {
+  max-width: 520px;
+}
+
+.recording {
+  margin: 28px 0 16px;
+}
 
 .recording__state {
   margin: 0;
@@ -236,6 +258,13 @@ input {
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--text-muted);
+}
+
+/* 녹음 중일 때만 흐리지 않다. 상태가 한눈에 갈린다. */
+
+.recording__state--live {
+  font-weight: 600;
+  color: var(--text);
 }
 
 .recording__elapsed {
@@ -246,37 +275,59 @@ input {
   letter-spacing: 0.01em;
 }
 
-/*
- * Phase 2A spike 패널 (docs/ADR-0003-recording-engine.md §12).
- * 임시 표면이므로 꾸미지 않는다 — 점선 하나로 "여기는 최종 화면이 아니다"만 말한다.
- * Phase 2B가 이 자리를 대체할 때 함께 사라진다.
- */
+.recording__controls {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 20px;
+}
 
-.spike-notice {
+.recording__microphone {
   max-width: 520px;
-  margin: 0 0 20px;
-  padding: 8px 10px;
-  border: 1px dashed var(--hairline);
+  margin-bottom: 20px;
+}
+
+.recording__device {
+  margin: 0 0 4px;
+}
+
+/* recording detail (§5 C) */
+
+.detail__title {
+  margin: 0 0 2px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.detail__player {
+  max-width: 520px;
+  margin: 16px 0 4px;
+}
+
+/* 재생 막대 하나가 전부다. 파형도 장식도 두지 않는다 (§19). */
+
+.detail__audio {
+  width: 100%;
+}
+
+/* 파일이 없는 상태. 실패처럼 붉게 칠하지 않는다 — 레코드는 온전하다 (INV-3 · INV-4). */
+
+.detail__player--missing {
+  padding: 12px;
+  border: 1px solid var(--hairline);
   border-radius: 5px;
-  font-size: 13px;
-  color: var(--text-muted);
 }
 
-.spike-result {
+.detail__missing {
+  margin: 0 0 4px;
+  font-weight: 500;
+}
+
+.detail__path {
   margin: 0;
-}
-
-.spike-result dt {
   font-size: 13px;
   color: var(--text-muted);
+  word-break: break-all;
 }
-
-.spike-result dd {
-  margin: 0 0 8px;
-  word-break: break-word;
-}
-
-/* recording detail */
 
 .tabs {
   display: flex;

@@ -5,7 +5,7 @@
 //
 // 세 가지를 본다:
 //   1. src/ 아래에 SQL이나 임의 질의 경로가 없다 — 저장소를 아는 것은 Rust뿐이다.
-//   2. 등록된 command 목록과 frontend가 부르는 목록이 정확히 같고, Phase 1 범위를 넘지 않는다.
+//   2. 등록된 command 목록과 frontend가 부르는 목록이 정확히 같고, 지금 범위를 넘지 않는다.
 //   3. Rust의 실패 종류가 frontend 타입에 전부 있다 — 실패가 조용히 어긋나지 않는다.
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -34,9 +34,11 @@ const rustFailureSource = readText('../src-tauri/src/domain/failure.rs');
 /**
  * 지금까지 노출하기로 한 command 전부.
  *
- * 앞의 여섯은 Phase 1(recording CRUD · settings)이고, 나머지 셋은 Phase 2A가 engine 검증을
- * 위해 더한 spike 표면이다 — **입력 장치 열거**와 **캡처 시작 / 정지 한 쌍**
- * (docs/ADR-0003-recording-engine.md §12).
+ * 앞의 여섯은 Phase 1(recording CRUD · settings)이고, 나머지는 녹음 표면이다 —
+ * **입력 장치 열거**와 **녹음 session**(시작 · 일시정지 · 재개 · 정지 · 상태 조회),
+ * 그리고 **레코드와 파일이 어긋난 상태의 감지**(`list_missing_audio`)다.
+ * 진행 중인 session을 소유하는 것은 backend이며, 화면은 이 command로만 그것을 다룬다
+ * (R-001 · docs/ADR-0004-recording-session-lifecycle.md).
  *
  * 이 목록에 없는 이름이 등록되면 그것은 Phase 범위가 넘쳤다는 뜻이다 — 그래서 이 검사는
  * 부분집합이 아니라 **정확히 같은 집합**을 요구한다.
@@ -50,7 +52,11 @@ const REGISTERED_COMMANDS = [
   'update_settings',
   'list_input_devices',
   'start_capture',
+  'pause_capture',
+  'resume_capture',
   'stop_capture',
+  'capture_status',
+  'list_missing_audio',
 ];
 
 /** lib.rs의 generate_handler![...]에 등록된 command 이름. */
@@ -95,15 +101,17 @@ describe('command 표면', () => {
   });
 
   it('아직 만들지 않은 기능의 command가 등록되어 있지 않다', () => {
-    // Phase 2A가 만드는 것은 **start / stop 한 쌍의 spike 캡처**까지다.
-    // pause/resume · 재생 · Recording 영속화는 Phase 2B이고, 전사 · AI · Notion은
-    // 각각 Phase 3 · 4 · 5다. 아래 정규식이 그 선을 지킨다 — `*_recording`은 Recording
-    // 레코드를 만드는 영속화 표면의 이름이므로 여전히 막혀 있다.
+    // 녹음 표면은 **capture 계열 네 동작과 상태 조회**까지다. 저장된 녹음의 재생은
+    // command로 하지 않는다 — 파일은 asset protocol로 흐르므로 이 표면에 이름이 생기지
+    // 않는다 (docs/ADR-0006-audio-playback.md). 전사 · AI · Notion은 각각 Phase 3 · 4 · 5다.
+    // 아래 정규식이 그 선을 지킨다 —
+    // `*_recording`은 Recording 레코드를 만드는 영속화 표면의 이름이므로,
+    // 녹음 동작이 그 이름으로 새로 생기는 것은 여전히 막는다.
     const outOfScope =
-      /(start|stop|pause|resume)_recording|(pause|resume)_capture|play|transcri|whisper|\bai_|notion|ollama|export/i;
+      /(start|stop|pause|resume)_recording|play|transcri|whisper|\bai_|notion|ollama|export/i;
 
     for (const command of registeredCommands()) {
-      expect(command, `${command}는 Phase 1의 command가 아니다`).not.toMatch(outOfScope);
+      expect(command, `${command}는 아직 만들지 않은 기능의 command다`).not.toMatch(outOfScope);
     }
   });
 

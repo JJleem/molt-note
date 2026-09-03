@@ -34,8 +34,17 @@ pub enum FailureKind {
     /// 오디오 입력 장치를 다루지 못했다. 지금은 장치 목록을 읽지 못한 경우가 여기 속한다.
     ///
     /// 저장소 실패와 구분한다 — 사용자가 할 수 있는 일이 다르다. 저장소는 앱을 다시 시작하는
-    /// 문제이고, 이쪽은 장치 연결이나 마이크 권한의 문제다.
+    /// 문제이고, 이쪽은 장치 연결의 문제다.
     AudioDevice,
+    /// 마이크에 접근할 수 없다 (§13의 `microphone permission denied`).
+    ///
+    /// **장치 실패와도, 녹음 초기화 실패와도 구분한다.** 사용자가 할 수 있는 일이 다르기
+    /// 때문이다 — 이 실패는 다른 장치를 고르거나 앱을 다시 시작해서 풀리지 않고, 시스템의
+    /// 권한 설정에서 접근을 허용해야 풀린다.
+    ///
+    /// **어디서 무엇을 켜야 하는지는 domain이 알지 않는다.** 그 문장은 platform 경계가
+    /// 만들어 넣는다 (`crate::platform::microphone_permission` · INV-10).
+    MicrophonePermission,
 }
 
 impl FailureKind {
@@ -47,6 +56,7 @@ impl FailureKind {
             Self::Storage => "storage",
             Self::InvalidInput => "invalidInput",
             Self::AudioDevice => "audioDevice",
+            Self::MicrophonePermission => "microphonePermission",
         }
     }
 }
@@ -182,6 +192,10 @@ mod tests {
         assert_eq!(FailureKind::Storage.as_str(), "storage");
         assert_eq!(FailureKind::InvalidInput.as_str(), "invalidInput");
         assert_eq!(FailureKind::AudioDevice.as_str(), "audioDevice");
+        assert_eq!(
+            FailureKind::MicrophonePermission.as_str(),
+            "microphonePermission"
+        );
 
         // 이 문자열들은 `src/ipc/failure.ts`의 union과 1:1이다. 겹치면 화면이 두 실패를
         // 구분하지 못한다.
@@ -189,6 +203,7 @@ mod tests {
             FailureKind::Storage,
             FailureKind::InvalidInput,
             FailureKind::AudioDevice,
+            FailureKind::MicrophonePermission,
         ];
         let mut seen = Vec::new();
         for kind in kinds {

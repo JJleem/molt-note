@@ -10,8 +10,23 @@
 //! 그래서 **파일이 만들어지고 확정되는 경로 전체가 마이크 없이 테스트된다** — 가짜 샘플
 //! 소스를 [`SampleSource`] 자리에 넣으면 나머지는 실제 코드가 그대로 지나간다 (§18).
 //!
-//! **start / stop 한 쌍이 전부다.** pause/resume · 재시작 영속성 · 재생 · Recording 레코드
-//! 생성은 여기에 없다 — 전부 Phase 2B다 (ADR-0003 §14).
+//! **start · pause · resume · stop 네 가지가 여기에 있다.** 그 넷을 언제 부를 수 있는지는
+//! 이 파일이 정하지 않는다 — 전이 규칙은 [`super::session`]에, 둘을 엮는 자리는
+//! [`crate::commands`]에 있다. 재시작 영속성과 재생은 아직 없다.
+//!
+//! **확정된 파일이 쓸 수 있는 녹음인지 확인하는 것도 이 파일의 일이 아니다.** [`ActiveCapture::stop`]이
+//! 돌려주는 보고 값은 "여기까지 했다"이며, 그것이 R-002가 말하는 성공인지는
+//! [`super::finalized`]가 판정한다.
+//!
+//! ## pause는 장치를 닫지 않는다
+//!
+//! 일시정지는 **열린 장치와 쓰는 중인 파일을 그대로 둔 채** 샘플이 파일에 도달하지 않게
+//! 하는 것이다 (Phase 2B 요구사항 4). 그래서 resume은 같은 파일에 이어 쓰고, 정지는 여전히
+//! 파일 하나를 확정한다.
+//!
+//! 표시(`Paused` · `Resumed`)는 샘플과 **같은 통로**를 지난다 ([`Packet`]). 별도의 플래그를
+//! 두면 큐에 이미 들어와 있던 — 즉 일시정지 **이전에 녹음된** — 샘플이 그 플래그에 휩쓸려
+//! 사라진다. 같은 통로를 쓰면 표시가 샘플 사이의 정확한 자리에 놓인다.
 //!
 //! ## 만들어지는 포맷 — 확인된 것과 확인되지 않은 것
 //!
@@ -26,7 +41,7 @@
 use std::fs;
 use std::io::BufWriter;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
+use std::sync::mpsc::{sync_channel, Receiver, SyncSender, TrySendError};
 use std::thread::JoinHandle;
 
 use crate::domain::{Failure, FailureKind};
@@ -37,8 +52,12 @@ pub const CONTAINER: &str = "WAV";
 /// 이 경로가 쓰는 샘플 하나의 비트 수. 샘플을 `i16`으로 쓰므로 16이다.
 pub const BITS_PER_SAMPLE: u16 = 16;
 
-/// 출력 파일 확장자.
-const EXTENSION: &str = "wav";
+/// 출력 파일 확장자이자 **레코드에 남는 형식 식별자**(`Recording::audio_format` · §7).
+///
+/// 컨테이너 이름([`CONTAINER`])과 같은 것을 가리키지만 쓰임이 다르다 — 하나는 사람이 읽는
+/// 문장에 들어가고, 이 값은 저장되고 이후 Phase가 읽는 식별자다. 두 값을 각각 지어내지
+/// 않도록 형식 식별자의 출처는 여기 하나뿐이다 ([`super::finalized::VerifiedAudio::format`]).
+pub const EXTENSION: &str = "wav";
 
 /// 같은 이름을 몇 번까지 비켜 볼 것인가. 여기까지 전부 차 있으면 이름을 만들지 못한 것이다.
 const MAX_PATH_ATTEMPTS: u32 = 1_000;
@@ -115,6 +134,63 @@ pub struct CaptureReport {
     pub byte_size: u64,
 }
 
+/// 파일에 쓰는 쪽으로 흘러가는 것.
+///
+/// 샘플과 일시정지 표시가 **같은 순서로 같은 통로를 지난다.** 그래서 표시가 도착한 시점이
+/// 곧 "여기까지가 녹음이다"이며, 그 앞의 샘플은 전부 파일에 들어가고 뒤의 것은 하나도
+/// 들어가지 않는다 (모듈 주석).
+enum Packet {
+    /// 파일에 쓸 샘플 덩어리.
+    Samples(Vec<i16>),
+    /// 여기서부터 파일에 쓰지 않는다.
+    Paused,
+    /// 여기서부터 다시 파일에 쓴다. 파일은 같은 파일이다.
+    Resumed,
+}
+
+/// 샘플을 보내지 못한 이유.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SinkError {
+    /// 아직 파일에 쓰지 못한 것이 한도([`SAMPLE_QUEUE_CAPACITY`])까지 쌓여 있다.
+    ///
+    /// **저장이 녹음을 따라가지 못하고 있다는 뜻이다.** 보내는 쪽은 이 사실을 조용히
+    /// 삼키지 않는다 (R-005).
+    Full,
+    /// 받는 쪽이 이미 끝났다. 정지 중이라는 뜻이며 보통은 실패가 아니다.
+    Closed,
+}
+
+/// 샘플이 파일 쪽으로 들어가는 입구. [`SampleSource`]가 받는 값이다.
+///
+/// 통로의 실제 모양(일시정지 표시가 함께 흐른다는 것)은 이 타입 뒤에 있다 — 장치를 여는
+/// 코드는 샘플을 보내는 일만 알면 된다.
+#[derive(Clone)]
+pub struct SampleSink {
+    sender: SyncSender<Packet>,
+}
+
+impl SampleSink {
+    /// 자리가 날 때까지 기다렸다가 보낸다.
+    ///
+    /// 스스로 속도를 조절할 수 있는 쪽(테스트의 가짜 장치 등)이 쓴다. **실제 오디오 콜백은
+    /// 기다릴 수 없으므로** [`Self::try_send`]를 쓴다.
+    pub fn send(&self, chunk: Vec<i16>) -> Result<(), SinkError> {
+        self.sender
+            .send(Packet::Samples(chunk))
+            .map_err(|_| SinkError::Closed)
+    }
+
+    /// 기다리지 않고 보낸다. 보내지 못했으면 그 이유를 돌려준다.
+    pub fn try_send(&self, chunk: Vec<i16>) -> Result<(), SinkError> {
+        self.sender
+            .try_send(Packet::Samples(chunk))
+            .map_err(|error| match error {
+                TrySendError::Full(_) => SinkError::Full,
+                TrySendError::Disconnected(_) => SinkError::Closed,
+            })
+    }
+}
+
 /// 열린 캡처 하나. [`SampleSource`]가 돌려주는 값이다.
 pub struct OpenCapture {
     /// 실제로 열린 장치의 이름.
@@ -135,8 +211,11 @@ pub trait SampleSource {
     /// 들어오는 샘플은 `samples`로 보낸다. 큐가 가득 차면 **버리지 말고** 정지 시점에
     /// 실패로 알린다 ([`OpenCapture::stop`]).
     ///
+    /// **일시정지는 이 경계의 일이 아니다.** 장치는 계속 열려 있고 샘플도 계속 들어온다 —
+    /// 그것을 파일에 쓸지 말지는 [`ActiveCapture`]가 정한다 (모듈 주석).
+    ///
     /// 장치를 열지 못하면 실패다. 이때 파일은 아직 만들어지지 않았다.
-    fn open(&self, device_key: &str, samples: SyncSender<Vec<i16>>) -> Result<OpenCapture, Failure>;
+    fn open(&self, device_key: &str, samples: SampleSink) -> Result<OpenCapture, Failure>;
 }
 
 /// 진행 중인 캡처 하나. [`Self::stop`]이 파일을 확정하고 보고 값을 만든다.
@@ -146,11 +225,44 @@ pub struct ActiveCapture {
     output_path: PathBuf,
     stop_device: Box<dyn FnOnce() -> Result<(), Failure> + Send>,
     /// 파일에 쓰는 쪽으로 가는 통로. 이것을 닫는 것이 "더 이상 샘플이 없다"는 신호다.
-    samples: SyncSender<Vec<i16>>,
+    packets: SyncSender<Packet>,
     writer: JoinHandle<Result<(), Failure>>,
 }
 
 impl ActiveCapture {
+    /// 확정될 파일의 경로. 아직 쓰는 중이다.
+    pub fn output_path(&self) -> &Path {
+        &self.output_path
+    }
+
+    /// 여기서부터 들어오는 샘플을 파일에 쓰지 않는다.
+    ///
+    /// **장치도 파일도 그대로 열려 있다.** 표시가 도착하기 전까지 들어온 샘플은 전부
+    /// 파일에 들어간다 (모듈 주석).
+    pub fn pause(&self) -> Result<(), Failure> {
+        self.mark(Packet::Paused)
+    }
+
+    /// 여기서부터 다시 파일에 쓴다. **같은 파일에 이어 쓴다** — 새 파일을 만들지 않는다.
+    pub fn resume(&self) -> Result<(), Failure> {
+        self.mark(Packet::Resumed)
+    }
+
+    /// 표시 하나를 통로에 넣는다.
+    ///
+    /// 넣지 못하는 경우는 하나뿐이다 — **쓰는 쪽이 이미 끝났을 때**다. 그때는 파일에 쓰는
+    /// 일이 실패했다는 뜻이므로 그 사실을 숨기지 않는다. 정지하면 그때까지 확정된 것을
+    /// 사용자가 알 수 있다 ([`Self::stop`]).
+    fn mark(&self, packet: Packet) -> Result<(), Failure> {
+        self.packets.send(packet).map_err(|_| {
+            Failure::permanent(
+                FailureKind::Storage,
+                "녹음을 파일에 쓰는 일이 이미 끝났다. 정지하면 그때까지 저장된 것을 확인할 수 있다.",
+            )
+            .with_source_data_at_risk()
+        })
+    }
+
     /// 캡처를 멈추고 파일을 확정한 뒤 보고 값을 만든다.
     ///
     /// 순서가 중요하다 — **장치를 먼저 멈추고 · 통로를 닫고 · 쓰는 쪽이 끝나기를 기다린 뒤**
@@ -161,7 +273,7 @@ impl ActiveCapture {
             format,
             output_path,
             stop_device,
-            samples,
+            packets,
             writer,
         } = self;
 
@@ -169,7 +281,7 @@ impl ActiveCapture {
         let stopped = stop_device();
 
         // 2. 통로를 닫는다. 쓰는 쪽은 남은 것을 전부 쓰고 스스로 끝난다.
-        drop(samples);
+        drop(packets);
 
         // 3. 파일이 확정될 때까지 기다린다. 쓰는 쪽이 죽었더라도 앱은 죽지 않는다.
         let written = match writer.join() {
@@ -218,9 +330,14 @@ pub fn start(
     stem: &str,
 ) -> Result<ActiveCapture, Failure> {
     let output_path = output_path(directory, stem)?;
-    let (sender, receiver) = sync_channel::<Vec<i16>>(SAMPLE_QUEUE_CAPACITY);
+    let (sender, receiver) = sync_channel::<Packet>(SAMPLE_QUEUE_CAPACITY);
 
-    let open = source.open(device_key, sender.clone())?;
+    let open = source.open(
+        device_key,
+        SampleSink {
+            sender: sender.clone(),
+        },
+    )?;
 
     let file = match WavFile::create(&output_path, open.format) {
         Ok(file) => file,
@@ -251,7 +368,7 @@ pub fn start(
         format: open.format,
         output_path,
         stop_device: open.stop,
-        samples: sender,
+        packets: sender,
         writer,
     })
 }
@@ -299,12 +416,22 @@ pub fn file_size(path: &Path) -> Result<u64, Failure> {
     })
 }
 
-/// 들어오는 샘플을 파일에 쓰고, 통로가 닫히면 파일을 확정한다.
+/// 들어오는 것을 순서대로 처리하고, 통로가 닫히면 파일을 확정한다.
+///
+/// 일시정지 구간의 샘플은 **여기서 버려진다** — 파일에 도달하지 않는다. 표시가 샘플과 같은
+/// 통로로 오므로 어느 샘플이 그 구간의 것인지 판단할 필요가 없다 (모듈 주석).
 ///
 /// **이 함수 안에 panic 경로가 없다.** 여기서 죽으면 파일이 확정되지 않은 채 남는다.
-fn drain(receiver: Receiver<Vec<i16>>, mut file: WavFile) -> Result<(), Failure> {
-    for chunk in receiver {
-        file.write(&chunk)?;
+fn drain(receiver: Receiver<Packet>, mut file: WavFile) -> Result<(), Failure> {
+    let mut writing = true;
+    for packet in receiver {
+        match packet {
+            Packet::Samples(chunk) if writing => file.write(&chunk)?,
+            // 일시정지 구간이다. 이 샘플은 녹음이 아니다.
+            Packet::Samples(_) => {}
+            Packet::Paused => writing = false,
+            Packet::Resumed => writing = true,
+        }
     }
     file.finish()
 }
@@ -528,6 +655,90 @@ mod tests {
             size >= 5 * u64::from(BITS_PER_SAMPLE / 8),
             "쓴 샘플이 파일에 들어 있다: {size} byte"
         );
+    }
+
+    /// 확정된 WAV 파일에 실제로 들어 있는 샘플 전부. **크기가 아니라 내용을 본다.**
+    fn samples_in(path: &Path) -> Vec<i16> {
+        hound::WavReader::open(path)
+            .expect("확정된 파일은 다시 읽을 수 있어야 한다")
+            .into_samples::<i16>()
+            .map(|sample| sample.expect("샘플을 읽을 수 있어야 한다"))
+            .collect()
+    }
+
+    /// 가짜 통로 하나에 정해진 것을 흘려보내고, 만들어진 파일의 샘플을 돌려준다.
+    fn drained(label: &str, packets: Vec<Packet>) -> (TempDir, Vec<i16>) {
+        let temp = TempDir::new(label);
+        let path = temp.path().join("drained.wav");
+        let file = WavFile::create(&path, CaptureFormat::pcm_16bit(16_000, 1))
+            .expect("파일을 만들 수 있어야 한다");
+
+        let (sender, receiver) = sync_channel::<Packet>(SAMPLE_QUEUE_CAPACITY);
+        for packet in packets {
+            sender.send(packet).expect("보낼 수 있어야 한다");
+        }
+        drop(sender);
+
+        drain(receiver, file).expect("파일을 확정할 수 있어야 한다");
+        let samples = samples_in(&path);
+        (temp, samples)
+    }
+
+    #[test]
+    fn samples_that_arrive_between_paused_and_resumed_never_reach_the_file() {
+        // 이 테스트가 pause의 의미 그 자체다 (Phase 2B 요구사항 4).
+        let (_temp, samples) = drained(
+            "paused-span",
+            vec![
+                Packet::Samples(vec![1_000; 4]),
+                Packet::Paused,
+                Packet::Samples(vec![2_000; 64]), // 멈춰 있는 동안 들어온 것
+                Packet::Resumed,
+                Packet::Samples(vec![3_000; 4]),
+            ],
+        );
+
+        assert_eq!(samples, [vec![1_000; 4], vec![3_000; 4]].concat());
+        assert!(
+            !samples.contains(&2_000),
+            "일시정지 구간의 샘플이 파일에 들어갔다"
+        );
+    }
+
+    #[test]
+    fn resuming_writes_into_the_same_file_rather_than_starting_a_new_one() {
+        // 여러 번 멈췄다 이어도 파일은 하나이고, 녹음된 구간이 순서대로 이어 붙는다.
+        let (_temp, samples) = drained(
+            "many-cycles",
+            vec![
+                Packet::Samples(vec![1; 2]),
+                Packet::Paused,
+                Packet::Samples(vec![9; 8]),
+                Packet::Resumed,
+                Packet::Samples(vec![2; 2]),
+                Packet::Paused,
+                Packet::Samples(vec![9; 8]),
+                Packet::Resumed,
+                Packet::Samples(vec![3; 2]),
+            ],
+        );
+
+        assert_eq!(samples, [1, 1, 2, 2, 3, 3]);
+    }
+
+    #[test]
+    fn a_capture_that_is_stopped_while_paused_still_finalizes_what_was_recorded() {
+        // 멈춰 둔 녹음을 그대로 끝내는 것은 정상적인 사용이다 (`super::session`).
+        let (_temp, samples) = drained(
+            "stopped-while-paused",
+            vec![
+                Packet::Samples(vec![7; 4]),
+                Packet::Paused,
+                Packet::Samples(vec![9; 4]),
+            ],
+        );
+
+        assert_eq!(samples, [7; 4], "멈춘 뒤의 것은 들어가지 않는다");
     }
 
     #[test]

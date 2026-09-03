@@ -102,6 +102,7 @@ fn every_command_returns_the_initialization_failure_rather_than_pretending_to_wo
         .update_settings(SettingsPayload {
             recordings_directory: Some("/tmp/recordings".to_string()),
             automatic_processing: true,
+            default_microphone: None,
         })
         .expect_err("설정 갱신이 실패해야 한다");
 
@@ -283,6 +284,7 @@ fn an_empty_store_answers_with_an_empty_list_and_the_default_settings() {
         SettingsPayload {
             recordings_directory: None,
             automatic_processing: false,
+            default_microphone: None,
         },
         "저장된 적이 없으면 기본값이다"
     );
@@ -297,6 +299,7 @@ fn updated_settings_are_stored_and_read_back() {
         .update_settings(SettingsPayload {
             recordings_directory: Some("/Users/someone/Recordings".to_string()),
             automatic_processing: true,
+            default_microphone: Some("0:Studio Mic".to_string()),
         })
         .expect("설정을 저장할 수 있어야 한다");
 
@@ -310,6 +313,11 @@ fn updated_settings_are_stored_and_read_back() {
         Some("/Users/someone/Recordings")
     );
     assert!(saved.automatic_processing);
+    assert_eq!(
+        saved.default_microphone.as_deref(),
+        Some("0:Studio Mic"),
+        "고른 장치 키가 그대로 저장되고 그대로 돌아와야 한다"
+    );
 }
 
 #[test]
@@ -321,11 +329,39 @@ fn a_blank_directory_is_stored_as_not_chosen_rather_than_as_an_empty_path() {
         .update_settings(SettingsPayload {
             recordings_directory: Some("   ".to_string()),
             automatic_processing: false,
+            default_microphone: Some("  ".to_string()),
         })
         .expect("설정을 저장할 수 있어야 한다");
 
     assert_eq!(
         saved.recordings_directory, None,
         "빈 값은 '아직 고르지 않음'과 같은 뜻이다 — 세 번째 상태를 만들지 않는다"
+    );
+    assert_eq!(
+        saved.default_microphone, None,
+        "빈 선택도 '아직 고르지 않음'이다 — 어떤 장치의 키도 아닌 값을 저장하지 않는다"
+    );
+}
+
+#[test]
+fn a_default_microphone_that_no_longer_exists_is_stored_as_chosen_not_replaced() {
+    // 저장 경로는 장치 목록을 알지 않는다. 알아볼 수 없는 키가 와도 **다른 장치로 바꾸지
+    // 않고** 받은 값 그대로 남긴다 — 그것이 사용자의 선택이기 때문이다.
+    // 지금 그 장치가 있는지 말하는 것은 화면 쪽이다 (`src/screens/defaultMicrophone.ts`).
+    let temp = TempRoot::new("missing-microphone");
+    let storage = open_storage(&temp);
+
+    let saved = storage
+        .update_settings(SettingsPayload {
+            recordings_directory: None,
+            automatic_processing: false,
+            default_microphone: Some("7:장치가 빠진 마이크".to_string()),
+        })
+        .expect("설정을 저장할 수 있어야 한다");
+
+    assert_eq!(
+        saved.default_microphone.as_deref(),
+        Some("7:장치가 빠진 마이크"),
+        "알아볼 수 없는 키를 조용히 지우거나 다른 값으로 바꾸지 않는다"
     );
 }

@@ -1,0 +1,51 @@
+Phase 2A 임시 spike 표면이 저장소에 남아 있지 않다는 확인
+RUN-20260902T095416Z-TASK-020 / 2026-09-02
+
+--- 1. src/ 아래에 'spike'라는 말이 하나도 없다 ---
+
+$ grep -rni "spike" src/
+(no matches)
+
+작업 전에는 다음 6곳에 있었다:
+  src/App.css:250,255,265,269,274        .spike-notice / .spike-result 규칙
+  src/screens/captureSpikeView.ts:2      "Phase 2A spike 표면의 상태"
+  src/screens/RecordingScreen.tsx:18     "지금은 Phase 2A spike 표면을 담고 있다"
+  src/screens/RecordingScreen.tsx:121    name="spike-input-device"
+  src/screens/RecordingScreen.tsx:162    <dl className="spike-result">
+  src/screens/RecordingScreen.tsx:187-190  화면 맨 위의 "Phase 2A spike — temporary surface" 안내
+  src/screens/captureSpikeView.test.ts:1 "Phase 2A spike 표면의 상태 변환 테스트"
+
+--- 2. spike 전용 모듈이 삭제됐다 ---
+
+$ git status --porcelain -- src/screens
+ D src/screens/captureSpikeView.test.ts
+ D src/screens/captureSpikeView.ts
+ M src/screens/RecordingScreen.tsx
+ M src/screens/FailureNotice.tsx
+?? src/screens/recordingView.ts
+?? src/screens/recordingView.test.ts
+
+임시 표면에만 있던 표현(`CaptureSpikeView` · `captureStatusText` · `CaptureResultView` ·
+`formatByteSize`)은 어디에서도 import되지 않으며 저장소에 남아 있지 않다.
+production 화면은 spike의 결과 패널(장치 이름 · 경로 · 포맷 · 파일 크기)을 물려받지 않는다 —
+그것은 사람이 engine을 확인하기 위한 표면이었고, §5-B가 요구하는 화면이 아니다.
+
+--- 3. spike 전용 command 표면 ---
+
+지금 등록된 command는 13개이며(`src-tauri/src/lib.rs`), 전부 production 표면이다:
+
+  Phase 1 영속화   list_recordings · get_recording · create_recording · delete_recording
+                   get_settings · update_settings
+  녹음 표면        list_input_devices · start_capture · pause_capture · resume_capture
+                   stop_capture · capture_status · list_missing_audio
+
+spike 시절의 command 모양(`Capture` managed state, 보고 값만 돌려주던 `stop_capture`)은
+이 Task 이전에 이미 production 구현으로 대체됐다 —
+`git show 618c8ec -- src/ipc/commands.ts`의 `stopCapture(): Promise<CaptureReport>`가
+지금은 `stopCapture(title?): Promise<StoppedRecording>`이다.
+따라서 **이 Task가 지울 수 있는 미사용 spike 전용 command는 남아 있지 않다.**
+화면이 지금 부르지 않는 wrapper(getRecording · createRecording · deleteRecording ·
+listMissingAudio)는 spike 잔재가 아니라 Phase 1 CRUD와 TASK-021(Recording Detail · 파일 없음
+감지)이 쓸 표면이므로, 이 Task의 범위 밖이라 건드리지 않았다.
+`tests/ipc-boundary.test.ts`는 등록된 command 집합과 frontend가 부르는 집합이 **정확히 같을 것**을
+요구하며 그 검사는 계속 통과한다.

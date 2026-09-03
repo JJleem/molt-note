@@ -1,0 +1,51 @@
+# Stop = 파일 확정 + Recording 영속화, 순서와 보상 정책
+# Runtime이 PLAN-20260902T080012Z 승인 시점에 생성했다 (proposal P3). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-017
+status: DONE
+
+request: |-
+  Stop의 성공이 'API가 resolve됐다'가 아니라 '파일이 확정됐다'를 뜻하게 만든다(R-002). Stop이 성공하려면 최소한 다음이 모두 성립해야 한다: 파일 경로가 실제로 존재한다 · 파일 크기가 정해 둔 유효 최소치를 넘는다 · 포맷을 알고 있다 · Recording 메타데이터가 영속화됐다(title · duration(pause 제외) · audioPath · audioFormat · microphone · createdAt, Phase 1의 repository 경유). 확인에 실패하면 사용자에게 보이는 실패다. **파일 생성과 DB 저장의 순서와 보상 정책을 명시적으로 정하고 P2가 만든 lifecycle 문서에 기록한다** — audio는 있는데 DB row가 없는 상태, DB row는 있는데 audio가 없는 상태 각각을 어떻게 다루는지 적고 구현한다. **어느 경로에서도 기존 audio 파일을 자동 삭제하지 않는다(INV-3 · INV-4 · R-004).** DB 저장이 실패하면 확정된 파일의 경로가 실패 메시지에 담겨 사용자가 그 파일을 잃지 않게 한다. 레코드는 있는데 파일이 없는 상태를 감지할 수 있는 수단을 함께 만든다. 자동 테스트로 확인 절차 · 두 어긋난 상태 · '어떤 실패도 audio를 지우지 않는다'를 덮는다. commit하지 않는다.
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-016
+
+stop_condition:
+  gates: [build, lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 2
+
+acceptance_criteria:
+  - id: AC1
+    description: |-
+      test Gate가 통과한다. 파일 존재·최소 크기·포맷·레코드 영속화 네 조건과, 두 어긋난 상태(audio만 있음 / row만 있음)의 처리가 테스트로 판정된다.
+    verification:
+      type: gate
+      ref: test
+  - id: AC2
+    description: |-
+      lint Gate가 통과한다.
+    verification:
+      type: gate
+      ref: lint
+  - id: AC3
+    description: |-
+      build Gate가 통과한다.
+    verification:
+      type: gate
+      ref: build
+  - id: AC4
+    description: |-
+      파일 생성과 DB 저장의 순서·보상 정책이 문서에 명시되어 있고 구현이 그 정책과 일치한다. 실패 경로 어디에도 이미 만들어진 audio 파일을 삭제하는 코드가 없다(INV-4).
+    verification:
+      type: verifier
+      instruction: |-
+        문서와 소스를 대조한다: (1) 순서와 보상 정책이 문서에 적혀 있고 두 어긋난 상태 각각의 처리가 명시되어 있다, (2) 구현이 그 정책대로다, (3) audio 파일을 지우는 경로가 사용자의 명시적 삭제 밖에 존재하지 않는다, (4) DB 저장 실패 시 확정된 파일 경로가 사용자에게 전달된다, (5) 저장되는 duration이 pause를 제외한 값이다.
+
+evidence: []
+
+failure_memo: []

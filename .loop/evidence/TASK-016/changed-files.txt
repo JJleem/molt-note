@@ -1,0 +1,26 @@
+# TASK-016 — 변경 파일 (git status --porcelain, 2026-09-02)
+# commit하지 않았다 (Task 요구).
+
+M  src-tauri/src/audio/capture.rs          pause/resume를 샘플과 같은 통로로 흘린다 (Packet)
+M  src-tauri/src/audio/mod.rs              session 모듈 노출 · 경계 설명 갱신
+M  src-tauri/src/audio/system_capture.rs   SampleSink 통로 변경에 맞춤 (cpal은 여기 그대로)
+M  src-tauri/src/commands/mod.rs           Capture → Recorder. 상태 기계와 캡처를 엮고 소유한다
+M  src-tauri/src/commands/payload.rs       SessionStatusPayload 추가 · CaptureReportPayload에 길이
+M  src-tauri/src/lib.rs                    app.manage(Recorder) · pause/resume/status command 등록
+M  src-tauri/src/platform/mod.rs           clock 모듈 노출
+M  src-tauri/tests/capture.rs              새 표면에 맞춤
+M  src/ipc/commands.ts                     pauseCapture · resumeCapture · captureStatus
+M  src/ipc/types.ts                        SessionState · SessionStatus · CaptureReport 길이 필드
+M  src/screens/captureSpikeView.test.ts    CaptureReport fixture에 durationMs/durationLabel
+M  tests/ipc-boundary.test.ts              열두 개 command 경계 검사
+
+A  docs/ADR-0004-recording-session-lifecycle.md   소유권 결정과 근거
+A  src-tauri/src/audio/session.rs                 녹음 session 상태 기계 (하드웨어도 시계도 없다)
+A  src-tauri/src/platform/clock.rs                흐르는 시간을 읽는 경계
+A  src-tauri/tests/recording_lifecycle.rs         start→pause→resume→stop 전체 경로 (마이크 없이)
+A  src-tauri/tests/recording_session.rs           상태 기계 경계 검사
+A  tests/audio-boundary.test.ts                   프론트엔드 쪽 오디오 경계 검사
+
+# 아래는 이 Task가 만든 것이 아니다 (Runtime 소유 / 다른 Task):
+#   .loop/tasks/TASK-0{15,16,17,18,19,20,21,22}.yaml
+#   .loop/evidence/TASK-015/

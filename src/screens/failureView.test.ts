@@ -50,4 +50,23 @@ describe('실패 표현', () => {
   it('원인이 없어도 표현이 깨지지 않는다', () => {
     expect(toFailureView(failure({ detail: null })).detail).toBeNull();
   });
+
+  it('마이크 권한이 거부된 실패는 무엇을 해야 하는지 그대로 보여 준다', () => {
+    // Rust의 platform 경계가 만든 안내 문장이 화면까지 그대로 도달한다 —
+    // 화면은 그 문장을 다시 쓰지 않는다 (INV-10 · src-tauri/src/platform/microphone.rs).
+    const denied = toFailureView(
+      failure({
+        kind: 'microphonePermission',
+        message:
+          '마이크에 접근할 수 없다. 시스템 설정 › 개인정보 보호 및 보안 › 마이크에서 Molt Note의 접근을 허용한 뒤 다시 녹음을 시작해야 한다.',
+        detail: null,
+        retryable: false,
+      }),
+    );
+
+    expect(denied.message).toContain('시스템 설정');
+    expect(denied.retryable).toBe(false);
+    expect(denied.retryText).toBe('다시 시도해도 같은 결과가 나온다.');
+    expect(denied.dataSafetyText).toBe('저장된 데이터는 그대로 있다.');
+  });
 });

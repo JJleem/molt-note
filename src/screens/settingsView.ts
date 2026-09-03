@@ -8,6 +8,7 @@
  */
 import { toFailure, type Failure } from '../ipc/failure';
 import type { Settings } from '../ipc/types';
+import { chosenMicrophone, NO_DEFAULT_MICROPHONE } from './defaultMicrophone';
 
 /**
  * 입력란이 들고 있는 값.
@@ -18,6 +19,14 @@ import type { Settings } from '../ipc/types';
 export interface SettingsForm {
   readonly recordingsDirectory: string;
   readonly automaticProcessing: boolean;
+  /**
+   * 고른 입력 장치의 선택 키. 고르지 않았으면 `NO_DEFAULT_MICROPHONE`(빈 문자열)이다 —
+   * `<select>`의 값도 `null`을 담을 수 없다.
+   *
+   * **이 값이 지금 있는 장치인지는 여기서 묻지 않는다.** 없어진 장치도 고른 값 그대로
+   * 남으며, 그 사실을 말하는 것은 `defaultMicrophone.ts`다.
+   */
+  readonly defaultMicrophone: string;
 }
 
 /**
@@ -102,6 +111,8 @@ export function toSettings(form: SettingsForm): Settings {
   return {
     recordingsDirectory: directory === '' ? null : directory,
     automaticProcessing: form.automaticProcessing,
+    // 고른 키는 그대로 보낸다. 지금 없는 장치라도 **사용자가 고른 값이므로 바꾸지 않는다.**
+    defaultMicrophone: chosenMicrophone(form.defaultMicrophone),
   };
 }
 
@@ -110,6 +121,7 @@ export function toForm(settings: Settings): SettingsForm {
   return {
     recordingsDirectory: settings.recordingsDirectory ?? '',
     automaticProcessing: settings.automaticProcessing,
+    defaultMicrophone: settings.defaultMicrophone ?? NO_DEFAULT_MICROPHONE,
   };
 }
 

@@ -28,6 +28,17 @@ pub struct Settings {
     /// 어떤 후처리를 돌릴지는 그 기능이 존재하는 Phase가 정한다. 이 Phase는 토글 값의
     /// 영속화만 다루며, 이 값을 읽고 무언가를 실행하는 코드는 아직 없다.
     pub automatic_processing: bool,
+    /// 녹음을 시작할 때 기본으로 고를 입력 장치의 **선택 키**.
+    /// `None`은 **아직 고르지 않았다**는 정상 상태다.
+    ///
+    /// 보여 주는 이름이 아니라 키를 담는 이유는 이름이 같은 장치가 둘 있을 수 있어서다
+    /// (`crate::audio::devices`). domain은 그 키가 어떻게 만들어지는지 알지 않는다 —
+    /// 여기서는 **다시 알아볼 수 있는 값**일 뿐이다 (INV-10).
+    ///
+    /// 저장된 키가 다음 열거 목록에 없을 수 있다. 장치를 뽑아 두면 그렇게 되며, 그것은
+    /// 이 값이 틀렸다는 뜻이 아니라 **지금 그 장치가 없다**는 뜻이다. 그 구분은 목록을
+    /// 함께 아는 쪽이 하고, 조용히 다른 장치로 바꾸지 않는다.
+    pub default_microphone: Option<String>,
 }
 
 impl Settings {
@@ -37,9 +48,13 @@ impl Settings {
     ///   디렉터리를 설정 값으로 굳혀 두지 않는다.
     /// - `automatic_processing`: **OFF**. 자동 실행은 사용자가 명시적으로 켜는 것이며,
     ///   기본으로 켜 두고 끄게 하지 않는다.
+    /// - `default_microphone`: 고르지 않은 상태(`None`). 열거된 첫 장치를 기본값으로
+    ///   굳혀 두지 않는다 — 사용자가 고른 적 없는 값이 고른 값처럼 보이면, 나중에 그
+    ///   장치가 사라져도 무엇이 바뀐 것인지 말할 수 없게 된다.
     pub const DEFAULT: Self = Self {
         recordings_directory: None,
         automatic_processing: false,
+        default_microphone: None,
     };
 }
 

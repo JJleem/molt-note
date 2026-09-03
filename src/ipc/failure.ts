@@ -11,11 +11,20 @@
 /**
  * 실패의 종류.
  *
- * `storage` · `invalidInput` · `audioDevice`는 Rust의 `FailureKind`와 1:1이다.
- * `unexpected`는 **frontend 경계에서만 만들어진다** — command가 계약과 다른 값으로 거절했을 때
- * (예: 없는 command 이름, IPC 자체의 오류) 그 사실을 삼키지 않기 위해서다.
+ * `storage` · `invalidInput` · `audioDevice` · `microphonePermission`은 Rust의 `FailureKind`와
+ * 1:1이다. `unexpected`는 **frontend 경계에서만 만들어진다** — command가 계약과 다른 값으로
+ * 거절했을 때 (예: 없는 command 이름, IPC 자체의 오류) 그 사실을 삼키지 않기 위해서다.
+ *
+ * `microphonePermission`은 `audioDevice`와 따로 있다. 사용자가 할 수 있는 일이 다르기
+ * 때문이다 — 장치를 바꾸거나 다시 시도해서 풀리지 않고, 시스템 설정에서 접근을 허용해야 한다.
+ * 무엇을 허용해야 하는지는 `message`에 문장으로 들어 있다 (Rust의 `platform::microphone`).
  */
-export type FailureKind = 'storage' | 'invalidInput' | 'audioDevice' | 'unexpected';
+export type FailureKind =
+  | 'storage'
+  | 'invalidInput'
+  | 'audioDevice'
+  | 'microphonePermission'
+  | 'unexpected';
 
 export interface Failure {
   readonly kind: FailureKind;
