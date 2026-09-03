@@ -33,7 +33,19 @@ Transcript는 이 제품의 두 번째 핵심 산출물이며, Phase 4(AI Note)�
 1. **통합 방식** — Tauri sidecar(`bundle.externalBin`) · Rust 바인딩(`whisper-rs`) ·
    사용자가 직접 설치한 바이너리 참조 중 무엇인가.
 
-2. **바이너리 확보 경로 — 플랫폼 비대칭이 있다 (§14.4).**
+2. **바이너리 확보 경로 — 아티팩트 종류를 뭉뚱그리지 않는다.**
+
+   ⚠️ upstream이 무엇을 배포하는지 **실제 release asset을 보고** 다음을 구분한다.
+
+   ```text
+   (a) macOS CLI 실행 파일 (whisper-cli)   ← Tauri sidecar로 쓸 수 있는 것
+   (b) XCFramework / 라이브러리 아티팩트     ← CLI가 아니다
+   (c) 소스 빌드만 가능
+   (d) Windows 아티팩트
+   ```
+
+   **XCFramework가 있다고 해서 sidecar용 macOS `whisper-cli` 실행 파일이 있는 것은 아니다.**
+   그 반대도 마찬가지다. §14.4의 기록은 2026-09-01 기준이며 **재확인 대상이다.**
 
    ```text
    Windows x64  →  공식 prebuilt 있음 (whisper-bin-x64.zip · blas · cublas)
@@ -48,7 +60,26 @@ Transcript는 이 제품의 두 번째 핵심 산출물이며, Phase 4(AI Note)�
 3. **모델 관리** — 모델 파일은 466MB~3GB다. 앱에 번들할 것인가, 최초 실행 시 내려받을 것인가,
    사용자가 지정하게 할 것인가. 모델이 없을 때의 상태와 안내가 있어야 한다.
 
-4. **입력 포맷 변환 책임** — whisper.cpp는 **16-bit WAV만** 받는다 (모델은 16kHz mono 기준).
+4. **원본 오디오는 절대 덮어쓰지 않는다 (INV-1 · INV-3).**
+
+   Phase 2가 만든 raw recording은 **장치 native sample rate / channels의 PCM16 WAV**다
+   (예: 48kHz stereo). 전사를 위해 그 파일을 직접 resample해서 덮어쓰지 않는다.
+
+   ```text
+   raw audio            immutable · 보존
+   derived 전사 입력    재생성 가능 · 파생물
+   ```
+
+   변환이 필요하면 **파생 입력을 따로 만든다.** 원본을 건드리는 순간 INV-1 위반이다.
+
+5. **입력 포맷 변환 책임** — 선택한 통합 방식이 실제로 무엇을 요구하는지 확인한다.
+   (CLI는 16-bit WAV를 받고 모델은 16kHz mono 기준이라는 것이 §14.4의 기록이지만,
+   Rust 바인딩은 f32 PCM을 직접 받을 수도 있다 — **통합 방식마다 다르므로 확인한다.**)
+
+   변환 수단도 결정한다 — Rust native resampling / 외부 도구 / 통합 방식이 제공하는 전처리.
+   **개발 Mac에 ffmpeg이 있다는 이유로 사용자 의존성으로 가정하지 않는다.**
+   사용자에게 Homebrew 설치를 요구하는 구조라면 그 tradeoff를 명시한다.
+   근거 없이 과도한 custom DSP를 직접 구현하지도 않는다.
    Phase 2가 고른 recording engine의 출력이 이미 그 포맷이면 변환은 불필요하고,
    아니면 변환 단계가 필요하다. ffmpeg에 의존할 것인지 결정하고,
    의존한다면 **사용자 기기에 ffmpeg이 없을 경우**를 다뤄야 한다.
@@ -112,7 +143,10 @@ Transcript는 이 제품의 두 번째 핵심 산출물이며, Phase 4(AI Note)�
    unsupported whisper model · 모델 파일 없음 · 입력 포맷 변환 실패.
    실패해도 **원본 audio와 Recording은 그대로 남는다 (INV-3)**. 재시도가 가능해야 한다.
 
-8. **자동 테스트**: whisper JSON 출력 파싱, timestamp 변환(밀리초 → `HH:MM:SS`),
+8. **Worker / Gate / Verifier가 1시간 오디오를 전사하도록 만들지 않는다.**
+   자동 검증은 **짧고 결정론적인 fixture**로 한다. 장시간 실제 성능은 Final Integration이다.
+
+9. **자동 테스트**: whisper 출력 파싱, timestamp 변환(→ `HH:MM:SS`),
    segment 경계 처리, 잘못된/잘린 출력에 대한 방어가 whisper 실행 없이 테스트된다.
    실제 whisper 바이너리 없이 돌 수 있도록 파싱 로직과 프로세스 실행 경계를 분리한다 (§18).
 
@@ -151,11 +185,24 @@ Transcript는 이 제품의 두 번째 핵심 산출물이며, Phase 4(AI Note)�
 - 통합 방식 결정이 근거와 함께 기록되어 있다.
 - build / lint / test Gate가 green이다.
 
-### Human Review 항목
+### Human Review 항목 — **Final Integration으로 연기됨 (DEFERRED)**
 
-- 실제 한국어(및 한국어+영어 혼용) 음성의 전사 품질이 쓸 만한가
-- 1시간 분량 전사에 걸리는 시간이 실사용 가능한 수준인가
-- timestamp가 실제 음성 위치와 맞는가
+운영자가 실제 하드웨어/품질 검증을 Final Integration에 모으기로 했다
+(`ADR-0003` §12.A · `phase-prompt/Goal.md`의 hard human gate). Phase 3도 같은 정책을 따른다.
+
+**아래는 이 Phase에서 확인되지 않으며, 확인된 것처럼 적지 않는다.**
+
+| | |
+| --- | --- |
+| 실제 한국어 전사 품질 | `DEFERRED` |
+| 한국어 + 영어 혼용 음성 | `DEFERRED` |
+| timestamp가 실제 음성 위치와 맞는가 | `DEFERRED` |
+| 1시간 전사 소요 시간 | `DEFERRED` |
+
+**품질 검증을 하지 않았으면 PASS라고 쓰지 않는다.** `DEFERRED`로 명시한다.
+
+이 Phase가 자동으로 판정하는 것은 **엔지니어링**뿐이다 — 프로세스 통합 · 파서 ·
+영속성 규칙 · 상태 전이 · UI 상태. **전사 결과의 품질은 판정 대상이 아니다.**
 
 ## Source of Truth
 
