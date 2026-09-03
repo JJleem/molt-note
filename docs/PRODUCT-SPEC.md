@@ -12,6 +12,9 @@
 > - 2026-09-01 (rev 2) Requirements Delta 반영 — Windows를 지원 대상 플랫폼으로 추가,
 >   AI를 vendor 중립 Provider 추상화로 전환하고 core requirement에서 제외,
 >   §14.7의 근거 없는 VERIFIED 표기 정정
+> - 2026-09-03 (rev 6) Phase 3 계획을 위해 whisper 관련 외부 사실 재확인 (§14.4.1) —
+>   macOS CLI prebuilt 부재 확정 · 두 후보 모두 CMake 필요 · timestamp 단위 차이 ·
+>   Tauri #11992 미해결 · 변환은 순수 Rust로 가능
 > - 2026-09-02 (rev 5) recording 장치 검증을 Final Integration으로 연기 (§6.1 · §17.3) —
 >   `ASSUMPTION A-REC-001` 위에서 진행하며 Goal.md가 hard human gate가 된다
 > - 2026-09-02 (rev 4) Recording engine 결정을 2단계로 분리 (§6.1 · §21) —
@@ -854,6 +857,86 @@ Windows는 **`.exe` 확장자를 포함한다.** 호출에는 capabilities에 sh
 
 ⚠️ Tauri #11992 "Codesigning and notarization issue when using ExternalBin" 이슈 존재.
 해결 여부 UNVERIFIED — Phase 3에서 확인할 위험 항목이다.
+
+### 14.4.1 재확인 (2026-09-03) — Phase 3 계획 시점
+
+> §14.4는 2026-09-01 기준이다. Phase 3 계획을 위해 **primary source에서 재확인**했다.
+> 아래가 그 결과이며, 위 본문과 어긋나는 항목은 **아래가 우선한다.**
+
+**최신 릴리스: 태그 `b4938` (v1.9.3), 2026-08-20** — github.com/ggml-org/whisper.cpp/releases
+
+#### ⚠️ 아티팩트 종류 — 전수 확인
+
+릴리스 asset **9개 전부**를 열거해 확인했다.
+
+```text
+whisper-b4938-xcframework.zip          ← Apple 대상은 이것 하나. 라이브러리다
+whisper-bin-ubuntu-arm64.tar.gz
+whisper-bin-ubuntu-x64.tar.gz
+whisper-bin-Win32.zip                  ← Windows
+whisper-bin-x64.zip                    ← Windows
+whisper-blas-bin-Win32.zip
+whisper-blas-bin-x64.zip
+whisper-cublas-11.8.0-bin-x64.zip
+whisper-cublas-12.4.0-bin-x64.zip
+```
+
+| 종류 | macOS |
+| --- | --- |
+| **(a) CLI 실행 파일 (`whisper-cli`)** | **없다** — 전수 확인으로 확정 (VERIFIED) |
+| **(b) XCFramework / 라이브러리** | **있다** (`whisper-b4938-xcframework.zip`) |
+| **(c) 소스 빌드** | CLI를 얻으려면 이 경로뿐 |
+| **(d) Windows 아티팩트** | 있음 (CPU · BLAS · CUDA). 단 zip 내부가 CLI exe인지 DLL만인지는 **UNVERIFIED** |
+
+**(b)가 있다고 (a)가 있는 것이 아니다.** XCFramework는 Swift/ObjC 임베딩용 라이브러리이며
+**Tauri sidecar로 바로 쓸 수 없다.** 2026-09-01의 "macOS prebuilt 없음" 판단은 **확인됐다.**
+
+#### 통합 후보의 실제 요구사항
+
+| | Tauri sidecar + `whisper-cli` | Rust 바인딩 `whisper-rs` |
+| --- | --- | --- |
+| 최신 버전 | whisper.cpp v1.9.3 | **0.16.0** (2026-03-12), 번들 whisper.cpp는 **v1.8.3 — upstream보다 낮다** |
+| 유지보수 위치 | ggml-org/whisper.cpp (GitHub) | **GitHub 저장소는 2025-07-30 archived. 현재는 Codeberg** (`codeberg.org/tazz4843/whisper-rs`) |
+| **CMake 필요** | **필요** (소스 빌드) | **필요** — macOS·Windows 양쪽에서 CMake + C/C++ 툴체인 |
+| 오디오 입력 | 16-bit WAV 파일. *"runs only with 16-bit WAV files"* — **내부 리샘플링 없음** | `WhisperState::full(params, &[f32])` — **f32 PCM을 직접 받는다. 리샘플링·다운믹스 없음** |
+| **timestamp 단위** | JSON `offsets` = **밀리초** (`t0*10`, 내부 t0는 센티초) | `WhisperSegment::start_timestamp()` = **센티초** |
+| Apple Silicon | Metal 기본 ON (`if (APPLE)`에서 `GGML_METAL_DEFAULT=ON`) | `metal` feature flag |
+
+> ⚠️ **CMake는 두 후보 모두에 필요하다.** §14.1 기준 이 기기에 cmake가 **없다.**
+> 즉 cmake 부재는 sidecar만의 제약이 아니다 — 사용자가 직접 설치한 바이너리를 참조하는
+> 세 번째 후보만이 이를 피한다.
+
+> ⚠️ **timestamp 단위가 통합 방식마다 다르다** (밀리초 vs 센티초).
+> Phase 1의 `transcript_segments`는 `start_ms` · `end_ms`이므로 **선택한 방식의 실제 단위를
+> 확인하고 변환해야 한다.** 추측하지 않는다.
+
+#### ⚠️ Tauri sidecar + macOS notarization — 미해결 위험
+
+**tauri-apps/tauri#11992 "MacOS - Codesigning and notarization issue when using ExternalBin"
+은 현재 OPEN이다** (VERIFIED). `externalBin`을 설정하면 메인 앱 바이너리의 notarization이
+"invalid signature"로 실패하고, sidecar를 빼면 성공한다고 보고돼 있다
+(macOS 15.0.1 arm64 / Tauri 2.1.1에서 재현).
+
+**공식 수정이나 "sidecar를 빼라" 외의 문서화된 우회는 확인되지 않았다.**
+중첩 바이너리 서명 절차를 다루는 공식 v2 문서 페이지도 찾지 못했다 (UNVERIFIED).
+
+§3의 배포 범위(App Store 밖)를 고려하더라도, **sidecar 경로를 택하면 이 이슈를 안고 간다.**
+
+#### 오디오 변환 (48kHz stereo → 16kHz mono) — 외부 도구 불필요
+
+| crate | 버전 | 최근 릴리스 | 역할 |
+| --- | --- | --- | --- |
+| `rubato` | 5.0.0 | 2026-08-10 | **샘플레이트 변환.** 활발히 유지보수됨 |
+| `symphonia` | 0.6.1 | 2026-08-13 | 디코드/디먹스 전용. **리샘플링 없음** |
+| `hound` | 3.5.1 | 2023-09-25 | WAV I/O 전용. **리샘플링 없음** |
+| `dasp` | 0.11.0 | 2020-05-29 (유일 릴리스) | **사실상 미유지보수** |
+
+WAV 읽기와 리샘플링을 한 번에 하는 crate는 없다.
+확인된 방식은 **`hound`(읽기) + `rubato`(리샘플) + 수동 스테레오→모노 다운믹스**이며,
+**전부 순수 Rust다 — ffmpeg 등 외부 도구가 필요하지 않다.**
+
+이것은 §11의 "개발 Mac에 ffmpeg이 있다는 이유로 사용자 의존성으로 가정하지 않는다"를
+만족하는 경로가 실재함을 뜻한다.
 
 ### 14.5 Note AI Provider — Ollama (확인된 사실 · 구현은 Phase 4)
 
