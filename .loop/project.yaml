@@ -15,7 +15,12 @@ runtime:
 
   # Worker 실행 설정
   worker_adapter: claude          # loopctl adapters 로 사용 가능 여부 확인
-  worker_timeout_seconds: 900
+  # 2026-09-02 Phase 2B 실측으로 900 -> 1800 (docs/LOOP-RUNTIME-FIELD-NOTES.md OBS-021).
+  # 8개 Task 중 4개의 첫 시도가 정확히 900초에 SIGKILL됐고, 죽는 순간까지 산출물을
+  # 만들고 있었다(dirty entries 증가). 무응답이 아니라 작업 중 잘린 것이다.
+  # 무제한이 아니라 2배 — 진짜 폭주는 여전히 끊어야 한다.
+  # 주의: 이것은 Worker timeout이다. gate/verifier/planner timeout은 근거가 없어 그대로 둔다.
+  worker_timeout_seconds: 1800
   worker_model: null              # null이면 CLI 기본 모델. 모델 이름은 추측하지 않고 Envelope에 실제 값을 기록한다.
 
   # Gate 실행 설정 (Runtime이 직접 subprocess로 실행한다. LLM 호출 없음)
