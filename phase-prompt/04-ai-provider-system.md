@@ -36,6 +36,24 @@ Molt Note domain   ≠   특정 AI 벤더의 domain      (INV-9)
 벤더는 바뀐다. 가격 정책도, 무료 티어도, API 형태도 바뀐다.
 그것들이 바뀔 때 흔들리는 것이 adapter 한 개여야지 제품 전체여서는 안 된다.
 
+## ⚠️ Preconditions — Phase 3는 실제 추론을 한 적이 없다
+
+```text
+ASSUMPTION A-TRANS-001
+
+Phase 3의 local transcription architecture는 구현됐고 자동 검증을 통과했다.
+그러나 실제 Whisper 추론은 아직 한 번도 실행되지 않았다.
+```
+
+**이 Phase는 그 가정 위에서 진행한다** (`ADR-0007` §16.3.1 · `PRODUCT-SPEC` §14.4.4).
+
+따라서 실제 Transcript가 존재한다고 가정해야 하는 작업은
+**결정론적 fixture / mock Transcript를 쓴다.**
+**실제 Whisper 실행 결과를 꾸며내지 않는다** — 돌려본 적이 없기 때문이다.
+
+이것은 이 Phase의 자동 검증 방침과 어긋나지 않는다. §18은 이미 네트워크·프로세스 경계와
+도메인 로직을 분리하라고 요구하며, 전사 쪽도 같은 이유로 fixture를 쓴다.
+
 ## Required Outcome
 
 ### A. Provider 경계
