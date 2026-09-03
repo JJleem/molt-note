@@ -21,7 +21,8 @@ const SETTINGS_ROW_ID: i64 = 1;
 /// 저장된 설정을 읽는다. 저장된 적이 없으면 [`Settings::DEFAULT`]를 돌려준다.
 pub fn load(connection: &Connection) -> Result<Settings, DatabaseError> {
     let row = connection.query_row(
-        "SELECT recordings_directory, automatic_processing, default_microphone
+        "SELECT recordings_directory, automatic_processing, default_microphone,
+                automatic_transcription, transcription_model
          FROM settings WHERE id = ?1",
         [SETTINGS_ROW_ID],
         |row| {
@@ -29,17 +30,35 @@ pub fn load(connection: &Connection) -> Result<Settings, DatabaseError> {
                 row.get::<_, Option<String>>(0)?,
                 row.get::<_, i64>(1)?,
                 row.get::<_, Option<String>>(2)?,
+                row.get::<_, Option<i64>>(3)?,
+                row.get::<_, Option<String>>(4)?,
             ))
         },
     );
 
     match row {
-        Ok((recordings_directory, automatic_processing, default_microphone)) => Ok(Settings {
+        Ok((
             recordings_directory,
-            automatic_processing: decode_toggle(automatic_processing)?,
+            automatic_processing,
+            default_microphone,
+            automatic_transcription,
+            transcription_model,
+        )) => Ok(Settings {
+            recordings_directory,
+            automatic_processing: decode_toggle("automatic_processing", automatic_processing)?,
+            // 이 열은 version 5에서 더해졌고 NULL을 허용한다. 그 이전에 저장된 행에는 값이
+            // 없으며, **그것은 '아직 저장한 적 없음'이지 꺼져 있음이 아니다** — 무엇을 쓸지는
+            // 기본값 정책이 답한다 (`crate::db::migrations`의 version 5 주석).
+            automatic_transcription: match automatic_transcription {
+                Some(value) => decode_toggle("automatic_transcription", value)?,
+                None => Settings::DEFAULT.automatic_transcription,
+            },
             // 저장된 키가 지금 목록에 있는지는 여기서 묻지 않는다. 저장소는 장치를 알지
             // 않으며, 없어진 장치를 읽는 김에 지우거나 다른 값으로 바꾸지도 않는다.
             default_microphone,
+            // 같은 이유로 그 모델 파일이 지금 그 자리에 있는지도 묻지 않는다. 파일을 찾는 일은
+            // `crate::transcription::model`의 몫이며, 없다고 해서 저장된 선택이 지워지지 않는다.
+            transcription_model,
         }),
         // 행이 없는 것은 오류가 아니다 — 기본값 정책이 답을 갖고 있다.
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(Settings::DEFAULT),
@@ -53,17 +72,24 @@ pub fn load(connection: &Connection) -> Result<Settings, DatabaseError> {
 pub fn save(connection: &Connection, settings: &Settings) -> Result<(), DatabaseError> {
     connection
         .execute(
-            "INSERT INTO settings (id, recordings_directory, automatic_processing, default_microphone)
-             VALUES (?1, ?2, ?3, ?4)
+            "INSERT INTO settings (id, recordings_directory, automatic_processing,
+                                   default_microphone, automatic_transcription,
+                                   transcription_model)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
              ON CONFLICT (id) DO UPDATE
              SET recordings_directory = excluded.recordings_directory,
                  automatic_processing = excluded.automatic_processing,
-                 default_microphone = excluded.default_microphone",
+                 default_microphone = excluded.default_microphone,
+                 automatic_transcription = excluded.automatic_transcription,
+                 transcription_model = excluded.transcription_model",
             rusqlite::params![
                 SETTINGS_ROW_ID,
                 settings.recordings_directory,
                 i64::from(settings.automatic_processing),
                 settings.default_microphone,
+                // 두 토글은 서로의 값을 보지 않는다 — 각자 자기 열에만 쓰인다.
+                i64::from(settings.automatic_transcription),
+                settings.transcription_model,
             ],
         )
         .map_err(DatabaseError::Sql)?;
@@ -71,13 +97,16 @@ pub fn save(connection: &Connection, settings: &Settings) -> Result<(), Database
 }
 
 /// 저장된 0/1을 토글 값으로 옮긴다. 그 밖의 값은 추측하지 않고 실패한다.
-fn decode_toggle(value: i64) -> Result<bool, DatabaseError> {
+///
+/// 어느 열이었는지를 함께 받는 이유는 실패가 그 사실을 말해야 하기 때문이다 — 두 토글은
+/// 서로 다른 값이므로 "설정 어딘가가 이상하다"로 뭉뚱그리지 않는다.
+fn decode_toggle(column: &'static str, value: i64) -> Result<bool, DatabaseError> {
     match value {
         0 => Ok(false),
         1 => Ok(true),
         other => Err(DatabaseError::Decode {
             table: "settings",
-            column: "automatic_processing",
+            column,
             value: other.to_string(),
         }),
     }

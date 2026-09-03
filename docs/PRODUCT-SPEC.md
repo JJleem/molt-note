@@ -12,6 +12,7 @@
 > - 2026-09-01 (rev 2) Requirements Delta 반영 — Windows를 지원 대상 플랫폼으로 추가,
 >   AI를 vendor 중립 Provider 추상화로 전환하고 core requirement에서 제외,
 >   §14.7의 근거 없는 VERIFIED 표기 정정
+> - 2026-09-03 (rev 8) Phase 3 smoke test 연기 · `A-TRANS-001` 기록 (§14.4.4)
 > - 2026-09-03 (rev 7) 운영자 결정 반영 — 통합 방식 선택 정책(§14.4.2) ·
 >   Phase 3 실제 추론 smoke test 요구(§14.4.3) · cmake 설치로 §14.1 갱신
 > - 2026-09-03 (rev 6) Phase 3 계획을 위해 whisper 관련 외부 사실 재확인 (§14.4.1) —
@@ -981,6 +982,37 @@ Transcript로 저장할 수 있는가"** 하나다. **품질 벤치마크가 아
 
 **이 추론이 실행되지 않으면 Phase 3를 "end-to-end 전사가 검증됐다"고 표현하지 않는다.**
 자동 Gate는 계획대로 하드웨어/모델 독립을 유지한다.
+
+### 14.4.4 Phase 3 smoke test 연기 (운영자 결정 · 2026-09-03)
+
+§14.4.3이 요구한 실제 추론 smoke test를 운영자가 **다음 Final/Integration review로 연기**했다.
+
+```text
+Phase 3 engineering:              DONE
+Automated verification:           PASS
+Actual Whisper inference executed: NO
+Actual Whisper inference:         DEFERRED
+Actual transcription verified:    NO
+Risk accepted by user:            YES
+```
+
+`ASSUMPTION A-TRANS-001` — architecture는 구현·자동 검증됐으나 **실제 추론은 한 번도
+실행되지 않았다.** ADR-0007 §16.3.1에 기록했다.
+
+**PASS로 간주하지 않으며, 문서 어디에서도 실제 추론을 실행한 것처럼 표현하지 않는다.**
+
+Phase 4는 이 가정을 소비할 수 있다. 단 실제 Transcript를 전제해야 하는 Task는
+**결정론적 fixture / mock Transcript**를 쓰고 실제 실행 결과를 꾸며내지 않는다.
+
+연기된 검증에서 수행할 E2E:
+
+```text
+Recording → Stop → 실제 Whisper 전사 → Transcript 표시 → AI Note 생성
+```
+
+**Whisper 단계가 실패하면 AI Note 통합 테스트로 넘어가지 않는다.**
+이로써 V1은 미확정 전제를 **둘** 안고 간다 — `A-REC-001`(녹음)과 `A-TRANS-001`(전사).
+`phase-prompt/Goal.md`의 hard human gate가 둘 다를 판정한다.
 
 ### 14.5 Note AI Provider — Ollama (확인된 사실 · 구현은 Phase 4)
 

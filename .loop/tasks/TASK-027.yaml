@@ -1,0 +1,64 @@
+# 전사 orchestration과 영속성 규칙 — 새 Transcript 추가 · 실패 시 current 유지
+# Runtime이 PLAN-20260903T015253Z 승인 시점에 생성했다 (proposal P5). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-027
+status: DONE
+
+request: |-
+  Recording 하나에 대해 전사를 수행하는 orchestration을 Rust에 만든다: raw audio 경로 → P2의 파생 입력 → P4의 엔진 → P3의 정규화 → Transcript 영속화. Recording.transcriptionStatus를 none → pending → running → done/failed로 전이시켜 저장한다(기존 store::update_recording_statuses를 쓴다). 성공하면 store::append_transcript로 **새 Transcript를 추가**한다 — 기존 transcripts 행을 UPDATE하지 않는다(INV-2 · §7.1). 저장하는 값은 §7대로 language · segments[{start_ms, end_ms, text}] · rawText · engine · model · createdAt이며, 그다음 store::set_current_transcript로 그 Transcript를 current로 올린다(§7.2). 실패하면 기존 current를 그대로 두고 상태만 failed로 만든다 — 실패한 재전사 때문에 이미 유효한 Transcript를 잃지 않는다. 어떤 실패 경로도 원본 오디오 파일과 Recording 레코드를 지우거나 고치지 않는다(INV-1 · INV-3). 파생 입력만 정리 대상이며, 정리 실패가 전사 성공을 되돌리지 않는다. 같은 Recording에 대해 다시 시도할 수 있다. 테스트는 fake engine과 임시 DB로 다음을 덮는다: 성공 시 Transcript 한 건이 추가되고 current가 그것을 가리킨다 · 재전사 성공 시 기존 Transcript가 남아 있고 새 것이 추가되며 current만 바뀐다 · 재전사 실패 시 current가 이전 Transcript 그대로이고 기존 Transcript도 segments도 그대로 남는다 · 실패 후에도 원본 오디오 파일이 존재한다 · 상태 전이가 기대 순서대로 저장된다 · 모델 없음 실패가 failed 상태와 함께 사용자에게 전달된다.
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-026
+
+stop_condition:
+  gates: [build, lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 3
+
+acceptance_criteria:
+  - id: AC1
+    description: |-
+      npm run build가 통과한다.
+    verification:
+      type: gate
+      ref: build
+  - id: AC2
+    description: |-
+      npm run lint가 통과한다.
+    verification:
+      type: gate
+      ref: lint
+  - id: AC3
+    description: |-
+      npm run test가 통과한다.
+    verification:
+      type: gate
+      ref: test
+  - id: AC4
+    description: |-
+      재전사가 기존 Transcript를 UPDATE하지 않고 새 행을 추가한다. 두 Transcript가 함께 남는 것을 확인하는 테스트가 있다.
+    verification:
+      type: verifier
+  - id: AC5
+    description: |-
+      재전사 실패가 currentTranscriptId를 바꾸지 않는다는 것을 확인하는 테스트가 있다 — 성공한 Transcript A가 current인 상태에서 실패한 시도 후에도 current가 A다.
+    verification:
+      type: verifier
+  - id: AC6
+    description: |-
+      실패 경로가 원본 오디오 파일과 Recording 레코드를 건드리지 않는다(INV-1 · INV-3). 실패 후 파일이 그대로 있음을 확인하는 테스트가 있다.
+    verification:
+      type: verifier
+  - id: AC7
+    description: |-
+      transcriptionStatus가 pending · running · done · failed로 실제 저장되고 그 전이가 테스트된다. 저장되는 Transcript가 §7의 필드(language · segments · rawText · engine · model · createdAt)를 채운다.
+    verification:
+      type: verifier
+
+evidence: []
+
+failure_memo: []

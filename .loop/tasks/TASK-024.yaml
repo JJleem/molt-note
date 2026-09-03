@@ -1,0 +1,66 @@
+# 파생 전사 입력 생성 — 원본을 덮어쓰지 않는 오디오 전처리
+# Runtime이 PLAN-20260903T015253Z 승인 시점에 생성했다 (proposal P2). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-024
+status: DONE
+
+request: |-
+  ADR-0007이 정한 변환 수단으로 raw recording에서 전사 입력을 만드는 Rust 모듈을 만든다(예: src-tauri/src/transcription/audio_input.rs). Phase 2가 만든 raw recording은 장치 native sample rate/channels의 PCM16 WAV(예: 48kHz stereo)이며, 이 모듈은 그 파일을 읽기만 한다 — 절대 덮어쓰거나 지우거나 이름을 바꾸지 않는다(INV-1 · INV-3). 변환 결과는 재생성 가능한 파생 아티팩트로 따로 만든다(임시/파생 경로의 별도 파일 또는 메모리 버퍼). 산출 형태는 ADR-0007이 선택한 통합 방식이 실제로 요구하는 것에 맞춘다 — 16kHz mono 16-bit WAV 파일이거나 16kHz mono f32 PCM이다. 필요한 crate만 src-tauri/Cargo.toml에 추가하고(예: rubato), 사용자에게 ffmpeg 등 외부 도구 설치를 요구하는 경로를 만들지 않는다. 입력이 이미 요구 포맷이면 불필요한 변환을 하지 않는다. 손상되거나 잘린 WAV · 빈 파일 · 지원하지 않는 sample format · 예상과 다른 채널 수는 panic하지 않고 기존 Failure 계약(src-tauri/src/domain/failure.rs · §13)의 제품 실패로 돌려준다. 테스트는 저장소에 오디오를 커밋하지 않고(.gitignore가 *.wav를 전역 제외한다) 테스트가 임시 디렉터리에 합성 WAV를 생성해 수행한다. 최소한 다음을 덮는다: 다운샘플·다운믹스 결과의 샘플 수와 길이가 기대와 일치하는가, 스테레오→모노 다운믹스가 두 채널을 모두 반영하는가, 이미 16kHz mono인 입력이 그대로 통과하는가, 변환 후에도 원본 파일의 바이트가 완전히 동일한가, 잘못된 입력이 정의된 실패로 매핑되는가.
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-023
+
+stop_condition:
+  gates: [build, lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 3
+
+acceptance_criteria:
+  - id: AC1
+    description: |-
+      npm run build가 통과한다.
+    verification:
+      type: gate
+      ref: build
+  - id: AC2
+    description: |-
+      npm run lint가 통과한다.
+    verification:
+      type: gate
+      ref: lint
+  - id: AC3
+    description: |-
+      npm run test가 통과한다.
+    verification:
+      type: gate
+      ref: test
+  - id: AC4
+    description: |-
+      변환이 원본 raw recording 파일을 수정·삭제·이동하지 않는다. 변환 전후 원본 바이트가 동일함을 확인하는 테스트가 있고, 파생 산출물의 경로가 원본 경로와 같아질 수 없다.
+    verification:
+      type: verifier
+      instruction: |-
+        파생 출력 경로를 정하는 코드와 원본 불변 테스트를 직접 읽고 확인한다.
+  - id: AC5
+    description: |-
+      산출 포맷이 ADR-0007이 기록한 '선택한 통합 방식의 실제 입력 요구'와 일치하고, 그 근거가 코드 주석이나 문서로 연결된다.
+    verification:
+      type: verifier
+  - id: AC6
+    description: |-
+      손상·잘린·지원하지 않는 입력이 panic 없이 정의된 제품 실패로 매핑되고, 그 경로에 테스트가 있다.
+    verification:
+      type: verifier
+  - id: AC7
+    description: |-
+      오디오 fixture가 저장소에 커밋되지 않았다 — 테스트가 필요한 WAV를 스스로 생성한다.
+    verification:
+      type: verifier
+
+evidence: []
+
+failure_memo: []

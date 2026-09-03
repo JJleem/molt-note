@@ -1,0 +1,33 @@
+ M src-tauri/Cargo.lock
+ M src-tauri/Cargo.toml
+ M src-tauri/src/commands/mod.rs
+ M src-tauri/src/commands/payload.rs
+ M src-tauri/src/db/migrations.rs
+ M src-tauri/src/db/mod.rs
+ M src-tauri/src/db/settings.rs
+ M src-tauri/src/domain/failure.rs
+ M src-tauri/src/domain/settings.rs
+ M src-tauri/src/lib.rs
+ M src-tauri/src/platform/app_data_dir.rs
+ M src-tauri/tests/command_boundary.rs
+ M src-tauri/tests/settings_repository.rs
+ M src-tauri/tests/stop_persistence.rs
+ M src/App.css
+ M src/ipc/commands.ts
+ M src/ipc/failure.ts
+ M src/ipc/types.ts
+ M src/screens/RecordingDetailScreen.tsx
+ M src/screens/SettingsScreen.tsx
+ M src/screens/recordingsView.test.ts
+ M src/screens/settingsView.test.ts
+ M src/screens/settingsView.ts
+ M tests/ipc-boundary.test.ts
+ M tests/screen-boundary.test.ts
+?? src-tauri/src/commands/transcriber.rs
+?? src-tauri/src/transcription/
+?? src-tauri/tests/automatic_transcription.rs
+?? src-tauri/tests/transcription_background.rs
+?? src-tauri/tests/transcription_engine.rs
+?? src-tauri/tests/transcription_run.rs
+?? src/screens/transcriptView.test.ts
+?? src/screens/transcriptView.ts

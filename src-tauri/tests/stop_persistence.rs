@@ -27,10 +27,13 @@ use std::sync::{Arc, Mutex};
 use molt_note_lib::audio::{
     CaptureFormat, OpenCapture, SampleSink, SampleSource, MIN_FINALIZED_BYTES,
 };
-use molt_note_lib::commands::{finish_recording, Recorder, Storage, StoppedRecordingPayload};
+use molt_note_lib::commands::{
+    finish_recording, Recorder, Storage, StoppedRecordingPayload, Transcriber,
+};
 use molt_note_lib::domain::Failure;
 use molt_note_lib::platform::app_data_dir::AppDataDirectory;
 use molt_note_lib::platform::clock::Clock;
+use molt_note_lib::transcription::{engine_failed, StubEngine};
 
 /// 가짜 마이크는 어떤 키를 줘도 같은 값을 낸다.
 const DEVICE_KEY: &str = "0:가짜 마이크";
@@ -126,29 +129,61 @@ impl SampleSource for ControlledMicrophone {
     }
 }
 
-/// 정상적으로 열린 저장소와, 같은 자리에 녹음하는 녹음기.
-fn recorder_and_storage(temp: &TempRoot) -> (Recorder, Storage, ControlledMicrophone, TestClock) {
+/// 정상적으로 열린 저장소와, 같은 자리에 녹음하는 녹음기, 그리고 전사 실행자.
+///
+/// 전사 실행자가 여기 있는 이유는 **정지가 그것을 지나기 때문이다** — 자동 전사가 켜져
+/// 있으면 저장 직후에 전사가 걸린다. 이 파일의 테스트는 그 설정을 켜지 않으므로(기본값 OFF)
+/// 아무 전사도 시작되지 않으며, 그 자체를 판정하는 것은
+/// `src-tauri/tests/automatic_transcription.rs`다.
+fn recorder_and_storage(
+    temp: &TempRoot,
+) -> (
+    Recorder,
+    Storage,
+    Transcriber,
+    ControlledMicrophone,
+    TestClock,
+) {
     let app_data_dir = AppDataDirectory::new(temp.path().join("app-data"));
     let storage = Storage::open(&app_data_dir);
     assert!(storage.failure().is_none(), "사전 조건: 저장소가 열려야 한다");
 
     let microphone = ControlledMicrophone::new();
     let clock = TestClock::default();
-    let recorder = Recorder::with_clock(app_data_dir, microphone.clone(), clock.clone());
-    (recorder, storage, microphone, clock)
+    let recorder = Recorder::with_clock(app_data_dir.clone(), microphone.clone(), clock.clone());
+    (
+        recorder,
+        storage,
+        idle_transcriber(app_data_dir),
+        microphone,
+        clock,
+    )
+}
+
+/// 불릴 일이 없는 전사 실행자.
+///
+/// 자동 전사가 꺼져 있으므로 엔진까지 가지 않는다. 그래도 실패를 내는 double을 두는 이유는
+/// **불렸다면 그 사실이 조용히 지나가지 않게** 하기 위해서다 — 성공을 내는 double을 두면
+/// 걸리지 말았어야 할 전사가 성공한 채 남는다.
+fn idle_transcriber(app_data_dir: AppDataDirectory) -> Transcriber {
+    Transcriber::with_engine(
+        app_data_dir,
+        StubEngine::failing(engine_failed("이 파일의 정지는 전사를 걸지 않는다")),
+    )
 }
 
 /// 소리가 들어 있는 녹음 하나를 끝까지 마친다.
 fn record_something(
     recorder: &Recorder,
     storage: &Storage,
+    transcriber: &Transcriber,
     microphone: &ControlledMicrophone,
     clock: &TestClock,
 ) -> StoppedRecordingPayload {
     recorder.start(DEVICE_KEY).expect("녹음을 시작할 수 있어야 한다");
     microphone.speak(1_000);
     clock.advance(5_000);
-    finish_recording(recorder, storage, None).expect("정지가 성공해야 한다")
+    finish_recording(recorder, storage, transcriber, None).expect("정지가 성공해야 한다")
 }
 
 /// 확정된 WAV 파일에 실제로 들어 있는 샘플 전부.
@@ -180,7 +215,7 @@ fn wav_files(directory: &Path) -> Vec<PathBuf> {
 fn a_successful_stop_means_the_file_is_confirmed_and_the_record_is_saved() {
     // 이 테스트가 R-002 그 자체다. 네 조건이 여기서 한 번에 판정된다.
     let temp = TempRoot::new("confirmed");
-    let (recorder, storage, microphone, clock) = recorder_and_storage(&temp);
+    let (recorder, storage, transcriber, microphone, clock) = recorder_and_storage(&temp);
 
     recorder.start(DEVICE_KEY).expect("녹음을 시작할 수 있어야 한다");
     microphone.speak(1_000);
@@ -192,7 +227,8 @@ fn a_successful_stop_means_the_file_is_confirmed_and_the_record_is_saved() {
     microphone.speak(3_000);
     clock.advance(2_000);
 
-    let stopped = finish_recording(&recorder, &storage, None).expect("정지가 성공해야 한다");
+    let stopped =
+        finish_recording(&recorder, &storage, &transcriber, None).expect("정지가 성공해야 한다");
     let audio = PathBuf::from(&stopped.recording.audio_path);
 
     // 1. 파일 경로가 실제로 존재한다.
@@ -235,12 +271,13 @@ fn a_successful_stop_means_the_file_is_confirmed_and_the_record_is_saved() {
 fn a_stop_that_captured_no_sound_is_a_failure_the_user_sees() {
     // 파일은 만들어졌지만 소리가 없다. "resolve됐다"를 성공으로 삼지 않는다.
     let temp = TempRoot::new("silent");
-    let (recorder, storage, _microphone, clock) = recorder_and_storage(&temp);
+    let (recorder, storage, transcriber, _microphone, clock) = recorder_and_storage(&temp);
     let recordings_dir = AppDataDirectory::new(temp.path().join("app-data")).recordings_dir();
 
     recorder.start(DEVICE_KEY).expect("녹음을 시작할 수 있어야 한다");
     clock.advance(1_000);
-    let failure = finish_recording(&recorder, &storage, None).expect_err("빈 녹음은 성공이 아니다");
+    let failure = finish_recording(&recorder, &storage, &transcriber, None)
+        .expect_err("빈 녹음은 성공이 아니다");
 
     let written = wav_files(&recordings_dir);
     assert_eq!(written.len(), 1, "만들어진 파일은 그대로 있다: {written:?}");
@@ -259,18 +296,19 @@ fn a_stop_that_captured_no_sound_is_a_failure_the_user_sees() {
 #[test]
 fn a_title_the_user_typed_is_saved_and_a_blank_one_becomes_one_made_from_the_saved_time() {
     let temp = TempRoot::new("title");
-    let (recorder, storage, microphone, clock) = recorder_and_storage(&temp);
+    let (recorder, storage, transcriber, microphone, clock) = recorder_and_storage(&temp);
 
     recorder.start(DEVICE_KEY).expect("시작");
     microphone.speak(1_000);
     clock.advance(1_000);
-    let named = finish_recording(&recorder, &storage, Some("  3DGS Study #04  "))
+    let named = finish_recording(&recorder, &storage, &transcriber, Some("  3DGS Study #04  "))
         .expect("정지가 성공해야 한다");
 
     recorder.start(DEVICE_KEY).expect("두 번째 시작");
     microphone.speak(2_000);
     clock.advance(1_000);
-    let unnamed = finish_recording(&recorder, &storage, Some("   ")).expect("정지가 성공해야 한다");
+    let unnamed = finish_recording(&recorder, &storage, &transcriber, Some("   "))
+        .expect("정지가 성공해야 한다");
 
     assert_eq!(named.recording.title, "3DGS Study #04", "입력한 제목이 저장된다");
     assert!(
@@ -298,12 +336,13 @@ fn a_recording_that_cannot_be_saved_keeps_its_audio_and_tells_the_user_where_it_
 
     let microphone = ControlledMicrophone::new();
     let clock = TestClock::default();
-    let recorder = Recorder::with_clock(app_data_dir, microphone.clone(), clock.clone());
+    let recorder = Recorder::with_clock(app_data_dir.clone(), microphone.clone(), clock.clone());
+    let transcriber = idle_transcriber(app_data_dir);
 
     recorder.start(DEVICE_KEY).expect("녹음을 시작할 수 있어야 한다");
     microphone.speak(1_000);
     clock.advance(4_000);
-    let failure = finish_recording(&recorder, &storage, None)
+    let failure = finish_recording(&recorder, &storage, &transcriber, None)
         .expect_err("레코드를 남기지 못했으면 정지는 성공이 아니다");
 
     // 파일은 남아 있고, 내용도 그대로다.
@@ -333,9 +372,9 @@ fn a_recording_that_cannot_be_saved_keeps_its_audio_and_tells_the_user_where_it_
 #[test]
 fn a_record_whose_audio_is_gone_is_detected_and_nothing_is_removed_or_repaired() {
     let temp = TempRoot::new("missing-audio");
-    let (recorder, storage, microphone, clock) = recorder_and_storage(&temp);
+    let (recorder, storage, transcriber, microphone, clock) = recorder_and_storage(&temp);
 
-    let stopped = record_something(&recorder, &storage, &microphone, &clock);
+    let stopped = record_something(&recorder, &storage, &transcriber, &microphone, &clock);
     assert!(
         storage.missing_audio().expect("감지를 부를 수 있어야 한다").is_empty(),
         "방금 확정한 녹음은 어긋난 상태가 아니다"
@@ -371,29 +410,30 @@ fn a_record_whose_audio_is_gone_is_detected_and_nothing_is_removed_or_repaired()
 #[test]
 fn no_failure_on_any_path_removes_audio_that_was_already_written() {
     let temp = TempRoot::new("never-deletes");
-    let (recorder, storage, microphone, clock) = recorder_and_storage(&temp);
+    let (recorder, storage, transcriber, microphone, clock) = recorder_and_storage(&temp);
     let recordings_dir = AppDataDirectory::new(temp.path().join("app-data")).recordings_dir();
 
     // 지켜야 할 녹음 하나를 먼저 만들어 둔다.
-    let kept = record_something(&recorder, &storage, &microphone, &clock);
+    let kept = record_something(&recorder, &storage, &transcriber, &microphone, &clock);
     let kept_samples = samples_in(Path::new(&kept.recording.audio_path));
 
     // 1. 상태에 맞지 않는 요청들 — 거절이며 파일을 건드리지 않는다.
     recorder.pause().expect_err("녹음 중이 아니다");
     recorder.resume().expect_err("일시정지 상태가 아니다");
-    finish_recording(&recorder, &storage, None).expect_err("정지할 녹음이 없다");
+    finish_recording(&recorder, &storage, &transcriber, None).expect_err("정지할 녹음이 없다");
 
     // 2. 소리 없는 녹음 — 확인에 실패하지만 만들어진 파일은 남는다.
     recorder.start(DEVICE_KEY).expect("시작");
     clock.advance(1_000);
-    finish_recording(&recorder, &storage, None).expect_err("빈 녹음은 성공이 아니다");
+    finish_recording(&recorder, &storage, &transcriber, None).expect_err("빈 녹음은 성공이 아니다");
 
     // 3. 이미 녹음 중인데 또 시작 — 거절이며 진행 중인 녹음도 파일도 그대로다.
     recorder.start(DEVICE_KEY).expect("시작");
     microphone.speak(7_000);
     clock.advance(1_000);
     recorder.start(DEVICE_KEY).expect_err("이미 녹음 중이다");
-    let second = finish_recording(&recorder, &storage, None).expect("정지가 성공해야 한다");
+    let second =
+        finish_recording(&recorder, &storage, &transcriber, None).expect("정지가 성공해야 한다");
 
     // 앞선 녹음은 파일도 레코드도 그대로다.
     assert_eq!(

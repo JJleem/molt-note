@@ -1,0 +1,1541 @@
+diff --git a/src-tauri/src/commands/mod.rs b/src-tauri/src/commands/mod.rs
+index 8193c5d..14ca18f 100644
+--- a/src-tauri/src/commands/mod.rs
++++ b/src-tauri/src/commands/mod.rs
+@@ -6,8 +6,11 @@
+ //!
+ //! Phase 1의 표면은 두 가지였다 — **recording CRUD**와 **settings**.
+ //! 여기에 **입력 장치 열거**와 **녹음 session**(시작 · 일시정지 · 재개 · 정지 · 상태 조회),
+-//! 그리고 **레코드와 파일이 어긋난 상태의 감지**가 더해진다. 재시작 영속성과 재생은 아직 없다.
+-//! 전사 · AI · Notion을 위한 command도 그 기능이 존재하는 Phase가 함께 추가한다.
++//! 그리고 **레코드와 파일이 어긋난 상태의 감지**가 더해진다.
++//! Phase 3은 **전사**(시작 · 상태 조회) 둘과 **저장된 Transcript 읽기**([`get_transcript`])를
++//! 더한다 ([`Transcriber`]). 마지막 것은 읽기뿐이다 — Transcript는 immutable이므로
++//! 고치거나 지우는 이름은 이 표면에 없다 (§7.1 · INV-2).
++//! AI · Notion을 위한 command도 그 기능이 존재하는 Phase가 함께 추가한다.
+ //!
+ //! ## 정지의 성공은 "파일이 확정됐다"는 뜻이다 (R-002)
+ //!
+@@ -19,6 +22,11 @@
+ //! 어긋난 두 상태를 각각 어떻게 다루는지는
+ //! `docs/ADR-0004-recording-session-lifecycle.md` §10~§13에 있다.
+ //!
++//! 정지가 성공한 **뒤에** 전사가 자동으로 시작될 수 있다. 그것은 설정 값 하나가 정하며
++//! (`automatic_transcription`), 꺼져 있으면 아무 전사도 시작되지 않는다
++//! ([`start_automatic_transcription`]). 자동으로 시작하지 않는 것과 전사할 수 없는 것은
++//! 다른 말이다 — 수동 전사는 이 설정과 무관하게 언제나 [`start_transcription`]으로 할 수 있다.
++//!
+ //! ## 진행 중인 녹음을 소유하는 것은 여기다
+ //!
+ //! [`Recorder`]는 Tauri managed state로 앱이 들고 있다 (`crate::run`). 화면 컴포넌트가
+@@ -26,6 +34,10 @@
+ //! 화면은 command로 시작·정지를 요청하고 [`Recorder::status`]로 지금 상태를 물어볼 뿐이다.
+ //! 이 결정과 근거는 `docs/ADR-0004-recording-session-lifecycle.md`에 있다.
+ //!
++//! **진행 중인 전사도 같은 규약을 따른다** ([`Transcriber`] · `transcriber` 모듈 문서).
++//! 다른 점은 하나다 — 전사는 오래 걸리므로 배경 스레드에서 돌며, 그동안 이 표면의 다른
++//! command가 함께 멈추지 않는다.
++//!
+ //! ## 저장소 초기화 실패는 앱을 죽이지 않는다
+ //!
+ //! 저장소는 앱 시작 시 한 번 연다. 열지 못하면 [`Storage`]는 **실패를 값으로 들고 있다가**
+@@ -33,6 +45,7 @@
+ //! 이것이다 — 여기서 죽으면 사용자는 아무 설명도 받지 못하고, 실패는 콘솔에만 남는다 (§13).
+ 
+ pub mod payload;
++pub mod transcriber;
+ 
+ use std::path::{Path, PathBuf};
+ use std::sync::{Mutex, MutexGuard};
+@@ -47,7 +60,7 @@ use crate::audio::{
+     SystemSampleSource,
+ };
+ use crate::db::{self, settings, store};
+-use crate::domain::{Failure, FailureKind, RecordingId, RecordingView};
++use crate::domain::{Failure, FailureKind, RecordingId, RecordingView, TranscriptId};
+ use crate::platform::app_data_dir::AppDataDirectory;
+ use crate::platform::clock::{Clock, MonotonicClock};
+ use crate::platform::microphone::{
+@@ -56,8 +69,10 @@ use crate::platform::microphone::{
+ 
+ pub use payload::{
+     CaptureReportPayload, InputDevicePayload, MissingAudioPayload, NewRecording, RecordingPayload,
+-    SessionStatusPayload, SettingsPayload, StoppedRecordingPayload,
++    SessionStatusPayload, SettingsPayload, StoppedRecordingPayload, TranscriptPayload,
++    TranscriptSegmentPayload, TranscriptionStatusPayload,
+ };
++pub use transcriber::Transcriber;
+ 
+ /// 앱이 들고 있는 로컬 저장소.
+ ///
+@@ -123,6 +138,19 @@ impl Storage {
+         Ok(view.map(RecordingPayload::from))
+     }
+ 
++    /// Transcript 하나를 **segment까지** 돌려준다. 그런 id가 없으면 `None`이다 (오류가 아니다).
++    ///
++    /// 화면은 이것으로 `Recording.current_transcript_id`가 가리키는 Transcript를 읽는다
++    /// (§7.2 · `phase-prompt/03` 요구 6). **읽기뿐이다** — 저장소가 내놓는 Transcript 쓰기
++    /// 경로는 추가([`store::append_transcript`]) 하나이고 그것을 부르는 자리는
++    /// [`crate::transcription::run`]뿐이므로, 이 command가 열려도 화면이 Transcript를
++    /// 고치거나 지울 수 있게 되지는 않는다 (§7.1 · INV-2).
++    pub fn transcript(&self, id: &str) -> Result<Option<TranscriptPayload>, Failure> {
++        let connection = self.connection()?;
++        let transcript = store::load_transcript(&connection, &TranscriptId::new(id))?;
++        Ok(transcript.map(TranscriptPayload::from))
++    }
++
+     /// 녹음 하나를 새로 저장하고, 저장된 모습을 그대로 돌려준다.
+     ///
+     /// 식별자와 시각은 저장소가 만든다 — 프론트엔드가 정하지 않는다.
+@@ -531,10 +559,16 @@ impl Recorder {
+ /// 옮겨지거나 지워질 수 있다. 그것을 아는 수단이 [`Storage::missing_audio`]이며,
+ /// 그 역시 지우거나 고치지 않고 **알리기만 한다.**
+ ///
++/// ## 자동 전사는 **성공한 뒤에만, 설정이 켜져 있을 때만** 시작된다 (`phase-prompt/03` 요구 4)
++///
++/// 그 판단은 [`start_automatic_transcription`]이 하며, 여기서는 순서만 정해진다 — 레코드가
++/// 저장된 뒤다. 저장되지 않은 녹음을 전사하려 들지 않기 위해서다.
++///
+ /// `title`은 사용자가 입력한 제목이다. 없거나 비어 있으면 저장 시각에서 만든다.
+ pub fn finish_recording(
+     recorder: &Recorder,
+     storage: &Storage,
++    transcriber: &Transcriber,
+     title: Option<&str>,
+ ) -> Result<StoppedRecordingPayload, Failure> {
+     let capture = recorder.stop()?;
+@@ -544,9 +578,46 @@ pub fn finish_recording(
+         .save_capture(&capture, title)
+         .map_err(|failure| keeping_file(not_listed(failure), &output_path))?;
+ 
++    start_automatic_transcription(storage, transcriber, &recording.id);
++
+     Ok(StoppedRecordingPayload { recording, capture })
+ }
+ 
++/// 방금 저장된 녹음의 전사를 **설정이 켜져 있을 때만** 시작한다 (ADR-0007 §8.2.3).
++///
++/// ```text
++/// automatic_transcription = ON   → 전사를 건다 (배경 스레드에서 돈다)
++/// automatic_transcription = OFF  → 아무것도 하지 않는다
++/// ```
++///
++/// **수동 전사는 이 값과 무관하다** — [`start_transcription`] command는 설정을 보지 않는다.
++/// 꺼 두는 것은 "자동으로 시작하지 않는다"는 뜻이지 "전사할 수 없다"는 뜻이 아니다.
++///
++/// ## 여기서 일어나는 어떤 일도 정지의 성공을 되돌리지 않는다
++///
++/// 이 함수는 실패를 돌려주지 않는다. 정지는 이미 성공했고 — 파일이 확정됐고, 확인됐고,
++/// 레코드가 저장됐다 (R-002) — 전사를 걸지 못했다는 이유로 그 사실을 실패로 바꾸면
++/// 사용자는 저장된 녹음을 잃은 것처럼 보게 된다.
++///
++/// 시작하지 못하는 경우는 둘이다. 설정을 읽지 못했다면 자동 전사를 **켜져 있다고 가정하지
++/// 않는다** — 사용자가 켜지 않았을 수 있는 일을 추측으로 시작하지 않는다. 이미 다른 전사가
++/// 돌고 있다면 [`Transcriber::start`]가 거절하며, 그때도 녹음은 저장돼 있으므로 사용자는
++/// 앞의 전사가 끝난 뒤 수동으로 시작할 수 있다 (§16의 큐는 DEFERRED다).
++///
++/// **모델이 없어도 시작한다.** 그 상태를 이유로 토글을 뒤집거나 조용히 건너뛰지 않는다 —
++/// 전사는 §13의 `transcriptionModelMissing`으로 실패하고, 그 실패가 곧 사용자가 보는
++/// 제품 상태다 (ADR-0007 §8.2.3).
++fn start_automatic_transcription(storage: &Storage, transcriber: &Transcriber, recording_id: &str) {
++    let Ok(settings) = storage.settings() else {
++        return;
++    };
++    if !settings.automatic_transcription {
++        return;
++    }
++
++    let _ = transcriber.start(recording_id);
++}
++
+ /// 파일은 남았는데 레코드를 남기지 못한 실패.
+ ///
+ /// 저장소가 말한 원인은 그대로 두고 **무슨 일이 일어났는지를 앞에 붙인다** — 사용자가 읽어야
+@@ -643,9 +714,9 @@ fn validated(recording: NewRecording) -> Result<NewRecording, Failure> {
+ 
+ // --- Tauri command 표면 -------------------------------------------------------------
+ //
+-// 아래 열세 개가 frontend가 부를 수 있는 전부다. 각 함수는 [`Storage`] · [`AudioDevices`] ·
+-// [`Recorder`]의 같은 이름 동작이나 [`finish_recording`]을 그대로 부른다 — 로직을 여기에 두지
+-// 않으므로, 실제 동작은 Tauri 없이 테스트할 수 있다.
++// 아래 열다섯 개가 frontend가 부를 수 있는 전부다. 각 함수는 [`Storage`] · [`AudioDevices`] ·
++// [`Recorder`] · [`Transcriber`]의 같은 이름 동작이나 [`finish_recording`]을 그대로 부른다 —
++// 로직을 여기에 두지 않으므로, 실제 동작은 Tauri 없이 테스트할 수 있다.
+ 
+ #[tauri::command]
+ pub fn list_recordings(storage: State<'_, Storage>) -> Result<Vec<RecordingPayload>, Failure> {
+@@ -660,6 +731,18 @@ pub fn get_recording(
+     storage.recording(&recording_id)
+ }
+ 
++/// Transcript 하나를 segment까지 읽는다. 그런 id가 없으면 `null`이다.
++///
++/// **읽기 전용 표면이다.** Transcript를 고치거나 지우는 command는 없고, 만들 수도 없다 —
++/// 저장소의 Transcript 쓰기 경로가 추가 하나뿐이기 때문이다 (§7.1 · INV-2).
++#[tauri::command]
++pub fn get_transcript(
++    storage: State<'_, Storage>,
++    transcript_id: String,
++) -> Result<Option<TranscriptPayload>, Failure> {
++    storage.transcript(&transcript_id)
++}
++
+ #[tauri::command]
+ pub fn create_recording(
+     storage: State<'_, Storage>,
+@@ -709,13 +792,18 @@ pub fn resume_capture(recorder: State<'_, Recorder>) -> Result<(), Failure> {
+ }
+ 
+ /// 정지한다. **성공은 파일이 확정되고 확인되고 레코드로 저장됐다는 뜻이다** (R-002).
++///
++/// 저장된 뒤에 전사가 자동으로 시작될 수 있다 — 설정이 켜져 있을 때만이다
++/// ([`start_automatic_transcription`]). 그 전사는 배경 스레드에서 돌므로 이 command를
++/// 붙잡지 않는다.
+ #[tauri::command]
+ pub fn stop_capture(
+     recorder: State<'_, Recorder>,
+     storage: State<'_, Storage>,
++    transcriber: State<'_, Transcriber>,
+     title: Option<String>,
+ ) -> Result<StoppedRecordingPayload, Failure> {
+-    finish_recording(&recorder, &storage, title.as_deref())
++    finish_recording(&recorder, &storage, &transcriber, title.as_deref())
+ }
+ 
+ /// 레코드는 있는데 오디오 파일이 없는 녹음을 알린다. **아무것도 지우거나 고치지 않는다.**
+@@ -730,3 +818,25 @@ pub fn list_missing_audio(
+ pub fn capture_status(recorder: State<'_, Recorder>) -> Result<SessionStatusPayload, Failure> {
+     recorder.status()
+ }
++
++/// Recording 하나의 전사를 시작한다. **돌아오는 것은 접수 사실이지 전사 결과가 아니다.**
++///
++/// 실제 전사는 배경 스레드에서 돌므로 이 호출은 바로 끝난다 — 1시간짜리 녹음을 걸어도 이
++/// command가 IPC를 붙잡지 않는다. 결과는 [`transcription_status`]로 물어본다.
++///
++/// 이미 전사 중이면 거절한다 — 조용히 무시하지 않는다 ([`Transcriber::start`]).
++#[tauri::command]
++pub fn start_transcription(
++    transcriber: State<'_, Transcriber>,
++    recording_id: String,
++) -> Result<TranscriptionStatusPayload, Failure> {
++    transcriber.start(&recording_id)
++}
++
++/// 지금 전사가 어떤 상태인지 묻는다. **전사가 도는 동안에도 즉시 답한다.**
++#[tauri::command]
++pub fn transcription_status(
++    transcriber: State<'_, Transcriber>,
++) -> Result<TranscriptionStatusPayload, Failure> {
++    transcriber.status()
++}
+diff --git a/src-tauri/src/commands/payload.rs b/src-tauri/src/commands/payload.rs
+index ca654ba..b0039fb 100644
+--- a/src-tauri/src/commands/payload.rs
++++ b/src-tauri/src/commands/payload.rs
+@@ -11,7 +11,10 @@
+ use serde::{Deserialize, Serialize};
+ 
+ use crate::audio::{CaptureReport, InputDevice, SessionState, SessionSummary};
+-use crate::domain::{ProcessingStatus, Recording, RecordingId, RecordingView, Settings};
++use crate::domain::{
++    Failure, ProcessingStatus, Recording, RecordingId, RecordingView, Settings, Transcript,
++    TranscriptSegment,
++};
+ 
+ /// 조회된 녹음 하나. 목록 화면과 상세 화면이 그대로 쓴다 (§5 A · C).
+ ///
+@@ -260,6 +263,153 @@ impl SessionStatusPayload {
+     }
+ }
+ 
++/// 지금 전사가 어떤 상태인지 (`phase-prompt/03` 요구 3).
++///
++/// [`SessionStatusPayload`]와 같은 자리에 있는 값이다 — **진행 중인 전사를 들고 있는 것은
++/// backend이고 화면은 그것을 물어본다.** 그래서 화면이 다시 그려지거나 사용자가 다른 화면에
++/// 다녀와도 여기서 같은 답이 나온다 ([`crate::commands::Transcriber`]).
++///
++/// 네 상태는 서로 배타적이며, 상태마다 값이 있는 필드가 다르다.
++///
++/// ```text
++/// state      recordingId   transcriptId   failure
++/// idle       null          null           null
++/// running    있음          null           null
++/// done       있음          있음           null
++/// failed     있음          null           있음
++/// ```
++///
++/// **실패는 [`Failure`] 그대로 실려 온다.** §13의 세 질문에 대한 답이 이미 그 값 안에 있으므로
++/// 여기서 문장을 새로 만들거나 종류를 뭉개지 않는다 — 모델이 없는 것과 엔진이 죽은 것은
++/// 사용자가 할 일이 다르고, 그 구분이 화면까지 그대로 도달해야 한다.
++#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
++#[serde(rename_all = "camelCase")]
++pub struct TranscriptionStatusPayload {
++    /// `idle · running · done · failed` 중 하나.
++    ///
++    /// **[`RecordingPayload::transcription_status`]와 다른 값이다.** 저쪽은 녹음 하나에 저장된
++    /// 후처리 상태(§7)이고, 이쪽은 지금 이 앱이 실제로 돌리고 있는 전사 한 건이다.
++    pub state: String,
++    /// 지금 전사 중이거나 마지막으로 전사한 녹음. 아무것도 하지 않았으면 없다.
++    pub recording_id: Option<String>,
++    /// 성공했을 때 **추가된** Transcript (§7.1). 그 시점에 이미 current다 (§7.2).
++    pub transcript_id: Option<String>,
++    /// 실패했을 때 그 실패 그대로.
++    pub failure: Option<Failure>,
++}
++
++impl TranscriptionStatusPayload {
++    /// 진행 중인 전사도, 방금 끝난 전사도 없다. **오류가 아니라 정상 상태다.**
++    pub(super) fn idle() -> Self {
++        Self {
++            state: "idle".to_string(),
++            recording_id: None,
++            transcript_id: None,
++            failure: None,
++        }
++    }
++
++    /// 지금 이 녹음을 전사하고 있다.
++    pub(super) fn running(recording_id: &str) -> Self {
++        Self {
++            state: "running".to_string(),
++            recording_id: Some(recording_id.to_string()),
++            ..Self::idle()
++        }
++    }
++
++    /// 전사가 끝났고 Transcript가 하나 추가됐다.
++    pub(super) fn done(recording_id: &str, transcript_id: &str) -> Self {
++        Self {
++            state: "done".to_string(),
++            transcript_id: Some(transcript_id.to_string()),
++            ..Self::running(recording_id)
++        }
++    }
++
++    /// 전사가 실패했다. 원본 오디오도 Recording도 그대로 남아 있다 (INV-1 · INV-3).
++    pub(super) fn failed(recording_id: &str, failure: &Failure) -> Self {
++        Self {
++            state: "failed".to_string(),
++            failure: Some(failure.clone()),
++            ..Self::running(recording_id)
++        }
++    }
++}
++
++/// Transcript 안의 구간 하나 (§7의 `segments[] { start · end · text }`).
++///
++/// **밀리초로 나간다.** 엔진마다 다른 단위(CLI JSON은 밀리초 · `whisper-rs`는 센티초)를
++/// 하나로 맞추는 자리는 통합 경계 한 곳뿐이며 (`crate::transcription::parse`), 화면까지 오는
++/// 값은 이미 정규화된 밀리초다. 여기서 다시 나누거나 곱하지 않는다.
++///
++/// `00:02:14 → 00:02:21` 같은 **표시 문자열은 만들지 않는다.** 두 값을 어떤 형태로 보여줄지는
++/// 화면의 문제이며 그 규칙은 `src/screens/transcriptView.ts` 한 곳에 있다.
++#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
++#[serde(rename_all = "camelCase")]
++pub struct TranscriptSegmentPayload {
++    /// 녹음 시작 기준 오프셋(밀리초).
++    pub start_ms: i64,
++    pub end_ms: i64,
++    pub text: String,
++}
++
++impl From<TranscriptSegment> for TranscriptSegmentPayload {
++    fn from(segment: TranscriptSegment) -> Self {
++        Self {
++            start_ms: segment.start_ms,
++            end_ms: segment.end_ms,
++            text: segment.text,
++        }
++    }
++}
++
++/// 전사 결과 하나 (§7). Recording Detail의 Transcript 탭이 그대로 쓴다
++/// (`phase-prompt/03` 요구 6).
++///
++/// **읽기 전용 값이다.** 이 payload를 되돌려받는 command는 없다 — Transcript는 immutable이며
++/// (§7.1 · INV-2), 저장소가 내놓는 쓰기 경로도 추가([`crate::db::store::append_transcript`])
++/// 하나뿐이다. 그래서 화면이 이미 저장된 Transcript를 고치거나 지우는 경로는 만들어질 수 없다.
++///
++/// `language`가 없는 것도 정상이다 — 엔진이 언어를 말하지 않았다는 사실이며, 추측해서
++/// 채우지 않는다. `engine`과 `model`은 provenance다 (§7): 이 문장들이 **무엇으로 만들어졌는지**.
++#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
++#[serde(rename_all = "camelCase")]
++pub struct TranscriptPayload {
++    /// Recording과 독립적인 identity (§7.1).
++    pub id: String,
++    pub recording_id: String,
++    /// 감지·지정된 언어. 모르면 없다.
++    pub language: Option<String>,
++    /// 저장된 순서 그대로. 화면이 다시 정렬하지 않는다.
++    pub segments: Vec<TranscriptSegmentPayload>,
++    pub raw_text: String,
++    pub created_at: String,
++    /// 전사에 실제로 쓴 엔진 식별자.
++    pub engine: String,
++    /// 전사에 실제로 쓴 모델 식별자.
++    pub model: String,
++}
++
++impl From<Transcript> for TranscriptPayload {
++    fn from(transcript: Transcript) -> Self {
++        Self {
++            id: transcript.id.as_str().to_string(),
++            recording_id: transcript.recording_id.as_str().to_string(),
++            language: transcript.language,
++            segments: transcript
++                .segments
++                .into_iter()
++                .map(TranscriptSegmentPayload::from)
++                .collect(),
++            raw_text: transcript.raw_text,
++            created_at: transcript.created_at,
++            engine: transcript.engine,
++            model: transcript.model,
++        }
++    }
++}
++
+ /// 설정 값. 조회와 갱신이 같은 모양을 쓴다 — 화면이 읽은 것을 그대로 돌려보낼 수 있다.
+ ///
+ /// **INV-7: secret 필드가 없다.** API key · integration token을 담는 자리를 만들지 않는다.
+@@ -270,6 +420,19 @@ pub struct SettingsPayload {
+     #[serde(default)]
+     pub recordings_directory: Option<String>,
+     pub automatic_processing: bool,
++    /// 정지해 저장한 직후에 전사를 자동으로 시작할지 여부 (`phase-prompt/03` 요구 4).
++    ///
++    /// **[`Self::automatic_processing`]과 별개의 값이다.** 두 토글은 각자 저장되고 각자
++    /// 돌아온다 — 한쪽을 켜 보낸다고 다른 쪽이 켜지지 않는다.
++    pub automatic_transcription: bool,
++    /// 전사에 쓸 모델 파일의 이름 또는 경로 (ADR-0007 §8.2). 고르지 않은 상태(`null`)도
++    /// 정상이다.
++    ///
++    /// **secret이 아니다** — 파일이 어디 있는지일 뿐이며, 그래서 INV-7과 충돌하지 않는다.
++    /// 이 값이 가리키는 파일이 지금 실재하는지는 여기서 말하지 않는다. 그것을 아는 자리는
++    /// `crate::transcription::model` 하나이고, 없으면 §13의 정의된 실패로 드러난다.
++    #[serde(default)]
++    pub transcription_model: Option<String>,
+     /// 기본으로 고를 입력 장치의 **선택 키** ([`InputDevicePayload::key`]).
+     ///
+     /// 고르지 않은 상태(`null`)도 정상이다. 이 값이 가리키는 장치가 지금 목록에 있는지는
+@@ -284,6 +447,8 @@ impl From<Settings> for SettingsPayload {
+         Self {
+             recordings_directory: settings.recordings_directory,
+             automatic_processing: settings.automatic_processing,
++            automatic_transcription: settings.automatic_transcription,
++            transcription_model: settings.transcription_model,
+             default_microphone: settings.default_microphone,
+         }
+     }
+@@ -299,6 +464,15 @@ impl From<SettingsPayload> for Settings {
+                 .map(|directory| directory.trim().to_string())
+                 .filter(|directory| !directory.is_empty()),
+             automatic_processing: payload.automatic_processing,
++            // 두 토글은 서로를 보지 않는다. 자동 전사를 켰다고 자동 후처리가 켜지지 않는다.
++            automatic_transcription: payload.automatic_transcription,
++            // 공백만 있는 값은 모델 이름이 아니다 — '고르지 않음'과 구분되지 않는 세 번째
++            // 상태를 만들지 않는다. **그것뿐이다**: 이 자리에서 모델을 찾아보지도, 없는
++            // 값을 다른 모델로 바꾸지도 않는다 (ADR-0007 §8.2.3).
++            transcription_model: payload
++                .transcription_model
++                .map(|model| model.trim().to_string())
++                .filter(|model| !model.is_empty()),
+             // 같은 이유로 빈 선택은 '고르지 않음'이다. **다만 그것뿐이다** — 알아볼 수 없는
+             // 키가 와도 여기서 다른 장치로 바꾸지 않는다. 저장된 값과 지금 있는 장치를
+             // 맞춰 보는 일은 목록을 아는 쪽의 일이고, 그 결과는 값으로 구분된다.
+diff --git a/src-tauri/src/lib.rs b/src-tauri/src/lib.rs
+index 2d3f40e..3b54e4f 100644
+--- a/src-tauri/src/lib.rs
++++ b/src-tauri/src/lib.rs
+@@ -3,10 +3,11 @@ pub mod commands;
+ pub mod db;
+ pub mod domain;
+ pub mod platform;
++pub mod transcription;
+ 
+ use tauri::Manager;
+ 
+-use commands::{AudioDevices, Recorder, Storage};
++use commands::{AudioDevices, Recorder, Storage, Transcriber};
+ use platform::app_data_dir::AppDataDirectory;
+ 
+ #[cfg_attr(mobile, tauri::mobile_entry_point)]
+@@ -33,6 +34,16 @@ pub fn run() {
+             // 알린다 — 앱 시작을 막지 않는다 (§13).
+             app.manage(Recorder::open_for(app));
+ 
++            // 진행 중인 전사의 소유자도 여기다 — 녹음과 같은 이유이며 하나가 더 있다.
++            // 전사는 1시간 분량이면 오래 걸리므로 **배경 스레드에서 돈다.** 그동안 다른
++            // command와 화면은 계속 응답하고, 화면이 사라져도 돌던 전사는 사라지지 않는다
++            // (`phase-prompt/03` 요구 3 · crate::commands::transcriber).
++            //
++            // 모델도 엔진도 여기서 열지 않는다. 모델은 전사할 때마다 해석되며, 지정된 모델이
++            // 없는 것은 앱 시작을 막는 문제가 아니라 전사를 시작할 때 알리는 제품 상태다
++            // (§13 · ADR-0007 §8.2).
++            app.manage(Transcriber::open_for(app));
++
+             // 저장된 녹음을 재생하려면 webview가 그 파일을 읽을 수 있어야 한다.
+             // 그 통로는 Tauri v2의 asset protocol이고(`protocol-asset` feature),
+             // **열어 주는 자리는 녹음 디렉터리 하나뿐이다** — 사용자의 홈도, 앱 데이터
+@@ -60,6 +71,9 @@ pub fn run() {
+             // frontend가 부를 수 있는 전부다 (crate::commands).
+             commands::list_recordings,
+             commands::get_recording,
++            // 저장된 Transcript를 segment까지 읽는 자리다. **읽기뿐이다** — Transcript는
++            // immutable이므로 고치거나 지우는 이름은 여기에도 저장소에도 없다 (§7.1 · INV-2).
++            commands::get_transcript,
+             commands::create_recording,
+             commands::delete_recording,
+             commands::get_settings,
+@@ -72,6 +86,10 @@ pub fn run() {
+             commands::capture_status,
+             // 레코드와 파일이 어긋난 상태를 알리는 자리다 — 고치거나 지우지 않는다 (INV-4).
+             commands::list_missing_audio,
++            // 전사를 **움직이는** 표면은 이 둘뿐이다 — 한 건 시작과 상태 조회. 여러 Recording을
++            // 줄 세우는 큐는 이 Phase의 범위 밖이다 (PRODUCT-SPEC §16 DEFERRED).
++            commands::start_transcription,
++            commands::transcription_status,
+         ])
+         .run(tauri::generate_context!());
+ 
+diff --git a/src-tauri/tests/command_boundary.rs b/src-tauri/tests/command_boundary.rs
+index 2242a55..da94fef 100644
+--- a/src-tauri/tests/command_boundary.rs
++++ b/src-tauri/tests/command_boundary.rs
+@@ -10,8 +10,10 @@ use std::path::PathBuf;
+ use std::sync::atomic::{AtomicUsize, Ordering};
+ 
+ use molt_note_lib::commands::{NewRecording, SettingsPayload, Storage};
+-use molt_note_lib::db;
+-use molt_note_lib::domain::FailureKind;
++use molt_note_lib::db::{self, store};
++use molt_note_lib::domain::{
++    FailureKind, RecordingId, Transcript, TranscriptId, TranscriptSegment,
++};
+ use molt_note_lib::platform::app_data_dir::AppDataDirectory;
+ 
+ static COUNTER: AtomicUsize = AtomicUsize::new(0);
+@@ -102,6 +104,8 @@ fn every_command_returns_the_initialization_failure_rather_than_pretending_to_wo
+         .update_settings(SettingsPayload {
+             recordings_directory: Some("/tmp/recordings".to_string()),
+             automatic_processing: true,
++            automatic_transcription: false,
++            transcription_model: None,
+             default_microphone: None,
+         })
+         .expect_err("설정 갱신이 실패해야 한다");
+@@ -270,6 +274,78 @@ fn deleting_a_recording_removes_it_from_the_list() {
+     assert_eq!(storage.recording(&created.id).expect("조회한다"), None);
+ }
+ 
++// --- 저장된 Transcript 읽기 (phase-prompt/03 요구 6) ----------------------------------
++
++#[test]
++fn a_stored_transcript_comes_back_through_the_command_surface_with_its_segments() {
++    // 화면이 Transcript 탭에 무엇을 그릴 수 있는지가 여기서 정해진다 — segment마다
++    // **밀리초 두 개와 문장**이다. 단위를 여기서 다시 바꾸지 않는다 (§14.4.1의 ×10 · ×100 사고).
++    let temp = TempRoot::new("transcript");
++    let app_data_dir = AppDataDirectory::new(temp.path().join("app-data"));
++    let storage = Storage::open(&app_data_dir);
++    assert!(storage.failure().is_none(), "사전 조건: 저장소가 열려야 한다");
++
++    let recording = storage
++        .create_recording(a_recording("전사된 녹음"))
++        .expect("녹음을 저장할 수 있어야 한다");
++
++    // 전사 경로가 하는 일을 저장소 API로 그대로 재현한다 — 이 테스트가 보는 것은 읽기 쪽이다.
++    let mut connection = db::open_in(&app_data_dir).expect("사전 조건: 같은 DB를 연다");
++    let transcript = Transcript {
++        id: TranscriptId::new("t-1"),
++        recording_id: RecordingId::new(&recording.id),
++        language: Some("ko".to_string()),
++        segments: vec![
++            TranscriptSegment {
++                start_ms: 134_000,
++                end_ms: 141_000,
++                text: "그러면 이번에는 PLY 먼저 변환하고".to_string(),
++            },
++            TranscriptSegment {
++                start_ms: 141_000,
++                end_ms: 148_500,
++                text: "그다음 SOG 변환 확인하면 될 것 같아요.".to_string(),
++            },
++        ],
++        raw_text: "그러면 이번에는 PLY 먼저 변환하고\n그다음 SOG 변환 확인하면 될 것 같아요.".to_string(),
++        created_at: "2026-09-03T04:50:26.000Z".to_string(),
++        engine: "stub".to_string(),
++        model: "ggml-base.bin".to_string(),
++    };
++    store::append_transcript(&mut connection, &transcript).expect("사전 조건: Transcript를 남긴다");
++
++    let found = storage
++        .transcript("t-1")
++        .expect("조회가 성공해야 한다")
++        .expect("저장한 Transcript가 있어야 한다");
++
++    assert_eq!(found.id, "t-1");
++    assert_eq!(found.recording_id, recording.id);
++    assert_eq!(found.language.as_deref(), Some("ko"));
++    assert_eq!(found.engine, "stub", "무엇으로 만들어졌는지가 함께 온다 (§7)");
++    assert_eq!(found.model, "ggml-base.bin");
++
++    // 순서도 밀리초 값도 저장된 그대로다.
++    assert_eq!(
++        found
++            .segments
++            .iter()
++            .map(|segment| (segment.start_ms, segment.end_ms))
++            .collect::<Vec<_>>(),
++        vec![(134_000, 141_000), (141_000, 148_500)]
++    );
++    assert_eq!(found.segments[0].text, "그러면 이번에는 PLY 먼저 변환하고");
++}
++
++#[test]
++fn looking_up_an_unknown_transcript_is_an_empty_answer_not_a_failure() {
++    // Recording에 아직 Transcript가 없는 것은 정상 상태다 (§7.2) — 실패로 만들지 않는다.
++    let temp = TempRoot::new("transcript-unknown");
++    let storage = open_storage(&temp);
++
++    assert_eq!(storage.transcript("없는-id").expect("조회 자체는 성공한다"), None);
++}
++
+ #[test]
+ fn an_empty_store_answers_with_an_empty_list_and_the_default_settings() {
+     let temp = TempRoot::new("empty");
+@@ -284,6 +360,9 @@ fn an_empty_store_answers_with_an_empty_list_and_the_default_settings() {
+         SettingsPayload {
+             recordings_directory: None,
+             automatic_processing: false,
++            // 자동 전사도 기본값은 OFF다. 두 토글은 서로 다른 값이다.
++            automatic_transcription: false,
++            transcription_model: None,
+             default_microphone: None,
+         },
+         "저장된 적이 없으면 기본값이다"
+@@ -299,6 +378,8 @@ fn updated_settings_are_stored_and_read_back() {
+         .update_settings(SettingsPayload {
+             recordings_directory: Some("/Users/someone/Recordings".to_string()),
+             automatic_processing: true,
++            automatic_transcription: true,
++            transcription_model: Some("ggml-base.bin".to_string()),
+             default_microphone: Some("0:Studio Mic".to_string()),
+         })
+         .expect("설정을 저장할 수 있어야 한다");
+@@ -313,6 +394,15 @@ fn updated_settings_are_stored_and_read_back() {
+         Some("/Users/someone/Recordings")
+     );
+     assert!(saved.automatic_processing);
++    assert!(
++        saved.automatic_transcription,
++        "자동 전사 토글도 그대로 저장되고 그대로 돌아와야 한다"
++    );
++    assert_eq!(
++        saved.transcription_model.as_deref(),
++        Some("ggml-base.bin"),
++        "고른 모델도 그대로 저장되고 그대로 돌아와야 한다"
++    );
+     assert_eq!(
+         saved.default_microphone.as_deref(),
+         Some("0:Studio Mic"),
+@@ -320,6 +410,48 @@ fn updated_settings_are_stored_and_read_back() {
+     );
+ }
+ 
++#[test]
++fn the_two_automatic_toggles_do_not_share_one_value() {
++    // 하나를 켜고 다른 하나를 끈 채로 저장했을 때 그대로 돌아오지 않으면, 두 토글이 사실은
++    // 한 값이라는 뜻이다.
++    let temp = TempRoot::new("independent-toggles");
++    let storage = open_storage(&temp);
++
++    let processing_only = storage
++        .update_settings(SettingsPayload {
++            recordings_directory: None,
++            automatic_processing: true,
++            automatic_transcription: false,
++            transcription_model: None,
++            default_microphone: None,
++        })
++        .expect("설정을 저장할 수 있어야 한다");
++    assert!(processing_only.automatic_processing);
++    assert!(
++        !processing_only.automatic_transcription,
++        "후처리를 켜는 것이 자동 전사를 켜지 않는다"
++    );
++
++    let transcription_only = storage
++        .update_settings(SettingsPayload {
++            recordings_directory: None,
++            automatic_processing: false,
++            automatic_transcription: true,
++            transcription_model: None,
++            default_microphone: None,
++        })
++        .expect("설정을 저장할 수 있어야 한다");
++    assert!(
++        !transcription_only.automatic_processing,
++        "자동 전사를 켜는 것이 후처리를 켜지 않는다"
++    );
++    assert!(transcription_only.automatic_transcription);
++    assert_eq!(
++        transcription_only.transcription_model, None,
++        "모델을 고르지 않은 채로 자동 전사를 켤 수 있다 — 앱이 대신 고르지 않는다"
++    );
++}
++
+ #[test]
+ fn a_blank_directory_is_stored_as_not_chosen_rather_than_as_an_empty_path() {
+     let temp = TempRoot::new("blank-directory");
+@@ -329,6 +461,8 @@ fn a_blank_directory_is_stored_as_not_chosen_rather_than_as_an_empty_path() {
+         .update_settings(SettingsPayload {
+             recordings_directory: Some("   ".to_string()),
+             automatic_processing: false,
++            automatic_transcription: false,
++            transcription_model: Some("  \n ".to_string()),
+             default_microphone: Some("  ".to_string()),
+         })
+         .expect("설정을 저장할 수 있어야 한다");
+@@ -341,6 +475,38 @@ fn a_blank_directory_is_stored_as_not_chosen_rather_than_as_an_empty_path() {
+         saved.default_microphone, None,
+         "빈 선택도 '아직 고르지 않음'이다 — 어떤 장치의 키도 아닌 값을 저장하지 않는다"
+     );
++    assert_eq!(
++        saved.transcription_model, None,
++        "공백뿐인 모델 값도 '아직 고르지 않음'이다 — 어떤 파일도 가리키지 않는 값을 저장하지 않는다"
++    );
++}
++
++#[test]
++fn a_model_that_is_not_there_is_stored_as_chosen_not_replaced() {
++    // 저장 경로는 파일을 찾아보지 않는다. 그 자리에 파일이 없어도 **사용자가 고른 값 그대로**
++    // 남는다 — 지금 쓸 수 있는지 말하는 것은 전사를 시작할 때다 (ADR-0007 §8.2.3).
++    let temp = TempRoot::new("missing-model");
++    let storage = open_storage(&temp);
++
++    let saved = storage
++        .update_settings(SettingsPayload {
++            recordings_directory: None,
++            automatic_processing: false,
++            automatic_transcription: true,
++            transcription_model: Some("  없는-모델.bin  ".to_string()),
++            default_microphone: None,
++        })
++        .expect("설정을 저장할 수 있어야 한다");
++
++    assert_eq!(
++        saved.transcription_model.as_deref(),
++        Some("없는-모델.bin"),
++        "앞뒤 공백만 다듬고, 없는 파일이라고 해서 지우거나 다른 모델로 바꾸지 않는다"
++    );
++    assert!(
++        saved.automatic_transcription,
++        "모델을 찾지 못했다고 해서 토글이 뒤집히지 않는다"
++    );
+ }
+ 
+ #[test]
+@@ -355,6 +521,8 @@ fn a_default_microphone_that_no_longer_exists_is_stored_as_chosen_not_replaced()
+         .update_settings(SettingsPayload {
+             recordings_directory: None,
+             automatic_processing: false,
++            automatic_transcription: false,
++            transcription_model: None,
+             default_microphone: Some("7:장치가 빠진 마이크".to_string()),
+         })
+         .expect("설정을 저장할 수 있어야 한다");
+diff --git a/src/App.css b/src/App.css
+index 622597c..b039a06 100644
+--- a/src/App.css
++++ b/src/App.css
+@@ -350,6 +350,40 @@ input {
+   color: var(--text);
+ }
+ 
++/* transcript 탭 (§5 C · phase-prompt/03 요구 6) */
++
++.transcript {
++  max-width: 640px;
++}
++
++/* 문장 목록. 번호도 강조도 두지 않는다 — 읽는 것은 문장이다 (§19). */
++
++.transcript__lines {
++  margin: 12px 0 0;
++  padding: 0;
++  list-style: none;
++}
++
++.transcript__line {
++  display: grid;
++  grid-template-columns: 92px 1fr;
++  gap: 12px;
++  padding: 6px 0;
++}
++
++/* timestamp는 자리를 알려 줄 뿐이므로 문장보다 조용하다. 자릿수가 흔들리지 않게 고정폭으로. */
++
++.transcript__time {
++  font-variant-numeric: tabular-nums;
++  font-size: 13px;
++  color: var(--text-muted);
++  white-space: nowrap;
++}
++
++.transcript__text {
++  white-space: pre-wrap;
++}
++
+ /* settings */
+ 
+ .group {
+diff --git a/src/ipc/commands.ts b/src/ipc/commands.ts
+index 2105ece..e913cdc 100644
+--- a/src/ipc/commands.ts
++++ b/src/ipc/commands.ts
+@@ -1,7 +1,7 @@
+ /**
+  * 프론트엔드가 부를 수 있는 동작의 전부.
+  *
+- * `src-tauri/src/lib.rs`가 등록한 열두 개 command와 1:1이며, 그 밖의 경로는 없다 —
++ * `src-tauri/src/lib.rs`가 등록한 열여섯 개 command와 1:1이며, 그 밖의 경로는 없다 —
+  * **임의의 질의를 보낼 수단이 없다.** 저장소를 아는 코드는 Rust 안에만 있다
+  * (`docs/ADR-0001-local-persistence.md` · PRODUCT-SPEC §12).
+  *
+@@ -26,6 +26,8 @@ import type {
+   SessionStatus,
+   Settings,
+   StoppedRecording,
++  Transcript,
++  TranscriptionStatus,
+ } from './types';
+ 
+ export type { Failure, FailureKind } from './failure';
+@@ -40,6 +42,10 @@ export type {
+   SessionStatus,
+   Settings,
+   StoppedRecording,
++  Transcript,
++  TranscriptSegment,
++  TranscriptionState,
++  TranscriptionStatus,
+ } from './types';
+ 
+ /** command 하나를 부른다. 거절된 값은 언제나 {@link Failure}로 바꿔 던진다. */
+@@ -79,6 +85,19 @@ export function getRecording(recordingId: string): Promise<Recording | null> {
+   return call<Recording | null>('get_recording', { recordingId });
+ }
+ 
++/**
++ * 저장된 Transcript 하나를 **segment까지** 읽는다. 그런 id가 없으면 `null`이다.
++ *
++ * 화면은 `Recording.currentTranscriptId`가 가리키는 것을 이 함수로 읽는다 (§7.2).
++ *
++ * **읽기뿐이다.** Transcript를 고치거나 지우는 command는 없다 — Transcript는 immutable이고
++ * (§7.1 · INV-2) 저장소가 내놓는 쓰기 경로도 추가 하나뿐이다. 그래서 화면에서 시작한 어떤
++ * 동작도 이미 저장된 전사 내용을 바꾸지 못한다.
++ */
++export function getTranscript(transcriptId: string): Promise<Transcript | null> {
++  return call<Transcript | null>('get_transcript', { transcriptId });
++}
++
+ /** 녹음 하나를 저장하고 저장된 모습을 받는다. */
+ export function createRecording(recording: NewRecording): Promise<Recording> {
+   return call<Recording>('create_recording', { recording });
+@@ -177,3 +196,31 @@ export function listMissingAudio(): Promise<MissingAudio[]> {
+ export function captureStatus(): Promise<SessionStatus> {
+   return call<SessionStatus>('capture_status');
+ }
++
++/**
++ * 녹음 하나의 전사를 시작한다. **돌아오는 것은 접수 사실이지 전사 결과가 아니다.**
++ *
++ * 실제 전사는 backend의 배경 스레드에서 돌므로 이 호출은 바로 끝난다 — 1시간짜리 녹음을 걸어도
++ * 화면과 다른 command가 멈추지 않는다 (`phase-prompt/03` 요구 3). 결과는
++ * {@link transcriptionStatus}로 물어본다.
++ *
++ * **진행 중인 전사를 소유하는 것은 backend다.** 이 함수는 핸들을 돌려주지 않으며, 화면이
++ * 사라져도 전사는 계속된다 (R-001과 같은 규약).
++ *
++ * 이미 전사 중이면 실패한다 — 같은 녹음이어도 마찬가지다. 두 번째 요청이 조용히 사라지지
++ * 않는다. 여러 녹음을 줄 세우는 큐는 아직 없다 (PRODUCT-SPEC §16 DEFERRED).
++ */
++export function startTranscription(recordingId: string): Promise<TranscriptionStatus> {
++  return call<TranscriptionStatus>('start_transcription', { recordingId });
++}
++
++/**
++ * 지금 전사가 어떤 상태인지 물어본다. **전사가 도는 동안에도 즉시 답한다.**
++ *
++ * 아직 아무것도 걸지 않았으면 `idle`이 온다 — 오류가 아니다. 실패했으면 그 {@link Failure}가
++ * 그대로 실려 오므로 화면은 무엇이 실패했는지, 원본이 안전한지, 다시 시도할 수 있는지를
++ * 그 값에서 읽는다 (§13).
++ */
++export function transcriptionStatus(): Promise<TranscriptionStatus> {
++  return call<TranscriptionStatus>('transcription_status');
++}
+diff --git a/src/ipc/types.ts b/src/ipc/types.ts
+index b4a612f..285cad0 100644
+--- a/src/ipc/types.ts
++++ b/src/ipc/types.ts
+@@ -4,6 +4,7 @@
+  * `src-tauri/src/commands/payload.rs`의 직렬화 형태와 1:1이다. 여기 없는 것은 프론트엔드가
+  * 알 수 없다 — 저장소도, SQL도, 스키마도 이 경계를 넘어오지 않는다.
+  */
++import type { Failure } from './failure';
+ 
+ /** 후처리 상태 (PRODUCT-SPEC §7). `none`은 아직 시도하지 않았다는 정상 상태다. */
+ export type ProcessingStatus = 'none' | 'pending' | 'running' | 'done' | 'failed';
+@@ -141,6 +142,84 @@ export interface SessionStatus {
+   readonly elapsedLabel: string;
+ }
+ 
++/**
++ * 전사 한 건이 있을 수 있는 상태.
++ *
++ * **{@link ProcessingStatus}와 다른 값이다.** 저쪽은 녹음 하나에 저장된 후처리 상태(§7)이고,
++ * 이쪽은 지금 이 앱이 실제로 돌리고 있는 전사 한 건이다. 그래서 `none`도 `pending`도 없다 —
++ * 아직 아무것도 걸지 않은 상태가 `idle`이며, 시작한 순간부터 `running`이다.
++ */
++export type TranscriptionState = 'idle' | 'running' | 'done' | 'failed';
++
++/**
++ * 지금 전사가 어떤 상태인지 (`phase-prompt/03` 요구 3).
++ *
++ * **진행 중인 전사를 들고 있는 것은 backend다.** 화면은 그것을 소유하지 않고 물어본다 —
++ * 그래서 화면이 다시 그려지거나 사용자가 다른 화면에 다녀와도 같은 답이 온다. 전사가 도는
++ * 동안에도 이 질의는 즉시 답한다 (`src-tauri/src/commands/transcriber.rs`).
++ *
++ * 상태마다 값이 있는 필드가 다르다.
++ *
++ * ```text
++ * state      recordingId   transcriptId   failure
++ * idle       null          null           null
++ * running    있음          null           null
++ * done       있음          있음           null
++ * failed     있음          null           있음
++ * ```
++ */
++export interface TranscriptionStatus {
++  readonly state: TranscriptionState;
++  /** 지금 전사 중이거나 마지막으로 전사한 녹음. */
++  readonly recordingId: string | null;
++  /** 성공했을 때 **추가된** Transcript (§7.1). 그 시점에 이미 current다 (§7.2). */
++  readonly transcriptId: string | null;
++  /**
++   * 실패했을 때 그 실패 그대로.
++   *
++   * 종류가 뭉개지지 않는다 — 모델이 없는 것과 엔진이 죽은 것은 사용자가 할 일이 다르다 (§13).
++   */
++  readonly failure: Failure | null;
++}
++
++/**
++ * Transcript 안의 구간 하나 (§7의 `segments[] { start · end · text }`).
++ *
++ * **밀리초다.** 엔진마다 다른 단위를 하나로 맞추는 자리는 Rust의 통합 경계 한 곳뿐이며
++ * (`src-tauri/src/transcription/parse.rs`), 여기까지 오는 값은 이미 정규화돼 있다.
++ * 화면이 이 값을 다시 나누거나 곱하지 않는다 — 하는 일은 보여줄 형태로 옮기는 것뿐이다
++ * (`src/screens/transcriptView.ts`).
++ */
++export interface TranscriptSegment {
++  /** 녹음 시작 기준 오프셋(밀리초). */
++  readonly startMs: number;
++  readonly endMs: number;
++  readonly text: string;
++}
++
++/**
++ * 전사 결과 하나 (§7). **immutable · versioned다** (§7.1 · INV-2).
++ *
++ * 화면이 읽기만 하는 값이다 — 이 타입을 backend로 되돌려보내는 command가 없고, 재전사는
++ * 기존 것을 고치지 않고 새 Transcript를 추가한다. 그래서 이미 본 Transcript가 다음 전사
++ * 때문에 바뀌는 일은 없다.
++ *
++ * `language`가 없는 것도 정상이다 — 엔진이 언어를 말하지 않았다는 사실이며, 화면이 추측해서
++ * 채우지 않는다. `engine`·`model`은 이 문장들이 무엇으로 만들어졌는지다 (provenance · §7).
++ */
++export interface Transcript {
++  readonly id: string;
++  readonly recordingId: string;
++  readonly language: string | null;
++  /** 저장된 순서 그대로. 화면이 다시 정렬하지 않는다. */
++  readonly segments: readonly TranscriptSegment[];
++  readonly rawText: string;
++  /** ISO-8601 UTC 텍스트. */
++  readonly createdAt: string;
++  readonly engine: string;
++  readonly model: string;
++}
++
+ /**
+  * 설정 값 (§5 D).
+  *
+@@ -150,6 +229,28 @@ export interface Settings {
+   /** 아직 고르지 않았으면 `null`이다. */
+   readonly recordingsDirectory: string | null;
+   readonly automaticProcessing: boolean;
++  /**
++   * 녹음을 정지해 저장한 직후에 **전사를 자동으로 시작할지** 여부
++   * (`phase-prompt/03` 요구 4).
++   *
++   * **{@link Settings.automaticProcessing}과 다른 값이다.** 한쪽을 켠다고 다른 쪽이 켜지지
++   * 않는다 — 하나의 boolean에 두 의미가 겹치지 않는다.
++   *
++   * 꺼져 있다는 것은 "자동으로 시작하지 않는다"는 뜻이지 "전사할 수 없다"는 뜻이 아니다.
++   * 수동 전사(`startTranscription`)는 이 값과 무관하게 언제나 할 수 있다.
++   */
++  readonly automaticTranscription: boolean;
++  /**
++   * 전사에 쓸 모델 파일의 **이름 또는 경로** (docs/ADR-0007-transcription-engine.md §8.2).
++   * 아직 고르지 않았으면 `null`이며, 그것도 정상 상태다.
++   *
++   * **secret이 아니다** — 파일이 어디 있는지일 뿐이므로 INV-7과 충돌하지 않는다.
++   *
++   * `defaultMicrophone`과 같은 성질을 갖는다. 이 값이 가리키는 파일이 지금 그 자리에 있는지는
++   * 이 값만으로 알 수 없고, **없다고 해서 앱이 값을 지우거나 다른 모델로 바꾸지 않는다.**
++   * 실제로 찾아보는 것은 전사를 시작할 때이며, 없으면 §13의 실패로 드러난다.
++   */
++  readonly transcriptionModel: string | null;
+   /**
+    * 기본으로 고를 입력 장치의 **선택 키** ({@link InputDevice.key}). 아직 고르지 않았으면
+    * `null`이며, 그것도 정상 상태다.
+diff --git a/src/screens/RecordingDetailScreen.tsx b/src/screens/RecordingDetailScreen.tsx
+index a865f67..566feac 100644
+--- a/src/screens/RecordingDetailScreen.tsx
++++ b/src/screens/RecordingDetailScreen.tsx
+@@ -1,5 +1,13 @@
+-import { useEffect, useState } from 'react';
+-import { getRecording, listMissingAudio, recordingAudioSource } from '../ipc/commands';
++import { useCallback, useEffect, useRef, useState } from 'react';
++import {
++  getRecording,
++  getTranscript,
++  listMissingAudio,
++  recordingAudioSource,
++  startTranscription,
++  transcriptionStatus,
++} from '../ipc/commands';
++import type { Recording, Transcript, TranscriptionStatus } from '../ipc/types';
+ import { FailureNotice } from './FailureNotice';
+ import {
+   LOADING_RECORDING_DETAIL,
+@@ -8,6 +16,14 @@ import {
+   loadedRecordingDetail,
+   type RecordingDetailView,
+ } from './recordingDetailView';
++import {
++  LOADING_TRANSCRIPT_TAB,
++  transcriptTab,
++  transcriptTrouble,
++  type TranscriptLine,
++  type TranscriptTabView,
++  type TranscriptTrouble,
++} from './transcriptView';
+ import type { ScreenProps } from './types';
+ 
+ // §5.C의 세 탭. AI Note가 없어도 화면은 정상 동작해야 한다 (INV-8).
+@@ -20,17 +36,34 @@ const TAB_EMPTY_STATE: Record<Tab, string> = {
+   Recording: 'No audio file yet.',
+ };
+ 
++/**
++ * 전사가 도는 동안 상태를 다시 물어보는 간격(밀리초).
++ *
++ * 화면이 진행 상황을 만들어 내지 않으므로 보이는 것은 언제나 backend가 마지막으로 말해 준
++ * 값이다. 녹음 화면의 경과 시간보다 느리게 물어보는 이유는 이 값이 초 단위로 바뀌지 않기
++ * 때문이다 — 바뀌는 것은 상태 하나뿐이다.
++ */
++const TRANSCRIPTION_REFRESH_MS = 1_000;
++
+ /**
+  * Recording Detail 화면 (§5.C).
+  *
+- * 두 가지를 읽는다 — 이 녹음(`get_recording`)과, **레코드는 있는데 파일이 없는 녹음의 목록**
+- * (`list_missing_audio`)이다. 파일이 있는지를 화면이 직접 보지 않는 이유는 하나다:
+- * 파일시스템을 아는 코드는 Rust 안에만 있다 (PRODUCT-SPEC §12 · ADR-0001).
+- * 그 목록은 **알리기만 한다** — 부른다고 해서 레코드가 지워지거나 고쳐지지 않는다 (INV-4).
++ * 세 가지를 읽는다 — 이 녹음(`get_recording`), **레코드는 있는데 파일이 없는 녹음의 목록**
++ * (`list_missing_audio`), 그리고 current Transcript(`get_transcript` · §7.2)다. 파일이 있는지를
++ * 화면이 직접 보지 않는 이유는 하나다: 파일시스템을 아는 코드는 Rust 안에만 있다
++ * (PRODUCT-SPEC §12 · ADR-0001). 그 목록은 **알리기만 한다** — 부른다고 해서 레코드가
++ * 지워지거나 고쳐지지 않는다 (INV-4).
++ *
++ * 응답을 화면 상태로 바꾸는 규칙은 {@link loadedRecordingDetail} · {@link failedRecordingDetail} ·
++ * {@link transcriptTab}에 있다. 여기에는 그리는 일만 있다 — 그래서 재생 경로 네 갈래와
++ * 전사 상태 다섯 갈래가 DOM 없이 판정된다 (§18).
++ *
++ * ## 진행 중인 전사를 이 컴포넌트가 소유하지 않는다
+  *
+- * 응답을 화면 상태로 바꾸는 규칙은 {@link loadedRecordingDetail} · {@link failedRecordingDetail}에
+- * 있다. 여기에는 그리는 일만 있다 — 그래서 네 경로(로딩 · 재생 가능 · 파일 없음 · 조회 실패)가
+- * DOM 없이 판정된다 (§18).
++ * 전사는 backend의 배경 스레드에서 돌고 (`src-tauri/src/commands/transcriber.rs`), 화면은
++ * `transcription_status`로 **물어본다** — 녹음 화면이 `capture_status`를 물어보는 것과 같은
++ * 규약이다 (R-001). 그래서 화면이 unmount돼도 전사는 이어지고, 1시간짜리 녹음을 걸어 둔
++ * 동안에도 이 화면은 멎지 않는다. unmount가 하는 일은 되풀이 조회를 멈추는 것뿐이다.
+  *
+  * 재생은 `<audio controls>` 하나다. 파일 바이트는 IPC를 지나지 않고 asset protocol을 지나며
+  * (`recordingAudioSource` · docs/ADR-0006-audio-playback.md), 그 주소는 로컬 webview 안에서만
+@@ -40,17 +73,53 @@ const TAB_EMPTY_STATE: Record<Tab, string> = {
+ export function RecordingDetailScreen({ route, goBack }: ScreenProps) {
+   const [tab, setTab] = useState<Tab>('Transcript');
+   const [view, setView] = useState<RecordingDetailView>(LOADING_RECORDING_DETAIL);
+-  /** 다시 시도 횟수. 늘어나면 다시 읽는다. */
++  /** 레코드 그대로. 상세 표시는 {@link view}가 하고, 전사 상태 판단에는 이 값이 필요하다. */
++  const [record, setRecord] = useState<Recording | null>(null);
++  /** current Transcript (§7.2). 아직 읽지 못했거나 없으면 `null`이다. */
++  const [currentTranscript, setCurrentTranscript] = useState<Transcript | null>(null);
++  /** backend가 마지막으로 알려준 전사 상태. 아직 물어보지 못했으면 `null`이다. */
++  const [live, setLive] = useState<TranscriptionStatus | null>(null);
++  /** 거절된 요청 하나. 전사 자체의 실패와 다른 자리에 놓인다 (§13). */
++  const [trouble, setTrouble] = useState<TranscriptTrouble | null>(null);
++  /** 다시 읽은 횟수. 늘어나면 다시 읽는다. */
+   const [attempt, setAttempt] = useState(0);
+ 
+   const recordingId = route.screen === 'recording-detail' ? route.recordingId : null;
+ 
+-  /** 다시 읽는다. 상태를 되돌리는 것은 effect가 아니라 이 사용자 동작의 일이다. */
++  /** 마지막으로 본 전사 상태. 전사가 **끝나는 순간**을 알아보는 데 쓴다. */
++  const lastLiveState = useRef<TranscriptionStatus['state'] | null>(null);
++
++  /** 저장된 값을 다시 읽는다. 화면을 로딩으로 되돌리지 않는다 — 보고 있던 것이 사라지지 않게. */
++  const reload = useCallback(() => setAttempt((count) => count + 1), []);
++
++  /** 사용자가 다시 시도했다. 이때는 화면을 로딩으로 되돌린다. */
+   const retry = () => {
+     setView(LOADING_RECORDING_DETAIL);
+-    setAttempt((count) => count + 1);
++    setTrouble(null);
++    reload();
+   };
+ 
++  /**
++   * 지금 전사가 어떤 상태인지 backend에 물어본다.
++   *
++   * 화면이 상태를 만들어 내지 않는 자리다. 전사가 끝난 것을 본 순간에는 저장된 값을 다시
++   * 읽는다 — 그때 비로소 새 Transcript와 `transcriptionStatus`가 저장돼 있기 때문이다.
++   */
++  const refreshTranscription = useCallback(() => {
++    transcriptionStatus().then(
++      (next) => {
++        setLive(next);
++        const finished = next.state === 'done' || next.state === 'failed';
++        if (finished && lastLiveState.current === 'running' && next.recordingId === recordingId) {
++          reload();
++        }
++        lastLiveState.current = next.state;
++      },
++      // 실패를 console에만 남기지 않는다. 화면 상태가 된다 (§13).
++      (error: unknown) => setTrouble(transcriptTrouble('status', error)),
++    );
++  }, [recordingId, reload]);
++
+   useEffect(() => {
+     if (recordingId === null) {
+       return;
+@@ -58,28 +127,75 @@ export function RecordingDetailScreen({ route, goBack }: ScreenProps) {
+     // 응답이 오기 전에 화면을 떠났다면 그 응답으로 상태를 바꾸지 않는다.
+     let current = true;
+ 
+-    // 둘 중 하나라도 답하지 못하면 실패 상태가 된다 — 파일이 그 자리에 있는지 모르는 채로
+-    // "재생할 수 있다"고 말하지 않는다.
++    // 셋 중 하나라도 답하지 못하면 실패 상태가 된다 — 파일이 그 자리에 있는지 모르는 채로
++    // "재생할 수 있다"고 말하지 않는다. Transcript는 레코드가 가리킬 때만 읽는다 (§7.2).
+ 
+-    Promise.all([getRecording(recordingId), listMissingAudio()]).then(
+-      ([recording, missingAudio]) => {
+-        if (current) {
+-          setView(
+-            loadedRecordingDetail(recordingId, recording, missingAudio, recordingAudioSource),
+-          );
+-        }
+-      },
+-      (error: unknown) => {
+-        // 실패를 console에만 남기지 않는다. 화면 상태가 된다 (§13).
+-        if (current) setView(failedRecordingDetail(error));
+-      },
+-    );
++    getRecording(recordingId)
++      .then((recording) =>
++        Promise.all([
++          Promise.resolve(recording),
++          listMissingAudio(),
++          recording !== null && recording.currentTranscriptId !== null
++            ? getTranscript(recording.currentTranscriptId)
++            : Promise.resolve(null),
++        ]),
++      )
++      .then(
++        ([recording, missingAudio, currentTranscript]) => {
++          if (!current) {
++            return;
++          }
++          setRecord(recording);
++          setCurrentTranscript(currentTranscript);
++          setView(loadedRecordingDetail(recordingId, recording, missingAudio, recordingAudioSource));
++        },
++        (error: unknown) => {
++          if (current) setView(failedRecordingDetail(error));
++        },
++      );
+ 
+     return () => {
+       current = false;
+     };
+   }, [recordingId, attempt]);
+ 
++  // 화면을 열 때 한 번 물어본다 — 이 화면에 오기 전에 걸어 둔 전사가 돌고 있을 수 있다.
++  useEffect(() => {
++    refreshTranscription();
++  }, [refreshTranscription]);
++
++  // 레코드를 아직 읽지 못한 것은 "전사가 없다"가 아니다 — 그 둘을 접지 않는다.
++  const transcriptView =
++    record === null ? LOADING_TRANSCRIPT_TAB : transcriptTab(record, currentTranscript, live);
++  const transcribing = transcriptView.kind === 'running' || transcriptView.kind === 'pending';
++
++  useEffect(() => {
++    // 전사가 도는 동안에만 되풀이해 물어본다. 상태 조회는 전사를 기다리지 않으므로
++    // (`Transcriber::status`) 이 되풀이가 화면을 멎게 하지 않는다.
++    if (!transcribing) {
++      return;
++    }
++    const timer = setInterval(refreshTranscription, TRANSCRIPTION_REFRESH_MS);
++    return () => clearInterval(timer);
++  }, [transcribing, refreshTranscription]);
++
++  /**
++   * 이 화면에서 전사를 시작한다 — 처음이든 실패한 뒤든 같은 동작이다 (요구 2 · 7).
++   *
++   * 돌아오는 것은 접수 사실이지 전사 결과가 아니다. 거절되면 그 사실이 화면에 남는다 —
++   * 조용히 사라지지 않는다.
++   */
++  const beginTranscription = (id: string) => {
++    setTrouble(null);
++    startTranscription(id).then(
++      (next) => {
++        setLive(next);
++        lastLiveState.current = next.state;
++      },
++      (error: unknown) => setTrouble(transcriptTrouble('start', error)),
++    );
++  };
++
+   // 대상 recording 없이 이 화면에 도달하는 것도 정상 상태다.
+   if (recordingId === null) {
+     return (
+@@ -165,15 +281,117 @@ export function RecordingDetailScreen({ route, goBack }: ScreenProps) {
+         ))}
+       </div>
+ 
+-      {tab === 'Recording' ? (
++      {tab === 'Transcript' && (
++        <TranscriptTab tab={transcriptView} trouble={trouble} onTranscribe={beginTranscription} />
++      )}
++
++      {tab === 'Recording' && (
+         <p className="hint">
+           {view.kind === 'playable'
+             ? `${view.audioFormat} · ${recording.durationLabel}`
+             : TAB_EMPTY_STATE.Recording}
+         </p>
+-      ) : (
+-        <p className="empty">{TAB_EMPTY_STATE[tab]}</p>
+       )}
++
++      {tab === 'AI Note' && <p className="empty">{TAB_EMPTY_STATE['AI Note']}</p>}
+     </div>
+   );
+ }
++
++/**
++ * Transcript 탭 (§5 C · `phase-prompt/03` 요구 6 · 7).
++ *
++ * 다섯 상태가 서로 다른 모습을 갖는다. 어느 상태인지 정하는 규칙은 여기 없고
++ * {@link transcriptTab}에 있다 — 이 컴포넌트는 그리기만 한다.
++ */
++function TranscriptTab({
++  tab,
++  trouble,
++  onTranscribe,
++}: {
++  tab: TranscriptTabView;
++  trouble: TranscriptTrouble | null;
++  onTranscribe: (recordingId: string) => void;
++}) {
++  return (
++    <section className="transcript">
++      {/* 요청이 거절된 사실은 전사 상태를 덮지 않고 그 옆에 남는다 (§13). */}
++      {trouble !== null && <FailureNotice failure={trouble.failure} headline={trouble.headline} />}
++
++      {tab.kind === 'loading' && <p className="hint">Loading transcript…</p>}
++
++      {tab.kind === 'none' && (
++        <>
++          <p className="empty">{tab.text}</p>
++          <button
++            type="button"
++            className="action"
++            onClick={() => onTranscribe(tab.start.recordingId)}
++          >
++            {tab.start.label}
++          </button>
++        </>
++      )}
++
++      {(tab.kind === 'pending' || tab.kind === 'running') && (
++        <>
++          {/* 상태가 바뀌는 것은 소리로도 알린다. 화면은 이 동안에도 멎지 않는다. */}
++          <p className="hint" aria-live="polite">
++            {tab.text}
++          </p>
++          {/* 새 전사가 도는 동안에도 이미 있던 Transcript는 그대로 보인다 (§7.1 · INV-2). */}
++          <TranscriptLines lines={tab.kept} />
++        </>
++      )}
++
++      {tab.kind === 'done' && (
++        <>
++          <p className="hint">
++            {[tab.language, tab.engine, tab.model].filter((fact) => fact !== null).join(' · ')}
++          </p>
++          <TranscriptLines lines={tab.lines} />
++        </>
++      )}
++
++      {tab.kind === 'failed' && (
++        <>
++          {/* 무엇이 실패했는지 · 원본은 안전한지 · 다시 시도할 수 있는지 (§13). */}
++          {tab.failure !== null && (
++            <FailureNotice failure={tab.failure} headline={tab.headline} />
++          )}
++          {tab.failure === null && <p className="failure__headline">{tab.headline}</p>}
++          {/* 앱은 아무것도 지우지 않았다 (INV-1 · INV-2 · INV-3). */}
++          <p className="hint">{tab.preservedNotice}</p>
++          {/* 모델이 없어서 실패한 경우는 먼저 할 일이 다르다. */}
++          {tab.resolution !== null && <p className="hint">{tab.resolution}</p>}
++          <button
++            type="button"
++            className="action"
++            onClick={() => onTranscribe(tab.retry.recordingId)}
++          >
++            {tab.retry.label}
++          </button>
++          <TranscriptLines lines={tab.kept} />
++        </>
++      )}
++    </section>
++  );
++}
++
++/** segment 목록. 시작·종료 timestamp가 문장과 함께 보인다 (요구 6). */
++function TranscriptLines({ lines }: { lines: readonly TranscriptLine[] }) {
++  if (lines.length === 0) {
++    return null;
++  }
++
++  return (
++    <ol className="transcript__lines">
++      {lines.map((line) => (
++        <li key={`${line.startLabel}-${line.endLabel}-${line.text}`} className="transcript__line">
++          <span className="transcript__time">{line.rangeLabel}</span>
++          <span className="transcript__text">{line.text}</span>
++        </li>
++      ))}
++    </ol>
++  );
++}
+diff --git a/src/screens/recordingsView.test.ts b/src/screens/recordingsView.test.ts
+index 0021518..924bb55 100644
+--- a/src/screens/recordingsView.test.ts
++++ b/src/screens/recordingsView.test.ts
+@@ -83,6 +83,27 @@ describe('목록 상태', () => {
+     }
+   });
+ 
++  it('Transcript badge가 저장된 전사 상태를 그대로 보여준다', () => {
++    // 전사 상태는 목록과 상세 **양쪽에서** 실제 값으로 보여야 한다
++    // (phase-prompt/03 요구 3). 목록 쪽이 이 badge다 — 다섯 상태가 서로 다르게 읽힌다.
++    const statuses = ['none', 'pending', 'running', 'done', 'failed'] as const;
++
++    const texts = statuses.map((transcriptionStatus) => {
++      const view = loadedRecordings([recording({ transcriptionStatus })], UTC);
++      if (view.kind !== 'list') throw new Error('목록이어야 한다');
++
++      const [badge] = view.items[0].statuses;
++      expect(badge.label).toBe('Transcript');
++      // 저장된 값이 그대로 실린다 — 화면이 다른 상태로 바꾸지 않는다.
++      expect(badge.status).toBe(transcriptionStatus);
++      return badge.text;
++    });
++
++    expect(new Set(texts).size, `다섯 상태가 같은 말로 읽힌다: ${texts.join(' · ')}`).toBe(
++      statuses.length,
++    );
++  });
++
+   it('아직 시도하지 않은 상태가 실패처럼 읽히지 않는다', () => {
+     // none은 정상 상태다 (§7 · INV-8).
+     const view = loadedRecordings(
+diff --git a/tests/ipc-boundary.test.ts b/tests/ipc-boundary.test.ts
+index 32c19cb..b1ba260 100644
+--- a/tests/ipc-boundary.test.ts
++++ b/tests/ipc-boundary.test.ts
+@@ -34,11 +34,18 @@ const rustFailureSource = readText('../src-tauri/src/domain/failure.rs');
+ /**
+  * 지금까지 노출하기로 한 command 전부.
+  *
+- * 앞의 여섯은 Phase 1(recording CRUD · settings)이고, 나머지는 녹음 표면이다 —
++ * 앞의 여섯은 Phase 1(recording CRUD · settings)이고, 그다음은 녹음 표면이다 —
+  * **입력 장치 열거**와 **녹음 session**(시작 · 일시정지 · 재개 · 정지 · 상태 조회),
+  * 그리고 **레코드와 파일이 어긋난 상태의 감지**(`list_missing_audio`)다.
+- * 진행 중인 session을 소유하는 것은 backend이며, 화면은 이 command로만 그것을 다룬다
+- * (R-001 · docs/ADR-0004-recording-session-lifecycle.md).
++ * 나머지 셋이 Phase 3의 전사 표면이다 — **한 건 시작 · 상태 조회 · 저장된 결과 읽기**다.
++ * 진행 중인 session도 진행 중인 전사도 소유하는 것은 backend이며, 화면은 이 command로만
++ * 그것을 다룬다 (R-001 · docs/ADR-0004-recording-session-lifecycle.md ·
++ * src-tauri/src/commands/transcriber.rs).
++ *
++ * `get_transcript`는 Phase 3의 요구 6이 요구하는 읽기다 — Recording Detail의 Transcript 탭이
++ * timestamp와 함께 문장을 보여주려면 저장된 Transcript를 읽는 이름이 있어야 한다. **읽기뿐이며
++ * 쓰기 이름은 늘지 않았다**: Transcript는 immutable이고 (§7.1 · INV-2) 저장소가 내놓는 쓰기
++ * 경로도 추가 하나뿐이다.
+  *
+  * 이 목록에 없는 이름이 등록되면 그것은 Phase 범위가 넘쳤다는 뜻이다 — 그래서 이 검사는
+  * 부분집합이 아니라 **정확히 같은 집합**을 요구한다.
+@@ -46,6 +53,7 @@ const rustFailureSource = readText('../src-tauri/src/domain/failure.rs');
+ const REGISTERED_COMMANDS = [
+   'list_recordings',
+   'get_recording',
++  'get_transcript',
+   'create_recording',
+   'delete_recording',
+   'get_settings',
+@@ -57,6 +65,8 @@ const REGISTERED_COMMANDS = [
+   'stop_capture',
+   'capture_status',
+   'list_missing_audio',
++  'start_transcription',
++  'transcription_status',
+ ];
+ 
+ /** lib.rs의 generate_handler![...]에 등록된 command 이름. */
+@@ -103,18 +113,43 @@ describe('command 표면', () => {
+   it('아직 만들지 않은 기능의 command가 등록되어 있지 않다', () => {
+     // 녹음 표면은 **capture 계열 네 동작과 상태 조회**까지다. 저장된 녹음의 재생은
+     // command로 하지 않는다 — 파일은 asset protocol로 흐르므로 이 표면에 이름이 생기지
+-    // 않는다 (docs/ADR-0006-audio-playback.md). 전사 · AI · Notion은 각각 Phase 3 · 4 · 5다.
++    // 않는다 (docs/ADR-0006-audio-playback.md). AI · Notion은 각각 Phase 4 · 5다.
+     // 아래 정규식이 그 선을 지킨다 —
+     // `*_recording`은 Recording 레코드를 만드는 영속화 표면의 이름이므로,
+     // 녹음 동작이 그 이름으로 새로 생기는 것은 여전히 막는다.
++    // `queue`·`batch`·`schedule`은 여러 Recording 동시 전사 큐의 이름이며 DEFERRED다 (§16).
+     const outOfScope =
+-      /(start|stop|pause|resume)_recording|play|transcri|whisper|\bai_|notion|ollama|export/i;
++      /(start|stop|pause|resume)_recording|play|whisper|\bai_|notion|ollama|export|queue|batch|schedule/i;
+ 
+     for (const command of registeredCommands()) {
+       expect(command, `${command}는 아직 만들지 않은 기능의 command다`).not.toMatch(outOfScope);
+     }
+   });
+ 
++  it('전사 표면은 한 건 시작 · 상태 조회 · 결과 읽기 셋뿐이다', () => {
++    // 여러 Recording 동시 전사 큐는 이 Phase의 범위 밖이다 (PRODUCT-SPEC §16 DEFERRED ·
++    // phase-prompt/03의 Out of Scope). 큐가 생기면 표면에 먼저 드러난다 — 목록을 걸거나,
++    // 대기열을 묻거나, 취소하는 이름이 필요해지기 때문이다.
++    const transcription = registeredCommands().filter((command) => /transcri/i.test(command));
++
++    expect(transcription.sort()).toEqual([
++      'get_transcript',
++      'start_transcription',
++      'transcription_status',
++    ]);
++  });
++
++  it('저장된 Transcript를 고치거나 지우는 command가 없다', () => {
++    // Transcript는 immutable · versioned다 (§7.1 · INV-2). 재전사는 기존 것을 고치지 않고
++    // 새 것을 추가하며, 그 추가를 하는 것은 backend의 전사 경로뿐이다. transcript 편집·삭제
++    // UI도 이 Phase의 범위 밖이다 — 그러므로 그 수단이 표면에 있어서도 안 된다.
++    const mutating = registeredCommands().filter((command) =>
++      /^(update|set|edit|delete|remove|append|save)_.*transcript/i.test(command),
++    );
++
++    expect(mutating).toEqual([]);
++  });
++
+   it('frontend가 부르는 이름이 등록된 이름과 정확히 같다', () => {
+     const called = [...commandsSource.matchAll(/call<[^>]*>\(\s*'([\w]+)'/g)].map(
+       (matched) => matched[1],
+diff --git a/tests/screen-boundary.test.ts b/tests/screen-boundary.test.ts
+index 6c03ca5..e58d290 100644
+--- a/tests/screen-boundary.test.ts
++++ b/tests/screen-boundary.test.ts
+@@ -7,6 +7,17 @@
+ //      그 규칙은 src-tauri/src/domain/duration.rs 한 곳에만 있고, 화면은 Rust가 보낸
+ //      durationLabel을 쓴다. 두 벌이 되면 조용히 갈라진다.
+ //   2. 실패가 console에만 남고 끝나는 경로가 없다 (PRODUCT-SPEC §13).
++//
++// ## 예외가 하나 있다 — segment timestamp (2026-09-03 · phase-prompt/03 요구 6)
++//
++// Transcript의 `00:02:14 → 00:02:21`은 **녹음 길이가 아니다.** 녹음 하나가 얼마나 긴가와
++// 이 문장이 녹음의 어디인가는 다른 값이고 형식도 다르며, Rust는 후자의 문자열을 보내지
++// 않는다 — Transcript payload가 보내는 것은 밀리초 두 개다. 그래서 그 변환은 화면 쪽에
++// **한 모듈**에만 있고, 그 모듈은 자기 옆의 리터럴 기대값 테스트로 판정된다
++// (src/screens/transcriptView.test.ts).
++//
++// 예외를 파일 하나로 못 박고, 그 파일이 녹음 길이 쪽으로 넘어오지 않는다는 것도 함께 본다 —
++// 규칙이 두 벌이 되는 것을 막는 것이 이 검사의 목적이지 산술을 금지하는 것이 목적이 아니다.
+ import { readFileSync, readdirSync, statSync } from 'node:fs';
+ import { fileURLToPath } from 'node:url';
+ import { describe, expect, it } from 'vitest';
+@@ -27,6 +38,14 @@ const frontendSources = sourceFiles(path('../src'));
+ const recordingsViewSource = readFileSync(path('../src/screens/recordingsView.ts'), 'utf8');
+ const recordingViewSource = readFileSync(path('../src/screens/recordingView.ts'), 'utf8');
+ 
++/**
++ * 시각을 문자열로 바꾸는 계산이 허용된 **단 하나의** 모듈.
++ *
++ * 여기서 만드는 것은 Transcript segment의 위치(`00:02:14`)이며 녹음 길이가 아니다.
++ * 목록·상세·녹음 화면의 길이 표시는 여전히 Rust가 만든 값을 그대로 쓴다.
++ */
++const TIMESTAMP_MODULE = path('../src/screens/transcriptView.ts');
++
+ describe('길이 포맷은 Rust에만 있다', () => {
+   it('src/ 아래에 초를 mm:ss로 바꾸는 계산이 없다', () => {
+     // 계산의 모양을 찾는다 — 분·초로 쪼개는 나눗셈/나머지와 두 자리 채우기.
+@@ -38,7 +57,7 @@ describe('길이 포맷은 Rust에만 있다', () => {
+       /toFixed\s*\(\s*2\s*\)[\s\S]{0,40}:/, // 초를 소수로 만들고 콜론을 붙이는 변형
+     ];
+ 
+-    for (const file of frontendSources) {
++    for (const file of frontendSources.filter((file) => file !== TIMESTAMP_MODULE)) {
+       const source = readFileSync(file, 'utf8');
+       for (const shape of durationArithmetic) {
+         expect(source, `${file}에 길이 포맷 계산이 있다`).not.toMatch(shape);
+@@ -46,6 +65,23 @@ describe('길이 포맷은 Rust에만 있다', () => {
+     }
+   });
+ 
++  it('예외인 모듈이 실제로 그 자리에 있다', () => {
++    // 예외를 파일 경로로 못 박았으므로, 그 파일이 사라지거나 이름이 바뀌면 검사가 조용히
++    // 아무것도 면제하지 않는 상태가 된다 — 그때 이 테스트가 먼저 알린다.
++    expect(frontendSources).toContain(TIMESTAMP_MODULE);
++  });
++
++  it('예외인 모듈이 녹음 길이 쪽으로 넘어오지 않는다', () => {
++    // 이 모듈이 만드는 것은 segment의 위치뿐이다. 녹음 하나의 길이(durationLabel ·
++    // elapsedLabel)를 여기서 만들기 시작하면 규칙이 두 벌이 되고 조용히 갈라진다.
++    const source = readFileSync(TIMESTAMP_MODULE, 'utf8');
++    const timestampFacts = [/durationMs/, /durationLabel/, /elapsedMs/, /elapsedLabel/];
++
++    for (const shape of timestampFacts) {
++      expect(source, '녹음 길이는 Rust가 만든 값을 쓴다').not.toMatch(shape);
++    }
++  });
++
+   it('목록 항목의 길이가 저장소에서 온 값 그대로다', () => {
+     expect(recordingsViewSource).toMatch(/durationLabel:\s*recording\.durationLabel/);
+   });

@@ -83,6 +83,27 @@ describe('목록 상태', () => {
     }
   });
 
+  it('Transcript badge가 저장된 전사 상태를 그대로 보여준다', () => {
+    // 전사 상태는 목록과 상세 **양쪽에서** 실제 값으로 보여야 한다
+    // (phase-prompt/03 요구 3). 목록 쪽이 이 badge다 — 다섯 상태가 서로 다르게 읽힌다.
+    const statuses = ['none', 'pending', 'running', 'done', 'failed'] as const;
+
+    const texts = statuses.map((transcriptionStatus) => {
+      const view = loadedRecordings([recording({ transcriptionStatus })], UTC);
+      if (view.kind !== 'list') throw new Error('목록이어야 한다');
+
+      const [badge] = view.items[0].statuses;
+      expect(badge.label).toBe('Transcript');
+      // 저장된 값이 그대로 실린다 — 화면이 다른 상태로 바꾸지 않는다.
+      expect(badge.status).toBe(transcriptionStatus);
+      return badge.text;
+    });
+
+    expect(new Set(texts).size, `다섯 상태가 같은 말로 읽힌다: ${texts.join(' · ')}`).toBe(
+      statuses.length,
+    );
+  });
+
   it('아직 시도하지 않은 상태가 실패처럼 읽히지 않는다', () => {
     // none은 정상 상태다 (§7 · INV-8).
     const view = loadedRecordings(

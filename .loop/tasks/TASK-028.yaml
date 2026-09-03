@@ -1,0 +1,66 @@
+# 비동기 전사 실행 · Tauri command 표면 · 타입 있는 frontend client
+# Runtime이 PLAN-20260903T015253Z 승인 시점에 생성했다 (proposal P6). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-028
+status: DONE
+
+request: |-
+  전사를 UI와 IPC를 막지 않고 실행한다 — 긴 전사(1시간 분량)가 도는 동안 다른 command와 화면이 계속 응답해야 한다. 진행 중인 전사를 backend가 소유하고(기존 Recorder와 같은 Tauri managed state 방식 · src-tauri/src/commands/mod.rs의 규약을 따른다), 화면이 사라져도 진행 중인 전사가 사라지지 않는다. command를 추가한다: Recording 하나의 전사를 시작하는 것과, 지금 전사가 어떤 상태인지 묻는 것. 같은 Recording에 대한 중복 시작은 조용히 무시하지 않고 거부한다. 여러 Recording을 동시에 처리하는 큐는 범위 밖이다(DEFERRED · §16) — 한 건 전사 중 UI가 멎지 않는 것까지만 한다. src-tauri/src/lib.rs에 command를 등록하고, src/ipc/commands.ts와 src/ipc/types.ts에 타입 있는 client를 기존 규약대로 추가하며, 실패는 기존 Failure 계약으로 매핑한다. 테스트는 실제 엔진 없이 한다: 엔진이 블록하고 있는 동안에도 상태 조회가 즉시 답한다 · 중복 시작이 거부된다 · 전사 실패가 Failure로 매핑된다 · 진행 중 상태와 완료 상태가 구분된다.
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-027
+
+stop_condition:
+  gates: [build, lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 3
+
+acceptance_criteria:
+  - id: AC1
+    description: |-
+      npm run build가 통과한다.
+    verification:
+      type: gate
+      ref: build
+  - id: AC2
+    description: |-
+      npm run lint가 통과한다.
+    verification:
+      type: gate
+      ref: lint
+  - id: AC3
+    description: |-
+      npm run test가 통과한다.
+    verification:
+      type: gate
+      ref: test
+  - id: AC4
+    description: |-
+      전사가 command 호출을 붙잡지 않는다 — 엔진이 진행 중인 동안 상태 조회가 즉시 답하는 것을 확인하는 테스트가 있다.
+    verification:
+      type: verifier
+      instruction: |-
+        블로킹 fake engine을 쓰는 테스트가 실제로 동시성 조건을 확인하는지, 아니면 순차 호출만 하는지 읽고 판정한다.
+  - id: AC5
+    description: |-
+      진행 중인 전사를 backend가 소유하고, 같은 Recording에 대한 중복 시작이 거부된다.
+    verification:
+      type: verifier
+  - id: AC6
+    description: |-
+      추가된 command가 lib.rs에 등록되고 src/ipc의 타입 있는 client와 1:1로 대응하며, 실패가 기존 Failure 계약으로 온다. 임의 질의를 보낼 수 있는 표면이 생기지 않았다.
+    verification:
+      type: verifier
+  - id: AC7
+    description: |-
+      여러 Recording 동시 전사 큐를 만들지 않았다 — 범위를 넘는 스케줄링 구조가 추가되지 않았다.
+    verification:
+      type: verifier
+
+evidence: []
+
+failure_memo: []

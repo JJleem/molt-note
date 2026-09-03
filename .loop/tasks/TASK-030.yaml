@@ -1,0 +1,64 @@
+# Recording Detail Transcript 탭 — timestamp 표시 · 상태 · 실패와 재시도
+# Runtime이 PLAN-20260903T015253Z 승인 시점에 생성했다 (proposal P8). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-030
+status: DONE
+
+request: |-
+  Recording Detail에 Transcript 탭을 만든다. 표시 로직은 순수 모듈에 두고(src/screens/recordingDetailView.ts 또는 그 옆의 새 모듈) React·DOM·Tauri 없이 vitest로 판정한다(§18). current Transcript의 segments를 timestamp와 함께 보여준다 — start_ms · end_ms를 HH:MM:SS로 만드는 규칙을 순수 함수로 두고, 00:02:14 → 00:02:21 형태를 값 기반 테스트로 확인한다(0 · 1초 미만 · 정확히 1시간 · 1시간 초과 · 반올림 경계를 포함한다). 다음을 서로 다른 상태로 표현한다: transcript가 아직 없음(none) · 대기/진행 중(pending · running) · 완료(done) · 실패(failed). 실패 상태는 §13대로 무엇이 실패했는지, 원본 audio와 Recording은 그대로 남아 있다는 사실, 그리고 재시도 수단을 함께 보여준다 — 모델이 없어서 실패한 경우는 그 사실과 해결 방법을 구분해 보여준다. 이 화면에서 수동 전사 시작과 재시도를 할 수 있다. 전사 상태는 Recordings 목록에도 보인다 — src/screens/recordingsView.ts의 기존 Transcript badge가 실제 상태를 반영하는지 확인하고 필요한 만큼만 손댄다. 전사가 도는 동안 화면이 멎지 않고 상태가 갱신된다 — 갱신 방식은 기존 화면 규약(command 조회)을 따른다. 새 Transcript가 생겨도 이전 Transcript를 화면이 지우거나 고치는 경로를 만들지 않는다(transcript 편집·검색·번역 UI는 범위 밖이다).
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-028
+
+stop_condition:
+  gates: [build, lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 3
+
+acceptance_criteria:
+  - id: AC1
+    description: |-
+      npm run build가 통과한다.
+    verification:
+      type: gate
+      ref: build
+  - id: AC2
+    description: |-
+      npm run lint가 통과한다.
+    verification:
+      type: gate
+      ref: lint
+  - id: AC3
+    description: |-
+      npm run test가 통과한다.
+    verification:
+      type: gate
+      ref: test
+  - id: AC4
+    description: |-
+      ms → HH:MM:SS 변환이 순수 함수로 있고 리터럴 기대값 테스트로 경계(0 · 1시간 · 1시간 초과 · 1초 미만)가 확인된다. segments가 시작·종료 timestamp와 함께 표시된다.
+    verification:
+      type: verifier
+  - id: AC5
+    description: |-
+      transcript 없음 · 진행 중 · 완료 · 실패가 서로 다른 화면 상태로 구분되고, 각각 DOM 없이 테스트된다.
+    verification:
+      type: verifier
+  - id: AC6
+    description: |-
+      실패 상태가 원본이 보존됐다는 사실과 재시도 수단을 함께 보여주고, 모델 없음이 일반 실패와 구분된다. 화면이 Recording이나 Transcript를 지우는 경로가 없다.
+    verification:
+      type: verifier
+  - id: AC7
+    description: |-
+      전사 상태가 Recordings 목록과 Detail 양쪽에서 실제 값으로 보인다.
+    verification:
+      type: verifier
+
+evidence: []
+
+failure_memo: []

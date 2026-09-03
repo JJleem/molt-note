@@ -21,9 +21,10 @@ use serde::Serialize;
 
 /// 실패가 어느 종류인지.
 ///
-/// **지금 실제로 만들어지는 것만 있다.** 전사·AI provider·Notion의 실패 종류는 §13에 이미
-/// 적혀 있지만, 그 기능이 존재하는 Phase가 그때 함께 추가한다 — 만들지 않은 실패의 자리를
-/// 미리 만들어 두지 않는다 (§20.6).
+/// **지금 실제로 만들어지는 것만 있다.** AI provider·Notion의 실패 종류는 §13에 이미 적혀
+/// 있지만, 그 기능이 존재하는 Phase가 그때 함께 추가한다 — 만들지 않은 실패의 자리를 미리
+/// 만들어 두지 않는다 (§20.6). 전사 실패 네 종류는 **전사가 실재하는 Phase 3에서** 그 규칙대로
+/// 추가됐다 (`crate::transcription::engine`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum FailureKind {
@@ -45,6 +46,19 @@ pub enum FailureKind {
     /// **어디서 무엇을 켜야 하는지는 domain이 알지 않는다.** 그 문장은 platform 경계가
     /// 만들어 넣는다 (`crate::platform::microphone_permission` · INV-10).
     MicrophonePermission,
+    /// 전사에 쓸 모델 파일이 그 자리에 없다 (§13 `모델 파일 없음`).
+    ///
+    /// **아래 네 전사 실패는 서로 다른 종류로 남는다.** 사용자가 할 수 있는 일이 전부 다르기
+    /// 때문이다 — 모델을 구해 오는 것 · 다른 모델을 고르는 것 · 다시 시도하는 것 · 다른 녹음을
+    /// 쓰는 것. 하나로 뭉치면 화면이 그 넷을 구분해 안내할 수 없다.
+    TranscriptionModelMissing,
+    /// 모델 파일은 그 자리에 있지만 읽을 수 없거나 엔진이 지원하지 않는다
+    /// (§13 `unsupported whisper model`).
+    TranscriptionModelUnusable,
+    /// 엔진이 실행되지 못했거나 비정상 종료했다 (§13 `transcription process failure`).
+    TranscriptionEngineFailed,
+    /// 엔진은 끝났지만 출력이 없거나 그 출력을 전사 결과로 해석할 수 없다.
+    TranscriptionOutputUnusable,
 }
 
 impl FailureKind {
@@ -57,6 +71,10 @@ impl FailureKind {
             Self::InvalidInput => "invalidInput",
             Self::AudioDevice => "audioDevice",
             Self::MicrophonePermission => "microphonePermission",
+            Self::TranscriptionModelMissing => "transcriptionModelMissing",
+            Self::TranscriptionModelUnusable => "transcriptionModelUnusable",
+            Self::TranscriptionEngineFailed => "transcriptionEngineFailed",
+            Self::TranscriptionOutputUnusable => "transcriptionOutputUnusable",
         }
     }
 }
@@ -196,6 +214,22 @@ mod tests {
             FailureKind::MicrophonePermission.as_str(),
             "microphonePermission"
         );
+        assert_eq!(
+            FailureKind::TranscriptionModelMissing.as_str(),
+            "transcriptionModelMissing"
+        );
+        assert_eq!(
+            FailureKind::TranscriptionModelUnusable.as_str(),
+            "transcriptionModelUnusable"
+        );
+        assert_eq!(
+            FailureKind::TranscriptionEngineFailed.as_str(),
+            "transcriptionEngineFailed"
+        );
+        assert_eq!(
+            FailureKind::TranscriptionOutputUnusable.as_str(),
+            "transcriptionOutputUnusable"
+        );
 
         // 이 문자열들은 `src/ipc/failure.ts`의 union과 1:1이다. 겹치면 화면이 두 실패를
         // 구분하지 못한다.
@@ -204,6 +238,10 @@ mod tests {
             FailureKind::InvalidInput,
             FailureKind::AudioDevice,
             FailureKind::MicrophonePermission,
+            FailureKind::TranscriptionModelMissing,
+            FailureKind::TranscriptionModelUnusable,
+            FailureKind::TranscriptionEngineFailed,
+            FailureKind::TranscriptionOutputUnusable,
         ];
         let mut seen = Vec::new();
         for kind in kinds {

@@ -350,6 +350,40 @@ input {
   color: var(--text);
 }
 
+/* transcript 탭 (§5 C · phase-prompt/03 요구 6) */
+
+.transcript {
+  max-width: 640px;
+}
+
+/* 문장 목록. 번호도 강조도 두지 않는다 — 읽는 것은 문장이다 (§19). */
+
+.transcript__lines {
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.transcript__line {
+  display: grid;
+  grid-template-columns: 92px 1fr;
+  gap: 12px;
+  padding: 6px 0;
+}
+
+/* timestamp는 자리를 알려 줄 뿐이므로 문장보다 조용하다. 자릿수가 흔들리지 않게 고정폭으로. */
+
+.transcript__time {
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.transcript__text {
+  white-space: pre-wrap;
+}
+
 /* settings */
 
 .group {

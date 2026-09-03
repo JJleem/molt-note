@@ -1,0 +1,54 @@
+# 운영자 smoke test 절차 문서 + ADR-0007 결과 정리 (문서 전용)
+# Runtime이 PLAN-20260903T015253Z 승인 시점에 생성했다 (proposal P9). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-031
+status: DONE
+
+request: |-
+  문서만 바꾸는 Task다 — 소스 · 설정 · 의존성은 건드리지 않는다. (1) 운영자가 실제 Whisper 추론 smoke test(PRODUCT-SPEC §14.4.3)를 그대로 따라 할 수 있는 절차를 문서로 남긴다(docs/ADR-0007-transcription-engine.md의 절차 절 또는 별도 문서). 담을 것: 어떤 모델을 어디서 얻는지와 어디에 두는지(저장소에 커밋하지 않는다) · sidecar를 택했다면 바이너리를 어떻게 얻어 어느 경로에 어떤 파일명으로 두는지 · 짧은 로컬 WAV를 어떻게 준비하는지 · 앱을 어떤 명령으로 실행하고 어떤 조작으로 전사를 시작하는지 · 무엇을 보면 성공인지(segments와 timestamp가 있는 Transcript가 화면에 보이고 앱을 재시작해도 남아 있다) · 실패했을 때 무엇을 기록하는지. 이것은 품질 벤치마크가 아니며 실제 마이크 녹음 · 1시간 오디오 · 한국어 품질 판정 · 성능 측정은 필요하지 않다는 것을 명시한다. (2) 이 Phase가 확인한 것과 확인하지 않은 것을 구분하는 기록표를 만든다 — 실제 한국어 전사 품질 · 한국어+영어 혼용 · timestamp가 실제 음성 위치와 맞는가 · 1시간 전사 소요 시간은 DEFERRED로 적고 PASS로 적지 않는다. 운영자 smoke test가 아직 실행되지 않았다면 'end-to-end 전사가 검증됐다'고 적지 않는다. (3) ADR-0007을 구현 결과에 맞게 갱신한다 — 실제로 구현된 것, 계획과 달라진 것과 그 이유, 여전히 UNVERIFIED로 남은 것(특히 notarization과 실제 추론). docs/SYSTEM-MAP.md는 이 Task에서 갱신하지 않는다 — Phase가 최종 DONE이 된 뒤 운영자가 한다.
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-029
+  - TASK-030
+
+stop_condition:
+  gates: []
+  requires_verifier: true
+  max_consecutive_failures: 2
+
+acceptance_criteria:
+  - id: AC1
+    description: |-
+      운영자가 추가 추측 없이 실행할 수 있을 만큼 구체적인 smoke test 절차가 있다 — 모델 획득 위치와 배치 경로, (해당 시) 바이너리 배치 경로와 파일명, 실행 명령, 조작 순서, 성공 판정 기준이 모두 적혀 있다.
+    verification:
+      type: verifier
+      instruction: |-
+        절차를 읽고 저장소의 실제 파일 경로·명령과 대조한다. 존재하지 않는 명령이나 경로를 적었으면 통과가 아니다.
+  - id: AC2
+    description: |-
+      smoke test가 품질 벤치마크가 아니라는 것과, 필요하지 않은 것(실제 마이크 · 1시간 오디오 · 한국어 품질 판정 · 성능 측정)이 명시된다.
+    verification:
+      type: verifier
+  - id: AC3
+    description: |-
+      확인된 것과 확인되지 않은 것을 구분하는 기록표가 있고, 연기된 네 항목이 DEFERRED로 표기된다. 실행되지 않은 검증이 PASS로 적히지 않았다.
+    verification:
+      type: verifier
+  - id: AC4
+    description: |-
+      ADR-0007이 실제 구현 결과와 일치하게 갱신되고, 남은 UNVERIFIED 항목이 그대로 UNVERIFIED로 남아 있다.
+    verification:
+      type: verifier
+  - id: AC5
+    description: |-
+      문서만 변경됐다 — 소스 · tauri.conf.json · Cargo.toml · package.json · docs/SYSTEM-MAP.md는 변경되지 않았다.
+    verification:
+      type: verifier
+
+evidence: []
+
+failure_memo: []

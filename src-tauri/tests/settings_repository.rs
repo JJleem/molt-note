@@ -87,11 +87,148 @@ fn defaults_are_returned_when_nothing_has_been_saved() {
         !loaded.automatic_processing,
         "automatic 처리의 기본값은 OFF다 — 켜는 것은 사용자의 명시적 선택이다"
     );
+    assert!(
+        !loaded.automatic_transcription,
+        "자동 전사의 기본값도 OFF다 (V1) — 사용자가 켜지 않은 전사를 녹음마다 시작하지 않는다"
+    );
+    assert_eq!(
+        loaded.transcription_model, None,
+        "전사 모델의 기본값은 '아직 고르지 않음'이다 — 아무 파일이나 골라 두지 않는다"
+    );
     assert_eq!(
         loaded.default_microphone, None,
         "default microphone의 기본값은 '아직 고르지 않음'이다 — 첫 장치를 대신 골라 두지 않는다"
     );
     close(connection);
+}
+
+// --- 두 토글은 서로 다른 값이다 --------------------------------------------------------
+
+#[test]
+fn the_two_automatic_toggles_are_stored_and_restored_independently() {
+    // 하나의 boolean에 두 의미가 겹치면 한쪽을 켤 때 다른 쪽이 함께 켜진다. 네 조합이 전부
+    // 그대로 저장되고 그대로 돌아와야 그 둘이 다른 값이라고 말할 수 있다.
+    for (processing, transcription) in [(false, false), (true, false), (false, true), (true, true)] {
+        let dir = TempDir::new("independent-toggles");
+
+        let first = open(&dir);
+        settings::save(
+            &first,
+            &Settings {
+                automatic_processing: processing,
+                automatic_transcription: transcription,
+                ..Settings::DEFAULT
+            },
+        )
+        .expect("설정을 저장할 수 있어야 한다");
+        close(first);
+
+        let second = open(&dir);
+        let loaded = settings::load(&second).expect("다시 열어도 설정을 읽을 수 있어야 한다");
+
+        assert_eq!(
+            (loaded.automatic_processing, loaded.automatic_transcription),
+            (processing, transcription),
+            "두 토글이 서로의 값을 덮어썼다"
+        );
+        assert_eq!(rows(&second), 1, "설정은 여전히 한 행이다");
+        close(second);
+    }
+}
+
+#[test]
+fn turning_automatic_transcription_on_does_not_touch_the_other_settings() {
+    let dir = TempDir::new("transcription-only");
+    let saved = Settings {
+        recordings_directory: Some("/tmp/molt-note-recordings".to_string()),
+        automatic_processing: false,
+        automatic_transcription: false,
+        transcription_model: Some("ggml-base.bin".to_string()),
+        default_microphone: Some("0:Studio Mic".to_string()),
+    };
+
+    let connection = open(&dir);
+    settings::save(&connection, &saved).expect("먼저 저장할 수 있어야 한다");
+    settings::save(
+        &connection,
+        &Settings {
+            automatic_transcription: true,
+            ..saved.clone()
+        },
+    )
+    .expect("토글만 바꿔 저장할 수 있어야 한다");
+    let loaded = settings::load(&connection).expect("설정을 읽을 수 있어야 한다");
+
+    assert_eq!(
+        loaded,
+        Settings {
+            automatic_transcription: true,
+            ..saved
+        },
+        "자동 전사를 켜는 것이 다른 값을 지우거나 바꾸면 안 된다"
+    );
+    close(connection);
+}
+
+// --- 모델 선택 (ADR-0007 §8.2) --------------------------------------------------------
+
+#[test]
+fn a_chosen_transcription_model_survives_closing_and_reopening_the_database() {
+    let dir = TempDir::new("model");
+
+    let first = open(&dir);
+    settings::save(
+        &first,
+        &Settings {
+            transcription_model: Some("/Users/tester/models/ggml-large-v3.bin".to_string()),
+            ..Settings::DEFAULT
+        },
+    )
+    .expect("설정을 저장할 수 있어야 한다");
+    close(first);
+
+    let second = open(&dir);
+    let loaded = settings::load(&second).expect("다시 열어도 설정을 읽을 수 있어야 한다");
+
+    assert_eq!(
+        loaded.transcription_model,
+        Some("/Users/tester/models/ggml-large-v3.bin".to_string()),
+        "고른 모델이 재시작 후에도 그대로여야 한다"
+    );
+    close(second);
+}
+
+#[test]
+fn a_model_file_that_is_no_longer_there_is_still_the_saved_choice() {
+    // 저장소는 파일을 찾아보지 않는다. 그 자리에 파일이 없어도 **저장된 선택은 그대로**이며,
+    // 읽는 김에 지우거나 다른 모델로 바꾸지 않는다 (ADR-0007 §8.2.3).
+    let dir = TempDir::new("missing-model");
+
+    let first = open(&dir);
+    settings::save(
+        &first,
+        &Settings {
+            automatic_transcription: true,
+            transcription_model: Some("없는-모델.bin".to_string()),
+            ..Settings::DEFAULT
+        },
+    )
+    .expect("설정을 저장할 수 있어야 한다");
+    close(first);
+
+    let second = open(&dir);
+    let loaded = settings::load(&second).expect("다시 열어도 설정을 읽을 수 있어야 한다");
+
+    assert_eq!(
+        loaded.transcription_model,
+        Some("없는-모델.bin".to_string()),
+        "파일이 없다는 이유로 저장된 선택이 사라지거나 바뀌면 안 된다"
+    );
+    assert!(
+        loaded.automatic_transcription,
+        "모델이 없다고 해서 토글이 뒤집히지도 않는다"
+    );
+    close(second);
 }
 
 #[test]
@@ -117,6 +254,8 @@ fn saved_values_survive_closing_and_reopening_the_database() {
     let saved = Settings {
         recordings_directory: Some("/Users/tester/Molt Note/Recordings".to_string()),
         automatic_processing: true,
+        automatic_transcription: true,
+        transcription_model: Some("ggml-base.bin".to_string()),
         default_microphone: Some("0:Studio Mic".to_string()),
     };
 
@@ -136,6 +275,15 @@ fn saved_values_survive_closing_and_reopening_the_database() {
     assert!(
         loaded.automatic_processing,
         "automatic 토글이 재시작 후에도 켜져 있어야 한다"
+    );
+    assert!(
+        loaded.automatic_transcription,
+        "자동 전사 토글도 재시작 후에도 켜져 있어야 한다"
+    );
+    assert_eq!(
+        loaded.transcription_model,
+        Some("ggml-base.bin".to_string()),
+        "고른 모델이 재시작 후에도 그대로여야 한다"
     );
     assert_eq!(
         loaded.default_microphone,
@@ -157,9 +305,8 @@ fn a_default_microphone_that_is_no_longer_plugged_in_is_still_the_saved_choice()
     settings::save(
         &first,
         &Settings {
-            recordings_directory: None,
-            automatic_processing: false,
             default_microphone: Some("0:USB Microphone".to_string()),
+            ..Settings::DEFAULT
         },
     )
     .expect("설정을 저장할 수 있어야 한다");
@@ -185,9 +332,8 @@ fn clearing_the_default_microphone_is_remembered_as_not_chosen() {
     settings::save(
         &first,
         &Settings {
-            recordings_directory: None,
-            automatic_processing: false,
             default_microphone: Some("0:Studio Mic".to_string()),
+            ..Settings::DEFAULT
         },
     )
     .expect("먼저 고른 값을 저장할 수 있어야 한다");
@@ -250,6 +396,86 @@ fn a_database_written_before_the_default_microphone_existed_keeps_its_values() {
 }
 
 #[test]
+fn a_database_written_before_the_transcription_settings_existed_keeps_its_values() {
+    // version 4까지만 적용된 DB에 값이 이미 있는 상황이다 — 전사 설정이 생기기 전이다.
+    // 새 migration은 그 행을 지우거나 다시 만들지 않고 **열만 더한다.**
+    let dir = TempDir::new("before-transcription");
+
+    let older = Connection::open(dir.database_path()).expect("빈 DB를 만들 수 있어야 한다");
+    older
+        .execute_batch(
+            "CREATE TABLE schema_migrations (
+                 version    INTEGER PRIMARY KEY,
+                 name       TEXT NOT NULL,
+                 applied_at TEXT NOT NULL
+             );
+             INSERT INTO schema_migrations (version, name, applied_at)
+             VALUES (3, 'create_settings', datetime('now')),
+                    (4, 'add_default_microphone_to_settings', datetime('now'));
+             CREATE TABLE settings (
+                 id                   INTEGER PRIMARY KEY CHECK (id = 1),
+                 recordings_directory TEXT,
+                 automatic_processing INTEGER NOT NULL
+                     CHECK (automatic_processing IN (0, 1)),
+                 default_microphone   TEXT
+             );
+             INSERT INTO settings (id, recordings_directory, automatic_processing, default_microphone)
+             VALUES (1, '/tmp/before-transcription', 1, '0:Studio Mic');
+             PRAGMA user_version = 4;",
+        )
+        .expect("사전 조건: 전사 설정이 없던 스키마를 만든다");
+    close(older);
+
+    // 여기서 새 migration이 적용된다.
+    let upgraded = open(&dir);
+    let loaded = settings::load(&upgraded).expect("올린 뒤에도 설정을 읽을 수 있어야 한다");
+
+    assert_eq!(
+        loaded.recordings_directory,
+        Some("/tmp/before-transcription".to_string()),
+        "이미 저장돼 있던 값이 그대로여야 한다"
+    );
+    assert!(
+        loaded.automatic_processing,
+        "후처리 토글이 그대로여야 한다 — 새 토글이 이 값을 건드리지 않는다"
+    );
+    assert_eq!(
+        loaded.default_microphone,
+        Some("0:Studio Mic".to_string()),
+        "고른 장치도 그대로여야 한다"
+    );
+    assert!(
+        !loaded.automatic_transcription,
+        "값이 없던 새 열은 기본값(OFF)으로 읽힌다 — 다른 토글의 값을 물려받지 않는다"
+    );
+    assert_eq!(
+        loaded.transcription_model, None,
+        "새로 생긴 열은 '아직 고르지 않음'으로 시작한다"
+    );
+    assert_eq!(rows(&upgraded), 1, "행이 늘거나 다시 만들어지지 않았다");
+
+    // 그리고 그 행은 이제 새 값도 담을 수 있다 — 올린 스키마가 반쪽이 아니다.
+    settings::save(
+        &upgraded,
+        &Settings {
+            automatic_transcription: true,
+            transcription_model: Some("ggml-base.bin".to_string()),
+            ..loaded
+        },
+    )
+    .expect("올린 뒤에는 새 값도 저장할 수 있어야 한다");
+    let again = settings::load(&upgraded).expect("다시 읽을 수 있어야 한다");
+    assert!(again.automatic_transcription);
+    assert_eq!(again.transcription_model, Some("ggml-base.bin".to_string()));
+    assert_eq!(
+        again.recordings_directory,
+        Some("/tmp/before-transcription".to_string()),
+        "새 값을 저장하는 것이 예전 값을 지우지 않는다"
+    );
+    close(upgraded);
+}
+
+#[test]
 fn a_toggle_turned_off_is_remembered_and_not_mistaken_for_an_unsaved_value() {
     let dir = TempDir::new("off");
 
@@ -259,7 +485,7 @@ fn a_toggle_turned_off_is_remembered_and_not_mistaken_for_an_unsaved_value() {
         &Settings {
             recordings_directory: Some("/tmp/molt-note-recordings".to_string()),
             automatic_processing: true,
-            default_microphone: None,
+            ..Settings::DEFAULT
         },
     )
     .expect("먼저 켠 상태를 저장할 수 있어야 한다");
@@ -268,7 +494,7 @@ fn a_toggle_turned_off_is_remembered_and_not_mistaken_for_an_unsaved_value() {
         &Settings {
             recordings_directory: Some("/tmp/molt-note-recordings".to_string()),
             automatic_processing: false,
-            default_microphone: None,
+            ..Settings::DEFAULT
         },
     )
     .expect("다시 끈 상태를 저장할 수 있어야 한다");
@@ -310,6 +536,8 @@ fn saving_settings_does_not_disturb_other_stored_data() {
         &Settings {
             recordings_directory: Some("/tmp/elsewhere".to_string()),
             automatic_processing: true,
+            automatic_transcription: true,
+            transcription_model: Some("ggml-base.bin".to_string()),
             default_microphone: Some("0:Desk Mic".to_string()),
         },
     )
@@ -352,9 +580,12 @@ fn the_settings_schema_has_no_secret_columns() {
             "id".to_string(),
             "recordings_directory".to_string(),
             "automatic_processing".to_string(),
-            "default_microphone".to_string()
+            "default_microphone".to_string(),
+            // Phase 3이 더한 두 값이다. 모델의 자리는 secret이 아니라 경로다 (ADR-0007 §8.2).
+            "automatic_transcription".to_string(),
+            "transcription_model".to_string()
         ],
-        "설정 테이블에는 이 Phase가 다루는 값만 있어야 한다"
+        "설정 테이블에는 지금까지의 Phase가 다루는 값만 있어야 한다"
     );
     for column in &columns {
         let lowered = column.to_lowercase();

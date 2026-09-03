@@ -6,8 +6,11 @@
 //!
 //! Phase 1의 표면은 두 가지였다 — **recording CRUD**와 **settings**.
 //! 여기에 **입력 장치 열거**와 **녹음 session**(시작 · 일시정지 · 재개 · 정지 · 상태 조회),
-//! 그리고 **레코드와 파일이 어긋난 상태의 감지**가 더해진다. 재시작 영속성과 재생은 아직 없다.
-//! 전사 · AI · Notion을 위한 command도 그 기능이 존재하는 Phase가 함께 추가한다.
+//! 그리고 **레코드와 파일이 어긋난 상태의 감지**가 더해진다.
+//! Phase 3은 **전사**(시작 · 상태 조회) 둘과 **저장된 Transcript 읽기**([`get_transcript`])를
+//! 더한다 ([`Transcriber`]). 마지막 것은 읽기뿐이다 — Transcript는 immutable이므로
+//! 고치거나 지우는 이름은 이 표면에 없다 (§7.1 · INV-2).
+//! AI · Notion을 위한 command도 그 기능이 존재하는 Phase가 함께 추가한다.
 //!
 //! ## 정지의 성공은 "파일이 확정됐다"는 뜻이다 (R-002)
 //!
@@ -19,12 +22,21 @@
 //! 어긋난 두 상태를 각각 어떻게 다루는지는
 //! `docs/ADR-0004-recording-session-lifecycle.md` §10~§13에 있다.
 //!
+//! 정지가 성공한 **뒤에** 전사가 자동으로 시작될 수 있다. 그것은 설정 값 하나가 정하며
+//! (`automatic_transcription`), 꺼져 있으면 아무 전사도 시작되지 않는다
+//! ([`start_automatic_transcription`]). 자동으로 시작하지 않는 것과 전사할 수 없는 것은
+//! 다른 말이다 — 수동 전사는 이 설정과 무관하게 언제나 [`start_transcription`]으로 할 수 있다.
+//!
 //! ## 진행 중인 녹음을 소유하는 것은 여기다
 //!
 //! [`Recorder`]는 Tauri managed state로 앱이 들고 있다 (`crate::run`). 화면 컴포넌트가
 //! session 핸들을 갖지 않으므로 **화면이 unmount되어도 녹음이 사라지지 않는다** (R-001).
 //! 화면은 command로 시작·정지를 요청하고 [`Recorder::status`]로 지금 상태를 물어볼 뿐이다.
 //! 이 결정과 근거는 `docs/ADR-0004-recording-session-lifecycle.md`에 있다.
+//!
+//! **진행 중인 전사도 같은 규약을 따른다** ([`Transcriber`] · `transcriber` 모듈 문서).
+//! 다른 점은 하나다 — 전사는 오래 걸리므로 배경 스레드에서 돌며, 그동안 이 표면의 다른
+//! command가 함께 멈추지 않는다.
 //!
 //! ## 저장소 초기화 실패는 앱을 죽이지 않는다
 //!
@@ -33,6 +45,7 @@
 //! 이것이다 — 여기서 죽으면 사용자는 아무 설명도 받지 못하고, 실패는 콘솔에만 남는다 (§13).
 
 pub mod payload;
+pub mod transcriber;
 
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
@@ -47,7 +60,7 @@ use crate::audio::{
     SystemSampleSource,
 };
 use crate::db::{self, settings, store};
-use crate::domain::{Failure, FailureKind, RecordingId, RecordingView};
+use crate::domain::{Failure, FailureKind, RecordingId, RecordingView, TranscriptId};
 use crate::platform::app_data_dir::AppDataDirectory;
 use crate::platform::clock::{Clock, MonotonicClock};
 use crate::platform::microphone::{
@@ -56,8 +69,10 @@ use crate::platform::microphone::{
 
 pub use payload::{
     CaptureReportPayload, InputDevicePayload, MissingAudioPayload, NewRecording, RecordingPayload,
-    SessionStatusPayload, SettingsPayload, StoppedRecordingPayload,
+    SessionStatusPayload, SettingsPayload, StoppedRecordingPayload, TranscriptPayload,
+    TranscriptSegmentPayload, TranscriptionStatusPayload,
 };
+pub use transcriber::Transcriber;
 
 /// 앱이 들고 있는 로컬 저장소.
 ///
@@ -121,6 +136,19 @@ impl Storage {
         let connection = self.connection()?;
         let view = store::load_recording_view(&connection, &RecordingId::new(id))?;
         Ok(view.map(RecordingPayload::from))
+    }
+
+    /// Transcript 하나를 **segment까지** 돌려준다. 그런 id가 없으면 `None`이다 (오류가 아니다).
+    ///
+    /// 화면은 이것으로 `Recording.current_transcript_id`가 가리키는 Transcript를 읽는다
+    /// (§7.2 · `phase-prompt/03` 요구 6). **읽기뿐이다** — 저장소가 내놓는 Transcript 쓰기
+    /// 경로는 추가([`store::append_transcript`]) 하나이고 그것을 부르는 자리는
+    /// [`crate::transcription::run`]뿐이므로, 이 command가 열려도 화면이 Transcript를
+    /// 고치거나 지울 수 있게 되지는 않는다 (§7.1 · INV-2).
+    pub fn transcript(&self, id: &str) -> Result<Option<TranscriptPayload>, Failure> {
+        let connection = self.connection()?;
+        let transcript = store::load_transcript(&connection, &TranscriptId::new(id))?;
+        Ok(transcript.map(TranscriptPayload::from))
     }
 
     /// 녹음 하나를 새로 저장하고, 저장된 모습을 그대로 돌려준다.
@@ -531,10 +559,16 @@ impl Recorder {
 /// 옮겨지거나 지워질 수 있다. 그것을 아는 수단이 [`Storage::missing_audio`]이며,
 /// 그 역시 지우거나 고치지 않고 **알리기만 한다.**
 ///
+/// ## 자동 전사는 **성공한 뒤에만, 설정이 켜져 있을 때만** 시작된다 (`phase-prompt/03` 요구 4)
+///
+/// 그 판단은 [`start_automatic_transcription`]이 하며, 여기서는 순서만 정해진다 — 레코드가
+/// 저장된 뒤다. 저장되지 않은 녹음을 전사하려 들지 않기 위해서다.
+///
 /// `title`은 사용자가 입력한 제목이다. 없거나 비어 있으면 저장 시각에서 만든다.
 pub fn finish_recording(
     recorder: &Recorder,
     storage: &Storage,
+    transcriber: &Transcriber,
     title: Option<&str>,
 ) -> Result<StoppedRecordingPayload, Failure> {
     let capture = recorder.stop()?;
@@ -544,7 +578,44 @@ pub fn finish_recording(
         .save_capture(&capture, title)
         .map_err(|failure| keeping_file(not_listed(failure), &output_path))?;
 
+    start_automatic_transcription(storage, transcriber, &recording.id);
+
     Ok(StoppedRecordingPayload { recording, capture })
+}
+
+/// 방금 저장된 녹음의 전사를 **설정이 켜져 있을 때만** 시작한다 (ADR-0007 §8.2.3).
+///
+/// ```text
+/// automatic_transcription = ON   → 전사를 건다 (배경 스레드에서 돈다)
+/// automatic_transcription = OFF  → 아무것도 하지 않는다
+/// ```
+///
+/// **수동 전사는 이 값과 무관하다** — [`start_transcription`] command는 설정을 보지 않는다.
+/// 꺼 두는 것은 "자동으로 시작하지 않는다"는 뜻이지 "전사할 수 없다"는 뜻이 아니다.
+///
+/// ## 여기서 일어나는 어떤 일도 정지의 성공을 되돌리지 않는다
+///
+/// 이 함수는 실패를 돌려주지 않는다. 정지는 이미 성공했고 — 파일이 확정됐고, 확인됐고,
+/// 레코드가 저장됐다 (R-002) — 전사를 걸지 못했다는 이유로 그 사실을 실패로 바꾸면
+/// 사용자는 저장된 녹음을 잃은 것처럼 보게 된다.
+///
+/// 시작하지 못하는 경우는 둘이다. 설정을 읽지 못했다면 자동 전사를 **켜져 있다고 가정하지
+/// 않는다** — 사용자가 켜지 않았을 수 있는 일을 추측으로 시작하지 않는다. 이미 다른 전사가
+/// 돌고 있다면 [`Transcriber::start`]가 거절하며, 그때도 녹음은 저장돼 있으므로 사용자는
+/// 앞의 전사가 끝난 뒤 수동으로 시작할 수 있다 (§16의 큐는 DEFERRED다).
+///
+/// **모델이 없어도 시작한다.** 그 상태를 이유로 토글을 뒤집거나 조용히 건너뛰지 않는다 —
+/// 전사는 §13의 `transcriptionModelMissing`으로 실패하고, 그 실패가 곧 사용자가 보는
+/// 제품 상태다 (ADR-0007 §8.2.3).
+fn start_automatic_transcription(storage: &Storage, transcriber: &Transcriber, recording_id: &str) {
+    let Ok(settings) = storage.settings() else {
+        return;
+    };
+    if !settings.automatic_transcription {
+        return;
+    }
+
+    let _ = transcriber.start(recording_id);
 }
 
 /// 파일은 남았는데 레코드를 남기지 못한 실패.
@@ -643,9 +714,9 @@ fn validated(recording: NewRecording) -> Result<NewRecording, Failure> {
 
 // --- Tauri command 표면 -------------------------------------------------------------
 //
-// 아래 열세 개가 frontend가 부를 수 있는 전부다. 각 함수는 [`Storage`] · [`AudioDevices`] ·
-// [`Recorder`]의 같은 이름 동작이나 [`finish_recording`]을 그대로 부른다 — 로직을 여기에 두지
-// 않으므로, 실제 동작은 Tauri 없이 테스트할 수 있다.
+// 아래 열다섯 개가 frontend가 부를 수 있는 전부다. 각 함수는 [`Storage`] · [`AudioDevices`] ·
+// [`Recorder`] · [`Transcriber`]의 같은 이름 동작이나 [`finish_recording`]을 그대로 부른다 —
+// 로직을 여기에 두지 않으므로, 실제 동작은 Tauri 없이 테스트할 수 있다.
 
 #[tauri::command]
 pub fn list_recordings(storage: State<'_, Storage>) -> Result<Vec<RecordingPayload>, Failure> {
@@ -658,6 +729,18 @@ pub fn get_recording(
     recording_id: String,
 ) -> Result<Option<RecordingPayload>, Failure> {
     storage.recording(&recording_id)
+}
+
+/// Transcript 하나를 segment까지 읽는다. 그런 id가 없으면 `null`이다.
+///
+/// **읽기 전용 표면이다.** Transcript를 고치거나 지우는 command는 없고, 만들 수도 없다 —
+/// 저장소의 Transcript 쓰기 경로가 추가 하나뿐이기 때문이다 (§7.1 · INV-2).
+#[tauri::command]
+pub fn get_transcript(
+    storage: State<'_, Storage>,
+    transcript_id: String,
+) -> Result<Option<TranscriptPayload>, Failure> {
+    storage.transcript(&transcript_id)
 }
 
 #[tauri::command]
@@ -709,13 +792,18 @@ pub fn resume_capture(recorder: State<'_, Recorder>) -> Result<(), Failure> {
 }
 
 /// 정지한다. **성공은 파일이 확정되고 확인되고 레코드로 저장됐다는 뜻이다** (R-002).
+///
+/// 저장된 뒤에 전사가 자동으로 시작될 수 있다 — 설정이 켜져 있을 때만이다
+/// ([`start_automatic_transcription`]). 그 전사는 배경 스레드에서 돌므로 이 command를
+/// 붙잡지 않는다.
 #[tauri::command]
 pub fn stop_capture(
     recorder: State<'_, Recorder>,
     storage: State<'_, Storage>,
+    transcriber: State<'_, Transcriber>,
     title: Option<String>,
 ) -> Result<StoppedRecordingPayload, Failure> {
-    finish_recording(&recorder, &storage, title.as_deref())
+    finish_recording(&recorder, &storage, &transcriber, title.as_deref())
 }
 
 /// 레코드는 있는데 오디오 파일이 없는 녹음을 알린다. **아무것도 지우거나 고치지 않는다.**
@@ -729,4 +817,26 @@ pub fn list_missing_audio(
 #[tauri::command]
 pub fn capture_status(recorder: State<'_, Recorder>) -> Result<SessionStatusPayload, Failure> {
     recorder.status()
+}
+
+/// Recording 하나의 전사를 시작한다. **돌아오는 것은 접수 사실이지 전사 결과가 아니다.**
+///
+/// 실제 전사는 배경 스레드에서 돌므로 이 호출은 바로 끝난다 — 1시간짜리 녹음을 걸어도 이
+/// command가 IPC를 붙잡지 않는다. 결과는 [`transcription_status`]로 물어본다.
+///
+/// 이미 전사 중이면 거절한다 — 조용히 무시하지 않는다 ([`Transcriber::start`]).
+#[tauri::command]
+pub fn start_transcription(
+    transcriber: State<'_, Transcriber>,
+    recording_id: String,
+) -> Result<TranscriptionStatusPayload, Failure> {
+    transcriber.start(&recording_id)
+}
+
+/// 지금 전사가 어떤 상태인지 묻는다. **전사가 도는 동안에도 즉시 답한다.**
+#[tauri::command]
+pub fn transcription_status(
+    transcriber: State<'_, Transcriber>,
+) -> Result<TranscriptionStatusPayload, Failure> {
+    transcriber.status()
 }

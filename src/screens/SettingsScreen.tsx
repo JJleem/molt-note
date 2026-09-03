@@ -18,6 +18,7 @@ import {
   savedSettings,
   savingSettings,
   toSettings,
+  transcriptionNotices,
   type SettingsForm,
   type SettingsView,
 } from './settingsView';
@@ -34,8 +35,15 @@ import {
  * 없을 수 있고, 그때 **다른 장치로 바꿔 놓지 않는다** — 저장된 선택은 그대로 두고 지금
  * 쓸 수 없다는 사실을 보여 준다 (`defaultMicrophone.ts`).
  *
- * Transcription / AI Provider / Notion은 섹션 자리만 둔다 — 그 안의 기능은 Phase 3·4·5의 일이고,
- * secret(API key · integration token) 입력은 INV-7에 따라 Phase 1에서 다루지 않는다.
+ * Transcription 그룹은 **자동 전사 토글**과 **모델 선택** 둘이다 (Phase 3). 모델이 없어서
+ * 지금 전사할 수 없다는 것은 여기서 보이는 **제품 상태**이며, 그 사실 때문에 자동 전사 토글이
+ * 뒤집히지 않는다 — 사용자가 켠 값은 켜진 채로 남는다 (ADR-0007 §8.2.3).
+ *
+ * AI Provider / Notion은 섹션 자리만 둔다 — 그 안의 기능은 Phase 4·5의 일이고,
+ * secret(API key · integration token) 입력은 INV-7에 따라 다루지 않는다.
+ *
+ * **Save는 화면 전체에 하나다.** 설정은 한 벌이고 한 번에 저장되므로, 그룹마다 버튼을 두어
+ * "이 그룹만 저장된다"처럼 보이게 하지 않는다.
  *
  * 응답을 화면 상태로 바꾸는 규칙은 `settingsView`에 있다. 여기에는 그리는 일만 있다 (§18).
  */
@@ -184,17 +192,41 @@ export function SettingsScreen() {
           />
           <span className="field__label">Automatic processing after a recording ends</span>
         </label>
-
-        <button type="button" className="action" disabled={saving} onClick={() => save(form)}>
-          {saving ? 'Saving…' : 'Save'}
-        </button>
-        {saved && <p className="hint">Saved.</p>}
-        {failure !== null && <FailureNotice failure={failure} onRetry={() => save(form)} />}
       </section>
 
       <section className="group">
         <h2 className="group__title">Transcription</h2>
-        <p className="hint">Not available yet.</p>
+
+        <label className="field" htmlFor="transcription-model">
+          <span className="field__label">Whisper model</span>
+          <input
+            id="transcription-model"
+            type="text"
+            className="field__input"
+            placeholder="Not set"
+            value={form.transcriptionModel}
+            onChange={(event) => edit({ transcriptionModel: event.currentTarget.value })}
+          />
+        </label>
+
+        <label className="field field--inline" htmlFor="automatic-transcription">
+          <input
+            id="automatic-transcription"
+            type="checkbox"
+            checked={form.automaticTranscription}
+            onChange={(event) => edit({ automaticTranscription: event.currentTarget.checked })}
+          />
+          {/* 후처리 토글과 **다른 값이다.** 하나를 켜는 것이 다른 하나를 켜지 않는다. */}
+          <span className="field__label">Transcribe automatically after a recording is saved</span>
+        </label>
+
+        {/* 모델이 없다는 사실과 그것을 푸는 방법이 여기 나온다. 토글 값은 건드리지 않는다 —
+            보이는 것이 늘어날 뿐이며, 사용자가 켠 것은 켜진 채로 남는다 (ADR-0007 §8.2.3). */}
+        {transcriptionNotices(form).map((notice) => (
+          <p className="hint" key={notice}>
+            {notice}
+          </p>
+        ))}
       </section>
 
       <section className="group">
@@ -205,6 +237,16 @@ export function SettingsScreen() {
       <section className="group">
         <h2 className="group__title">Notion</h2>
         <p className="hint">Not available yet.</p>
+      </section>
+
+      {/* 설정은 한 벌이므로 저장도 한 번이다. */}
+      <section className="group">
+        <button type="button" className="action" disabled={saving} onClick={() => save(form)}>
+          {saving ? 'Saving…' : 'Save'}
+        </button>
+        <p className="hint">Saves every setting on this screen.</p>
+        {saved && <p className="hint">Saved.</p>}
+        {failure !== null && <FailureNotice failure={failure} onRetry={() => save(form)} />}
       </section>
     </div>
   );

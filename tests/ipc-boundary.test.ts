@@ -34,11 +34,18 @@ const rustFailureSource = readText('../src-tauri/src/domain/failure.rs');
 /**
  * 지금까지 노출하기로 한 command 전부.
  *
- * 앞의 여섯은 Phase 1(recording CRUD · settings)이고, 나머지는 녹음 표면이다 —
+ * 앞의 여섯은 Phase 1(recording CRUD · settings)이고, 그다음은 녹음 표면이다 —
  * **입력 장치 열거**와 **녹음 session**(시작 · 일시정지 · 재개 · 정지 · 상태 조회),
  * 그리고 **레코드와 파일이 어긋난 상태의 감지**(`list_missing_audio`)다.
- * 진행 중인 session을 소유하는 것은 backend이며, 화면은 이 command로만 그것을 다룬다
- * (R-001 · docs/ADR-0004-recording-session-lifecycle.md).
+ * 나머지 셋이 Phase 3의 전사 표면이다 — **한 건 시작 · 상태 조회 · 저장된 결과 읽기**다.
+ * 진행 중인 session도 진행 중인 전사도 소유하는 것은 backend이며, 화면은 이 command로만
+ * 그것을 다룬다 (R-001 · docs/ADR-0004-recording-session-lifecycle.md ·
+ * src-tauri/src/commands/transcriber.rs).
+ *
+ * `get_transcript`는 Phase 3의 요구 6이 요구하는 읽기다 — Recording Detail의 Transcript 탭이
+ * timestamp와 함께 문장을 보여주려면 저장된 Transcript를 읽는 이름이 있어야 한다. **읽기뿐이며
+ * 쓰기 이름은 늘지 않았다**: Transcript는 immutable이고 (§7.1 · INV-2) 저장소가 내놓는 쓰기
+ * 경로도 추가 하나뿐이다.
  *
  * 이 목록에 없는 이름이 등록되면 그것은 Phase 범위가 넘쳤다는 뜻이다 — 그래서 이 검사는
  * 부분집합이 아니라 **정확히 같은 집합**을 요구한다.
@@ -46,6 +53,7 @@ const rustFailureSource = readText('../src-tauri/src/domain/failure.rs');
 const REGISTERED_COMMANDS = [
   'list_recordings',
   'get_recording',
+  'get_transcript',
   'create_recording',
   'delete_recording',
   'get_settings',
@@ -57,6 +65,8 @@ const REGISTERED_COMMANDS = [
   'stop_capture',
   'capture_status',
   'list_missing_audio',
+  'start_transcription',
+  'transcription_status',
 ];
 
 /** lib.rs의 generate_handler![...]에 등록된 command 이름. */
@@ -103,16 +113,41 @@ describe('command 표면', () => {
   it('아직 만들지 않은 기능의 command가 등록되어 있지 않다', () => {
     // 녹음 표면은 **capture 계열 네 동작과 상태 조회**까지다. 저장된 녹음의 재생은
     // command로 하지 않는다 — 파일은 asset protocol로 흐르므로 이 표면에 이름이 생기지
-    // 않는다 (docs/ADR-0006-audio-playback.md). 전사 · AI · Notion은 각각 Phase 3 · 4 · 5다.
+    // 않는다 (docs/ADR-0006-audio-playback.md). AI · Notion은 각각 Phase 4 · 5다.
     // 아래 정규식이 그 선을 지킨다 —
     // `*_recording`은 Recording 레코드를 만드는 영속화 표면의 이름이므로,
     // 녹음 동작이 그 이름으로 새로 생기는 것은 여전히 막는다.
+    // `queue`·`batch`·`schedule`은 여러 Recording 동시 전사 큐의 이름이며 DEFERRED다 (§16).
     const outOfScope =
-      /(start|stop|pause|resume)_recording|play|transcri|whisper|\bai_|notion|ollama|export/i;
+      /(start|stop|pause|resume)_recording|play|whisper|\bai_|notion|ollama|export|queue|batch|schedule/i;
 
     for (const command of registeredCommands()) {
       expect(command, `${command}는 아직 만들지 않은 기능의 command다`).not.toMatch(outOfScope);
     }
+  });
+
+  it('전사 표면은 한 건 시작 · 상태 조회 · 결과 읽기 셋뿐이다', () => {
+    // 여러 Recording 동시 전사 큐는 이 Phase의 범위 밖이다 (PRODUCT-SPEC §16 DEFERRED ·
+    // phase-prompt/03의 Out of Scope). 큐가 생기면 표면에 먼저 드러난다 — 목록을 걸거나,
+    // 대기열을 묻거나, 취소하는 이름이 필요해지기 때문이다.
+    const transcription = registeredCommands().filter((command) => /transcri/i.test(command));
+
+    expect(transcription.sort()).toEqual([
+      'get_transcript',
+      'start_transcription',
+      'transcription_status',
+    ]);
+  });
+
+  it('저장된 Transcript를 고치거나 지우는 command가 없다', () => {
+    // Transcript는 immutable · versioned다 (§7.1 · INV-2). 재전사는 기존 것을 고치지 않고
+    // 새 것을 추가하며, 그 추가를 하는 것은 backend의 전사 경로뿐이다. transcript 편집·삭제
+    // UI도 이 Phase의 범위 밖이다 — 그러므로 그 수단이 표면에 있어서도 안 된다.
+    const mutating = registeredCommands().filter((command) =>
+      /^(update|set|edit|delete|remove|append|save)_.*transcript/i.test(command),
+    );
+
+    expect(mutating).toEqual([]);
   });
 
   it('frontend가 부르는 이름이 등록된 이름과 정확히 같다', () => {

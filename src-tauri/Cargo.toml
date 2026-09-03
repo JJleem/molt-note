@@ -36,4 +36,18 @@ cpal = "0.18"
 # writer를 정상 종료해야 재생 가능한 파일이 된다 (ADR-0003 §5.5).
 # 알려진 한계: 3.5.1은 2023-09 이후 릴리스가 없다(dormant) — ADR-0003 §9.
 hound = "3"
+# 전사 엔진. ADR-0007이 sidecar(A)와 비교해 고른 B다 — 엔진은 `cargo build`의 산출물 안으로
+# 들어가고 **배포물에 추가로 넣는 실행 파일이 없다.** 그래서 `tauri.conf.json`에
+# `bundle.externalBin`도, target triple 파일명 규약도, shell 권한도 없다 (ADR-0007 §2 · §4.2).
+# 빌드 시점에 CMake + C/C++ 툴체인을 요구한다 — **개발 빌드 의존성이지 사용자 의존성이 아니다**
+# (PRODUCT-SPEC §14.4.2 · ADR-0007 §7). 그 대가로 cold build가 whisper.cpp 컴파일을 포함한다
+# (ADR-0007 §4.3).
+# 알려진 한계: 번들 whisper.cpp가 upstream보다 낮고(v1.8.3 vs v1.9.3), 유지보수가
+# GitHub → Codeberg로 이동했다 (ADR-0007 §4.3). 그래서 버전을 핀하고 교체 비용을 작게 둔다
+# (§13 — 교체 대상은 `transcription::whisper` 하나다).
+whisper-rs = "0.16"
+# 샘플레이트 변환. ADR-0007 §9.2가 고른 순수 Rust 경로의 나머지 절반이다
+# (`hound` 읽기 + `rubato` 리샘플 + 수동 다운믹스). 외부 도구를 요구하지 않는 것이
+# 선택 이유이며, 그래서 제품 경로는 ffmpeg을 부르지 않는다 (§14.4.2 · ADR-0007 §7).
+rubato = "5"
 

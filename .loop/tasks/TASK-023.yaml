@@ -1,0 +1,59 @@
+# ADR-0007 — whisper 통합 방식 · 바이너리 · 모델 · 입력 변환 결정
+# Runtime이 PLAN-20260903T015253Z 승인 시점에 생성했다 (proposal P1). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-023
+status: DONE
+
+request: |-
+  docs/ADR-0007-transcription-engine.md를 새로 쓴다. 이 Task는 문서만 만든다 — 소스 · 설정 · 의존성 매니페스트는 건드리지 않는다. 담을 것: (1) 후보 A(Tauri sidecar + whisper-cli) · B(whisper-rs) · C(사용자 설치 바이너리)를 PRODUCT-SPEC §14.4.2의 운영자 정책 아래에서 비교하고 하나를 선택한다 — cmake는 A·B 공통 요구이므로 둘을 가르는 근거로 쓰지 않고, 'Rust라서'를 B의 근거로 쓰지 않으며, C는 A와 B가 둘 다 실증된 blocker를 만났을 때만 선택할 수 있고 개발/디버그 fallback으로서의 위치는 따로 적는다. (2) 도입 시점 기준 사실 재확인 — upstream 릴리스 아티팩트를 (a) macOS CLI 실행 파일 (b) XCFramework/라이브러리 (c) 소스 빌드만 가능 (d) Windows 아티팩트로 구분해 적고 (b)가 있다고 (a)가 있는 것으로 취급하지 않는다. whisper-rs의 현재 버전 · 번들 whisper.cpp 버전 · 유지보수 위치, 선택한 방식이 실제로 내는 timestamp 단위(밀리초 vs 센티초), sidecar를 택했다면 실제 CLI 플래그와 JSON 필드명을 근거와 함께 적는다. 확인하지 못한 것은 UNVERIFIED로 남기고 확인된 것처럼 적지 않는다. 근거의 종류(직접 확인 / PRODUCT-SPEC §14.4.1의 2026-09-03 재확인 / 미확인)를 구분한다. (3) tauri-apps/tauri#11992는 관찰된 packaging 위험으로 기록하되 '사이드카를 빼는 것 외에 우회가 없다'를 확정된 사실로 적지 않고 최종 notarization 확인은 배포 검증 경계로 넘긴다. (4) 바이너리 확보 경로와, 최종 사용자에게 whisper.cpp · Homebrew · CMake · Whisper CLI 설치를 요구하지 않는다는 정책을 어떻게 만족하는지. (5) 모델 관리 정책(앱 번들 / 최초 실행 다운로드 / 사용자 지정 중 선택 + 근거), 모델이 없을 때를 설정을 조용히 바꾸는 대신 제품 상태로 표현한다는 규칙, 수백 MB~수 GB 모델과 큰 바이너리를 저장소에 커밋하지 않는다는 규칙. (6) 입력 포맷 변환 책임 — 선택한 방식이 실제로 요구하는 입력(16-bit WAV 파일 / f32 PCM)과 변환 수단(순수 Rust hound+rubato 등), 사용자에게 ffmpeg 설치를 요구하지 않는다는 결론, 그리고 원본 raw recording을 resample해 덮어쓰지 않고 파생 입력을 따로 만든다는 규칙(INV-1 · INV-3). (7) 선택한 방식이 Windows에서도 성립하는지 근거와 함께 평가하되, Windows 빌드 · Windows 바이너리 확보 · Windows 실행 검증은 Phase 6임을 명시하고 이 Phase에서 추상화를 선입금하지 않는다(§20.6). (8) 탈락한 후보와 탈락 이유. Status는 실제 근거 수준에 맞게 정하고, 사람이 확인해야만 아는 항목은 DEFERRED로 표기한다.
+
+execution:
+  role: impl
+
+stop_condition:
+  gates: []
+  requires_verifier: true
+  max_consecutive_failures: 2
+
+acceptance_criteria:
+  - id: AC1
+    description: |-
+      세 후보가 §14.4.2 정책 아래에서 비교되고 하나가 선택되며, 탈락 후보와 탈락 이유가 적혀 있다. cmake 부재나 '언어가 Rust라서'가 선택 근거로 쓰이지 않고, C는 A·B의 실증된 blocker 없이는 선택되지 않는다.
+    verification:
+      type: verifier
+      instruction: |-
+        선택 근거 문단을 읽고 §14.4.2의 세 제약이 실제로 지켜졌는지 확인한다. 근거 없이 정책을 되풀이하기만 한 문서는 통과가 아니다.
+  - id: AC2
+    description: |-
+      릴리스 아티팩트가 (a) macOS CLI 실행 파일 (b) XCFramework/라이브러리 (c) 소스 빌드 (d) Windows 아티팩트로 구분되어 기록되고, XCFramework의 존재가 macOS whisper-cli의 존재로 취급되지 않는다. 각 항목에 근거와 확인 시점이 있고, 확인하지 못한 것은 UNVERIFIED로 표기된다.
+    verification:
+      type: verifier
+  - id: AC3
+    description: |-
+      선택한 통합 방식이 실제로 내는 timestamp 단위가 근거와 함께 기록되고, start_ms · end_ms로의 정규화를 코드의 어느 한 경계에서만 한다는 것이 명시된다.
+    verification:
+      type: verifier
+  - id: AC4
+    description: |-
+      모델 관리 정책과 '모델 없음'을 제품 상태로 표현한다는 규칙, 그리고 모델·큰 바이너리를 저장소에 커밋하지 않는다는 규칙이 적혀 있다.
+    verification:
+      type: verifier
+  - id: AC5
+    description: |-
+      입력 포맷 변환 책임과 수단이 정해지고, 최종 사용자에게 whisper.cpp·Homebrew·CMake·ffmpeg 설치를 요구하지 않는다는 결론이 근거와 함께 적힌다. 원본 raw recording을 변환해 덮어쓰지 않는다는 규칙(INV-1·INV-3)이 명시된다.
+    verification:
+      type: verifier
+  - id: AC6
+    description: |-
+      tauri#11992가 '배포 불가'로 단정되지 않고 관찰 증거와 미확인 경계로 기록된다. Windows 성립 여부 평가가 있고, Windows 빌드·바이너리 확보·실행 검증은 Phase 6으로 남는다는 것이 명시된다.
+    verification:
+      type: verifier
+  - id: AC7
+    description: |-
+      이 Task는 문서만 추가·수정했다. 소스 파일 · tauri.conf.json · Cargo.toml · package.json은 변경되지 않았다.
+    verification:
+      type: verifier
+
+evidence: []
+
+failure_memo: []

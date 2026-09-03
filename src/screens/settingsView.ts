@@ -5,6 +5,11 @@
  * 읽기 · 편집 · 저장 · 실패 경로를 vitest로 그대로 판정할 수 있다 (§18).
  *
  * **INV-7: secret이 없다.** API key · integration token은 이 상태에도, 폼에도 없다.
+ * 전사 모델 값은 secret이 아니라 **파일이 어디 있는지**다 (ADR-0007 §8.2).
+ *
+ * **이 모듈은 사용자의 설정 값을 대신 고치지 않는다.** 모델이 없어서 지금 전사할 수 없다는
+ * 것은 사실이지만, 그 사실 때문에 자동 전사 토글을 뒤집지 않는다 — 그 상태는 값을 바꾸는
+ * 대신 {@link transcriptionNotices}가 말한다 (ADR-0007 §8.2.3).
  */
 import { toFailure, type Failure } from '../ipc/failure';
 import type { Settings } from '../ipc/types';
@@ -19,6 +24,17 @@ import { chosenMicrophone, NO_DEFAULT_MICROPHONE } from './defaultMicrophone';
 export interface SettingsForm {
   readonly recordingsDirectory: string;
   readonly automaticProcessing: boolean;
+  /**
+   * 정지해 저장한 직후에 전사를 자동으로 시작할지 여부.
+   *
+   * **`automaticProcessing`과 다른 값이다.** 하나를 켜는 것이 다른 하나를 켜지 않는다.
+   */
+  readonly automaticTranscription: boolean;
+  /**
+   * 전사에 쓸 모델의 이름 또는 경로. 고르지 않았으면 빈 문자열이다 —
+   * `recordingsDirectory`와 같은 이유로 텍스트 입력은 `null`을 표현할 수 없다.
+   */
+  readonly transcriptionModel: string;
   /**
    * 고른 입력 장치의 선택 키. 고르지 않았으면 `NO_DEFAULT_MICROPHONE`(빈 문자열)이다 —
    * `<select>`의 값도 `null`을 담을 수 없다.
@@ -108,9 +124,16 @@ export function failedSave(view: SettingsView, error: unknown): SettingsView {
 /** 폼 값을 저장할 수 있는 설정으로 옮긴다. 빈 입력은 "고르지 않음"(`null`)이다. */
 export function toSettings(form: SettingsForm): Settings {
   const directory = form.recordingsDirectory.trim();
+  const model = form.transcriptionModel.trim();
   return {
     recordingsDirectory: directory === '' ? null : directory,
     automaticProcessing: form.automaticProcessing,
+    // 두 토글은 각자 그대로 간다. 모델이 없다는 이유로 여기서 토글을 뒤집지 않는다 —
+    // 사용자가 켠 값을 앱이 대신 끄면, 무엇이 왜 꺼졌는지 말할 수 없게 된다 (ADR-0007 §8.2.3).
+    automaticTranscription: form.automaticTranscription,
+    // 입력한 값 그대로 보낸다(앞뒤 공백만 뺀다). 그 파일이 지금 있는지 여기서 찾아보지 않고,
+    // 없다고 해서 다른 모델로 바꾸지도 않는다 — `defaultMicrophone`과 같은 이유다.
+    transcriptionModel: model === '' ? null : model,
     // 고른 키는 그대로 보낸다. 지금 없는 장치라도 **사용자가 고른 값이므로 바꾸지 않는다.**
     defaultMicrophone: chosenMicrophone(form.defaultMicrophone),
   };
@@ -121,8 +144,66 @@ export function toForm(settings: Settings): SettingsForm {
   return {
     recordingsDirectory: settings.recordingsDirectory ?? '',
     automaticProcessing: settings.automaticProcessing,
+    automaticTranscription: settings.automaticTranscription,
+    transcriptionModel: settings.transcriptionModel ?? '',
     defaultMicrophone: settings.defaultMicrophone ?? NO_DEFAULT_MICROPHONE,
   };
+}
+
+/**
+ * 전사가 지금 실행될 수 있는 상태인가 — **설정 값만으로 말할 수 있는 데까지다.**
+ *
+ * ```text
+ * notChosen  모델을 아직 고르지 않았다  → 지금은 전사할 수 없다
+ * chosen     모델을 골랐다             → 그 파일이 실제로 그 자리에 있는지는 여기서 알 수 없다
+ * ```
+ *
+ * `chosen`이 "전사할 수 있다"는 뜻은 아니다. 파일이 실제로 있는지 여는 자리는 backend 하나이고
+ * (`src-tauri/src/transcription/model.rs`), 없으면 그 전사가 §13의 실패로 알린다. 화면이
+ * 파일을 찾아보는 척하지 않는다 — 알 수 없는 것을 아는 것처럼 적지 않는다.
+ */
+export type TranscriptionModel =
+  | { readonly kind: 'notChosen' }
+  | { readonly kind: 'chosen'; readonly value: string };
+
+/** 고른 모델이 있는가. 공백뿐인 입력은 고르지 않은 것과 같다. */
+export function transcriptionModel(form: SettingsForm): TranscriptionModel {
+  const value = form.transcriptionModel.trim();
+  return value === '' ? { kind: 'notChosen' } : { kind: 'chosen', value };
+}
+
+/** 모델이 없어서 지금 전사할 수 없다는 **사실**. */
+export const NO_TRANSCRIPTION_MODEL_NOTICE =
+  'No transcription model is set, so recordings cannot be transcribed right now.';
+
+/** 그 사실을 어떻게 푸는지 (docs/ADR-0007-transcription-engine.md §8.2). */
+export const HOW_TO_SET_A_TRANSCRIPTION_MODEL =
+  "Put a Whisper model file (for example ggml-base.bin) in the app's models folder and enter its file name here, or enter the full path to a model kept somewhere else.";
+
+/** 켜 둔 자동 전사를 **앱이 대신 끄지 않는다**는 사실 (ADR-0007 §8.2.3). */
+export const AUTOMATIC_TRANSCRIPTION_STAYS_ON_NOTICE =
+  'Automatic transcription stays on — it is not switched off for you. Until a model is set, each recording reports the missing model instead.';
+
+/**
+ * 전사 설정에 대해 사용자에게 할 말. 할 말이 없으면 빈 목록이다.
+ *
+ * **모델이 없는 상태를 조용한 skip으로 두지 않는다** — 그것은 설정 화면에 보이는 제품 상태이며,
+ * 무엇이 사실이고 그것을 어떻게 푸는지가 함께 온다 (ADR-0007 §8.2.3 · §13).
+ *
+ * 자동 전사가 켜져 있다면 한 줄이 더 붙는다. 붙는 것은 **말**뿐이고 값은 그대로다 —
+ * 이 모듈에는 `automaticTranscription`을 뒤집는 경로가 없다. 사용자가 켠 것은 켜진 채로 남고,
+ * 지금 실행할 수 없다는 사실은 그것과 별개의 상태로 표현된다.
+ */
+export function transcriptionNotices(form: SettingsForm): string[] {
+  if (transcriptionModel(form).kind === 'chosen') {
+    return [];
+  }
+
+  const notices = [NO_TRANSCRIPTION_MODEL_NOTICE, HOW_TO_SET_A_TRANSCRIPTION_MODEL];
+  if (form.automaticTranscription) {
+    notices.push(AUTOMATIC_TRANSCRIPTION_STAYS_ON_NOTICE);
+  }
+  return notices;
 }
 
 function ready(form: SettingsForm): SettingsView {

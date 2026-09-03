@@ -12,11 +12,15 @@ pub mod store;
 
 use std::fmt;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use rusqlite::Connection;
 
 use crate::domain::{Failure, FailureKind};
 use crate::platform::app_data_dir::AppDataDirectory;
+
+/// 다른 연결이 쥔 잠금을 기다리는 시간. 이 시간이 지나면 저장소 실패로 드러난다.
+const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// 앱 데이터 디렉터리의 DB 파일을 열고 스키마를 최신으로 만든다.
 ///
@@ -38,6 +42,18 @@ pub fn open(path: impl AsRef<Path>) -> Result<Connection, DatabaseError> {
     // 참조 무결성은 연결마다 켜야 한다 (SQLite 기본값이 off다).
     connection
         .pragma_update(None, "foreign_keys", "ON")
+        .map_err(DatabaseError::Sql)?;
+
+    // 이 DB에는 이제 연결이 둘 있을 수 있다 — 앱이 들고 있는 것과, 전사가 도는 동안 쓰는 것이다
+    // (`crate::commands::transcriber`). 두 번째 연결을 여는 이유는 전사가 앱의 연결을 붙들어
+    // 다른 command를 멈추게 하지 않기 위해서이며, 그 대가로 **쓰기가 겹칠 수 있다.**
+    //
+    // 기본값에서는 그 순간 즉시 `SQLITE_BUSY`가 난다. 두 쓰기 모두 짧으므로 그것을 실패로
+    // 만드는 대신 잠깐 기다린다 — 목록을 읽는 사이에 전사 상태가 저장됐다는 이유로 사용자에게
+    // 저장소 실패를 보이지 않기 위해서다. 무한정 기다리지도 않는다: 정말 풀리지 않는 잠금은
+    // 여전히 §13의 실패로 드러나야 한다.
+    connection
+        .busy_timeout(BUSY_TIMEOUT)
         .map_err(DatabaseError::Sql)?;
 
     migrations::apply_pending(&mut connection)?;
@@ -358,6 +374,26 @@ mod tests {
             .expect("pragma를 읽을 수 있어야 한다");
 
         assert_eq!(enabled, 1, "연결마다 참조 무결성이 켜져 있어야 한다");
+        close(connection);
+    }
+
+    #[test]
+    fn a_connection_waits_for_another_connection_instead_of_failing_immediately() {
+        // 전사가 도는 동안 이 DB에는 연결이 둘 있다. 겹친 쓰기가 즉시 실패하면 사용자는
+        // 아무 잘못도 하지 않고 저장소 실패를 본다.
+        let dir = TempDir::new("busy");
+        let connection = open(dir.database_path()).expect("열 수 있어야 한다");
+
+        let timeout_ms: i64 = connection
+            .pragma_query_value(None, "busy_timeout", |row| row.get(0))
+            .expect("pragma를 읽을 수 있어야 한다");
+
+        assert_eq!(
+            timeout_ms,
+            BUSY_TIMEOUT.as_millis() as i64,
+            "연결마다 대기 시간이 설정돼 있어야 한다"
+        );
+        assert!(timeout_ms > 0, "0이면 기다리지 않고 즉시 실패한다");
         close(connection);
     }
 

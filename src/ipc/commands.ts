@@ -1,7 +1,7 @@
 /**
  * 프론트엔드가 부를 수 있는 동작의 전부.
  *
- * `src-tauri/src/lib.rs`가 등록한 열두 개 command와 1:1이며, 그 밖의 경로는 없다 —
+ * `src-tauri/src/lib.rs`가 등록한 열여섯 개 command와 1:1이며, 그 밖의 경로는 없다 —
  * **임의의 질의를 보낼 수단이 없다.** 저장소를 아는 코드는 Rust 안에만 있다
  * (`docs/ADR-0001-local-persistence.md` · PRODUCT-SPEC §12).
  *
@@ -26,6 +26,8 @@ import type {
   SessionStatus,
   Settings,
   StoppedRecording,
+  Transcript,
+  TranscriptionStatus,
 } from './types';
 
 export type { Failure, FailureKind } from './failure';
@@ -40,6 +42,10 @@ export type {
   SessionStatus,
   Settings,
   StoppedRecording,
+  Transcript,
+  TranscriptSegment,
+  TranscriptionState,
+  TranscriptionStatus,
 } from './types';
 
 /** command 하나를 부른다. 거절된 값은 언제나 {@link Failure}로 바꿔 던진다. */
@@ -77,6 +83,19 @@ export function listRecordings(): Promise<Recording[]> {
 /** 녹음 하나를 읽는다. 그런 id가 없으면 `null`이다. */
 export function getRecording(recordingId: string): Promise<Recording | null> {
   return call<Recording | null>('get_recording', { recordingId });
+}
+
+/**
+ * 저장된 Transcript 하나를 **segment까지** 읽는다. 그런 id가 없으면 `null`이다.
+ *
+ * 화면은 `Recording.currentTranscriptId`가 가리키는 것을 이 함수로 읽는다 (§7.2).
+ *
+ * **읽기뿐이다.** Transcript를 고치거나 지우는 command는 없다 — Transcript는 immutable이고
+ * (§7.1 · INV-2) 저장소가 내놓는 쓰기 경로도 추가 하나뿐이다. 그래서 화면에서 시작한 어떤
+ * 동작도 이미 저장된 전사 내용을 바꾸지 못한다.
+ */
+export function getTranscript(transcriptId: string): Promise<Transcript | null> {
+  return call<Transcript | null>('get_transcript', { transcriptId });
 }
 
 /** 녹음 하나를 저장하고 저장된 모습을 받는다. */
@@ -176,4 +195,32 @@ export function listMissingAudio(): Promise<MissingAudio[]> {
  */
 export function captureStatus(): Promise<SessionStatus> {
   return call<SessionStatus>('capture_status');
+}
+
+/**
+ * 녹음 하나의 전사를 시작한다. **돌아오는 것은 접수 사실이지 전사 결과가 아니다.**
+ *
+ * 실제 전사는 backend의 배경 스레드에서 돌므로 이 호출은 바로 끝난다 — 1시간짜리 녹음을 걸어도
+ * 화면과 다른 command가 멈추지 않는다 (`phase-prompt/03` 요구 3). 결과는
+ * {@link transcriptionStatus}로 물어본다.
+ *
+ * **진행 중인 전사를 소유하는 것은 backend다.** 이 함수는 핸들을 돌려주지 않으며, 화면이
+ * 사라져도 전사는 계속된다 (R-001과 같은 규약).
+ *
+ * 이미 전사 중이면 실패한다 — 같은 녹음이어도 마찬가지다. 두 번째 요청이 조용히 사라지지
+ * 않는다. 여러 녹음을 줄 세우는 큐는 아직 없다 (PRODUCT-SPEC §16 DEFERRED).
+ */
+export function startTranscription(recordingId: string): Promise<TranscriptionStatus> {
+  return call<TranscriptionStatus>('start_transcription', { recordingId });
+}
+
+/**
+ * 지금 전사가 어떤 상태인지 물어본다. **전사가 도는 동안에도 즉시 답한다.**
+ *
+ * 아직 아무것도 걸지 않았으면 `idle`이 온다 — 오류가 아니다. 실패했으면 그 {@link Failure}가
+ * 그대로 실려 오므로 화면은 무엇이 실패했는지, 원본이 안전한지, 다시 시도할 수 있는지를
+ * 그 값에서 읽는다 (§13).
+ */
+export function transcriptionStatus(): Promise<TranscriptionStatus> {
+  return call<TranscriptionStatus>('transcription_status');
 }

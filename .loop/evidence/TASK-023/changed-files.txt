@@ -1,0 +1,11 @@
+# TASK-023이 바꾼 파일 전부 (git status --porcelain · 2026-09-03)
+# A = 이 Run이 새로 만든 파일. 수정(M)된 tracked 파일은 없다.
+
+A  docs/ADR-0007-transcription-engine.md          # 제품 문서 (Task의 산출물)
+A  .loop/evidence/TASK-023/verification-log.md    # Evidence
+A  .loop/evidence/TASK-023/changed-files.txt      # Evidence (이 파일)
+
+# 건드리지 않은 것 (AC7):
+#   src/**  src-tauri/**  src-tauri/tauri.conf.json  src-tauri/Cargo.toml  package.json
+#   docs/PRODUCT-SPEC.md  docs/SYSTEM-MAP.md  phase-prompt/**
+#   .loop/tasks/**  (Runtime이 만든 파일 — 읽기만 했다)

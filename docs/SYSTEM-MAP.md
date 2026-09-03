@@ -3,13 +3,17 @@
 이 문서는 프로젝트의 **최상위 지도**다. 상세 구현 문서가 아니라 진입점이다.
 상세는 §8의 문서로 넘긴다.
 
-> **현재 상태: Phase 2B 완료 (2026-09-03).** 앱 셸 · 로컬 영속성 · §7 데이터 모델 ·
+> **현재 상태: Phase 3 완료 (2026-09-03).** 앱 셸 · 로컬 영속성 · §7 데이터 모델 ·
 > 네 화면 navigation에 더해, **녹음 lifecycle(Record/Pause/Resume/Stop) · 파일 확정 ·
 > Recording 영속화 · 재생**이 구현되고 자동 검증을 통과했다.
 >
-> ⚠️ **그러나 실제 마이크에서 확인된 적이 없다.** recording engine은 `PROVISIONAL`이며
-> 장치 검증은 Final Integration으로 연기됐다 (`ADR-0003` §12 · `ASSUMPTION A-REC-001`).
-> **아직 전사도 AI도 없다** — Phase 3 이후다.
+> 여기에 **로컬 전사**(whisper-rs in-process · 파생 입력 · timestamp 정규화 · Transcript
+> 버전 관리)가 더해졌다.
+>
+> ⚠️ **그러나 실제 하드웨어/추론에서 확인된 적이 없다.** 미확정 전제가 **둘**이다 —
+> `A-REC-001`(실제 마이크 미검증) · `A-TRANS-001`(실제 Whisper 추론 미실행).
+> 둘 다 Final Integration의 hard human gate로 연기됐다.
+> **아직 AI Note는 없다** — Phase 4 이후다.
 >
 > 갱신 이력:
 > - 2026-09-01 Bootstrap — 개발 baseline과 Gate 확보
@@ -54,7 +58,8 @@ Linux와 모바일은 범위 밖이다 (`PRODUCT-SPEC.md` §3).
 | --- | --- |
 | **지금 동작한다 (DONE · 자동 검증 기준)** | 앱이 실행되고 네 화면 사이를 이동한다. 로컬 SQLite에 §7 스키마가 있고 Recording 목록·Settings가 재시작 후에도 유지된다. **backend가 소유하는 녹음 session으로 Record/Pause/Resume/Stop이 동작하고, Stop은 파일 확정 후 Recording을 영속화하며, Detail에서 재생한다.** 실패가 화면에 표시되고 재시도된다 |
 | **⚠️ 자동 검증됐으나 장치 미확인** | 위 녹음 경로 전체. 실제 마이크·권한 프롬프트·음질로 확인된 적이 **없다** (`ASSUMPTION A-REC-001`) |
-| **다음 단계 (PLANNED)** | Phase 3 — 로컬 whisper 전사 |
+| **⚠️ 구현됐으나 실제 추론 미실행** | 전사 경로 전체. `whisper-rs`가 링크돼 있고 자동 검증을 지나지만 **실제 모델로 추론한 적이 없다** (`A-TRANS-001`) |
+| **다음 단계 (PLANNED)** | Phase 4 — AI Provider System + Local AI (Ollama) |
 | **미룬 것 (DEFERRED)** | **Cloud AI Providers (Claude · Gemini · Groq)** · search · tags · processing queue · menu bar (`PRODUCT-SPEC.md` §16) |
 | **후보 (CANDIDATE)** | recording engine (§4) · whisper 통합 방식 (§4) · persistence crate (§4) |
 
@@ -119,6 +124,7 @@ Recordings 목록 → Recording Detail → 재생
 | 구분 | 항목 | 비고 |
 | --- | --- | --- |
 | **선택됨 · 현재 사용 중** | Tauri v2 (2.11.5) · React 19 · Vite 7 · TypeScript 5.8 · ESLint · Vitest<br>**`rusqlite` 0.40.2 (`bundled`, SQLite 3.53.2)** — 제품 경로에서 실제로 쓰인다 | persistence 선택 근거는 `docs/ADR-0001-local-persistence.md` |
+| **선택됨 · 추론 미실행** | **`whisper-rs` 0.16 + `rubato` 5** — 제품 전사 경로에서 쓰인다 | ⚠️ 실제 모델로 추론한 적이 없다 (`A-TRANS-001`) |
 | **잠정 선택 · 장치 미검증** | **`cpal` 0.18.2 + `hound` 3.5.1** — **제품 녹음 경로에서 쓰인다** | ⚠️ `ADR-0003`은 **PROVISIONAL**이다. 실제 마이크에서 확인된 적이 없다 (`ASSUMPTION A-REC-001`) |
 | **설치됨 · 미통합** | (없음) | scaffold의 `tauri-plugin-opener`는 Phase 1에서 **제거**했다 |
 | **후보 · 미선택** | recording: `cpal`+`hound` / webview MediaRecorder / 커뮤니티 플러그인<br>transcription: whisper.cpp sidecar / `whisper-rs`<br>AI: 로컬 Ollama REST (`reqwest` 또는 `ollama-rs`)<br>Notion: `@notionhq/client` | **설치되지 않았다.** 각각 이를 필요로 하는 Phase에서 검증과 함께 선택한다. 확인된 사실은 `PRODUCT-SPEC.md` §14 |
@@ -239,6 +245,54 @@ production recording lifecycle 완성
 
 운영자가 2026-09-02에 장치 검증을 **Final Integration으로 연기**하고 위험을 수용했다
 (`ADR-0003` §12 · §12.A — `ASSUMPTION A-REC-001`). §12의 8개 항목은 전부 `DEFERRED`다.
+
+### Phase 3 — Local Transcription · 2026-09-03 · **engineering DONE · 실제 추론 DEFERRED**
+
+Task 9개, 전부 Gate PASS + 독립 Verifier PASS. **9개 모두 첫 시도 통과** (Worker timeout
+1800초 조정 이후 — OBS-021).
+
+| Task | 결과물 |
+| --- | --- |
+| TASK-023 | `ADR-0007` — 통합 방식 결정 |
+| TASK-024 | 파생 전사 입력 (메모리 f32 · 원본 불변) |
+| TASK-025 | timestamp 정규화 경계 |
+| TASK-026 | 전사 실행 경계 · 모델 해석 · 실패 분류 |
+| TASK-027 | orchestration · Transcript 버전 규칙 |
+| TASK-028 | 비동기 실행 · command · IPC |
+| TASK-029 | `automatic_transcription` 설정 |
+| TASK-030 | Detail Transcript 탭 |
+| TASK-031 | smoke test 절차 문서 · ADR 결과 정리 |
+
+**채택된 통합 방식: `whisper-rs` 0.16 in-process 링크** (`ADR-0007`).
+sidecar를 쓰지 않아 `bundle.externalBin`도 `src-tauri/binaries/`도 shell 권한도 없다 —
+tauri#11992 notarization 위험을 구조적으로 피했고, **사용자는 whisper·CMake·Homebrew를
+설치하지 않는다.** 저장소 밖에서 오는 것은 **모델 파일 하나뿐**이다.
+
+핵심 성질:
+
+```text
+원본 오디오 불변 — 파생 입력은 파일이 아니라 메모리 f32 버퍼다.
+                   TranscriptionInput에 경로 필드가 없고 File::create도 없다
+timestamp        — parse.rs의 to_milliseconds() 한 곳에서만 센티초→밀리초, overflow 검사
+재전사 실패      — 실패 경로가 set_current_transcript를 부르지 않으므로 current가 유지된다
+자동 전사        — automatic_processing과 별개 값. 둘 다 기본 OFF
+모델             — 앱 데이터 디렉터리. 저장소에 커밋하지 않는다
+```
+
+검증: build/lint/test Gate green · **자동 테스트 406개** (vitest 201 · Rust 205).
+
+**⚠️ IMPLEMENTED / VERIFIED로 기록하지 않는 것:**
+
+```text
+실제 Whisper 추론이 한 번이라도 성공한다   ← NOT RUN
+segment timestamp 단위가 실제로 센티초인가  ← UNVERIFIED
+번들 whisper.cpp 버전 · Metal 가속 여부      ← UNVERIFIED
+release 빌드 · 번들 .app에서의 동작          ← UNVERIFIED
+한국어 품질 · 혼용 · 1시간 소요 시간         ← DEFERRED
+```
+
+절차는 `docs/PHASE-3-TRANSCRIPTION-SMOKE-TEST.md`. 가정은 `ADR-0007` §16.3.1
+(`A-TRANS-001`).
 
 ### Phase 2B — Reliable Recording · 2026-09-03 · **engineering DONE · 장치 검증 DEFERRED**
 

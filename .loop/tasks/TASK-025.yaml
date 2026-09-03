@@ -1,0 +1,66 @@
+# 전사 출력 정규화 경계 — timestamp 단위를 한 곳에서만 변환
+# Runtime이 PLAN-20260903T015253Z 승인 시점에 생성했다 (proposal P3). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-025
+status: DONE
+
+request: |-
+  선택한 통합 방식이 내는 원시 출력을 도메인 값으로 바꾸는 순수 모듈을 만든다(예: src-tauri/src/transcription/parse.rs). sidecar를 택했다면 whisper-cli의 JSON 출력 문자열이 입력이고, whisper-rs를 택했다면 라이브러리가 주는 segment의 원시 표현(단위 변환 전 값)을 담은 타입이 입력이다. 어느 쪽이든 이 모듈에는 프로세스 실행이나 라이브러리 호출 코드가 들어가지 않는다 — whisper 바이너리도 모델도 없이 테스트된다(§18). 산출은 language · segments[{start_ms, end_ms, text}] · rawText다. timestamp 단위 정규화는 이 경계에서 한 번만 하고, 근거는 ADR-0007이 확인한 실제 단위다 — 추측으로 정규화하지 않는다. 테스트는 알려진 입력에 대해 기대 밀리초 값을 직접 단언해 ×10 또는 ×100 어긋난 변환이 반드시 실패하게 한다(예: 1분 30초 지점이 90000이어야 하고 9000이나 900000이면 실패한다). segment 경계 처리도 덮는다 — 빈 segment, 공백만 있는 text, start > end, 순서가 뒤바뀐 segment, 겹치는 구간, 마지막 segment가 잘린 경우. 잘못되거나 잘린 출력에도 panic하지 않는다 — 빈 문자열, 깨진 JSON, 필드 누락, 타입이 다른 값, 음수/비정상 timestamp는 정의된 실패이거나 명시적으로 문서화된 처리로 흡수된다. rawText를 segment에서 구성하는 규칙도 결정론적으로 테스트한다.
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-023
+
+stop_condition:
+  gates: [build, lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 3
+
+acceptance_criteria:
+  - id: AC1
+    description: |-
+      npm run build가 통과한다.
+    verification:
+      type: gate
+      ref: build
+  - id: AC2
+    description: |-
+      npm run lint가 통과한다.
+    verification:
+      type: gate
+      ref: lint
+  - id: AC3
+    description: |-
+      npm run test가 통과한다.
+    verification:
+      type: gate
+      ref: test
+  - id: AC4
+    description: |-
+      timestamp 정규화가 이 모듈 한 곳에서만 일어나고, 변환 계수의 근거가 ADR-0007의 확인된 단위에 연결된다.
+    verification:
+      type: verifier
+  - id: AC5
+    description: |-
+      기대 밀리초 값을 직접 단언하는 테스트가 있어 ×10 · ×100 단위 오류를 반드시 잡는다. 변환식을 그대로 되풀이해 계산하는 테스트는 이 조건을 만족하지 않는다.
+    verification:
+      type: verifier
+      instruction: |-
+        테스트가 리터럴 기대값을 단언하는지, 아니면 프로덕션 코드와 같은 계산을 반복하는지 읽고 판정한다.
+  - id: AC6
+    description: |-
+      빈 출력 · 깨진 출력 · 필드 누락 · 잘린 마지막 segment · start>end · 역순/겹침 segment에 대한 방어가 있고 각각 테스트된다. 어떤 경로도 panic하지 않는다.
+    verification:
+      type: verifier
+  - id: AC7
+    description: |-
+      이 모듈에 프로세스 실행이나 whisper 라이브러리 호출이 없다 — whisper 바이너리·모델 없이 테스트가 돈다.
+    verification:
+      type: verifier
+
+evidence: []
+
+failure_memo: []

@@ -11,7 +11,10 @@
 use serde::{Deserialize, Serialize};
 
 use crate::audio::{CaptureReport, InputDevice, SessionState, SessionSummary};
-use crate::domain::{ProcessingStatus, Recording, RecordingId, RecordingView, Settings};
+use crate::domain::{
+    Failure, ProcessingStatus, Recording, RecordingId, RecordingView, Settings, Transcript,
+    TranscriptSegment,
+};
 
 /// 조회된 녹음 하나. 목록 화면과 상세 화면이 그대로 쓴다 (§5 A · C).
 ///
@@ -260,6 +263,153 @@ impl SessionStatusPayload {
     }
 }
 
+/// 지금 전사가 어떤 상태인지 (`phase-prompt/03` 요구 3).
+///
+/// [`SessionStatusPayload`]와 같은 자리에 있는 값이다 — **진행 중인 전사를 들고 있는 것은
+/// backend이고 화면은 그것을 물어본다.** 그래서 화면이 다시 그려지거나 사용자가 다른 화면에
+/// 다녀와도 여기서 같은 답이 나온다 ([`crate::commands::Transcriber`]).
+///
+/// 네 상태는 서로 배타적이며, 상태마다 값이 있는 필드가 다르다.
+///
+/// ```text
+/// state      recordingId   transcriptId   failure
+/// idle       null          null           null
+/// running    있음          null           null
+/// done       있음          있음           null
+/// failed     있음          null           있음
+/// ```
+///
+/// **실패는 [`Failure`] 그대로 실려 온다.** §13의 세 질문에 대한 답이 이미 그 값 안에 있으므로
+/// 여기서 문장을 새로 만들거나 종류를 뭉개지 않는다 — 모델이 없는 것과 엔진이 죽은 것은
+/// 사용자가 할 일이 다르고, 그 구분이 화면까지 그대로 도달해야 한다.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TranscriptionStatusPayload {
+    /// `idle · running · done · failed` 중 하나.
+    ///
+    /// **[`RecordingPayload::transcription_status`]와 다른 값이다.** 저쪽은 녹음 하나에 저장된
+    /// 후처리 상태(§7)이고, 이쪽은 지금 이 앱이 실제로 돌리고 있는 전사 한 건이다.
+    pub state: String,
+    /// 지금 전사 중이거나 마지막으로 전사한 녹음. 아무것도 하지 않았으면 없다.
+    pub recording_id: Option<String>,
+    /// 성공했을 때 **추가된** Transcript (§7.1). 그 시점에 이미 current다 (§7.2).
+    pub transcript_id: Option<String>,
+    /// 실패했을 때 그 실패 그대로.
+    pub failure: Option<Failure>,
+}
+
+impl TranscriptionStatusPayload {
+    /// 진행 중인 전사도, 방금 끝난 전사도 없다. **오류가 아니라 정상 상태다.**
+    pub(super) fn idle() -> Self {
+        Self {
+            state: "idle".to_string(),
+            recording_id: None,
+            transcript_id: None,
+            failure: None,
+        }
+    }
+
+    /// 지금 이 녹음을 전사하고 있다.
+    pub(super) fn running(recording_id: &str) -> Self {
+        Self {
+            state: "running".to_string(),
+            recording_id: Some(recording_id.to_string()),
+            ..Self::idle()
+        }
+    }
+
+    /// 전사가 끝났고 Transcript가 하나 추가됐다.
+    pub(super) fn done(recording_id: &str, transcript_id: &str) -> Self {
+        Self {
+            state: "done".to_string(),
+            transcript_id: Some(transcript_id.to_string()),
+            ..Self::running(recording_id)
+        }
+    }
+
+    /// 전사가 실패했다. 원본 오디오도 Recording도 그대로 남아 있다 (INV-1 · INV-3).
+    pub(super) fn failed(recording_id: &str, failure: &Failure) -> Self {
+        Self {
+            state: "failed".to_string(),
+            failure: Some(failure.clone()),
+            ..Self::running(recording_id)
+        }
+    }
+}
+
+/// Transcript 안의 구간 하나 (§7의 `segments[] { start · end · text }`).
+///
+/// **밀리초로 나간다.** 엔진마다 다른 단위(CLI JSON은 밀리초 · `whisper-rs`는 센티초)를
+/// 하나로 맞추는 자리는 통합 경계 한 곳뿐이며 (`crate::transcription::parse`), 화면까지 오는
+/// 값은 이미 정규화된 밀리초다. 여기서 다시 나누거나 곱하지 않는다.
+///
+/// `00:02:14 → 00:02:21` 같은 **표시 문자열은 만들지 않는다.** 두 값을 어떤 형태로 보여줄지는
+/// 화면의 문제이며 그 규칙은 `src/screens/transcriptView.ts` 한 곳에 있다.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TranscriptSegmentPayload {
+    /// 녹음 시작 기준 오프셋(밀리초).
+    pub start_ms: i64,
+    pub end_ms: i64,
+    pub text: String,
+}
+
+impl From<TranscriptSegment> for TranscriptSegmentPayload {
+    fn from(segment: TranscriptSegment) -> Self {
+        Self {
+            start_ms: segment.start_ms,
+            end_ms: segment.end_ms,
+            text: segment.text,
+        }
+    }
+}
+
+/// 전사 결과 하나 (§7). Recording Detail의 Transcript 탭이 그대로 쓴다
+/// (`phase-prompt/03` 요구 6).
+///
+/// **읽기 전용 값이다.** 이 payload를 되돌려받는 command는 없다 — Transcript는 immutable이며
+/// (§7.1 · INV-2), 저장소가 내놓는 쓰기 경로도 추가([`crate::db::store::append_transcript`])
+/// 하나뿐이다. 그래서 화면이 이미 저장된 Transcript를 고치거나 지우는 경로는 만들어질 수 없다.
+///
+/// `language`가 없는 것도 정상이다 — 엔진이 언어를 말하지 않았다는 사실이며, 추측해서
+/// 채우지 않는다. `engine`과 `model`은 provenance다 (§7): 이 문장들이 **무엇으로 만들어졌는지**.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TranscriptPayload {
+    /// Recording과 독립적인 identity (§7.1).
+    pub id: String,
+    pub recording_id: String,
+    /// 감지·지정된 언어. 모르면 없다.
+    pub language: Option<String>,
+    /// 저장된 순서 그대로. 화면이 다시 정렬하지 않는다.
+    pub segments: Vec<TranscriptSegmentPayload>,
+    pub raw_text: String,
+    pub created_at: String,
+    /// 전사에 실제로 쓴 엔진 식별자.
+    pub engine: String,
+    /// 전사에 실제로 쓴 모델 식별자.
+    pub model: String,
+}
+
+impl From<Transcript> for TranscriptPayload {
+    fn from(transcript: Transcript) -> Self {
+        Self {
+            id: transcript.id.as_str().to_string(),
+            recording_id: transcript.recording_id.as_str().to_string(),
+            language: transcript.language,
+            segments: transcript
+                .segments
+                .into_iter()
+                .map(TranscriptSegmentPayload::from)
+                .collect(),
+            raw_text: transcript.raw_text,
+            created_at: transcript.created_at,
+            engine: transcript.engine,
+            model: transcript.model,
+        }
+    }
+}
+
 /// 설정 값. 조회와 갱신이 같은 모양을 쓴다 — 화면이 읽은 것을 그대로 돌려보낼 수 있다.
 ///
 /// **INV-7: secret 필드가 없다.** API key · integration token을 담는 자리를 만들지 않는다.
@@ -270,6 +420,19 @@ pub struct SettingsPayload {
     #[serde(default)]
     pub recordings_directory: Option<String>,
     pub automatic_processing: bool,
+    /// 정지해 저장한 직후에 전사를 자동으로 시작할지 여부 (`phase-prompt/03` 요구 4).
+    ///
+    /// **[`Self::automatic_processing`]과 별개의 값이다.** 두 토글은 각자 저장되고 각자
+    /// 돌아온다 — 한쪽을 켜 보낸다고 다른 쪽이 켜지지 않는다.
+    pub automatic_transcription: bool,
+    /// 전사에 쓸 모델 파일의 이름 또는 경로 (ADR-0007 §8.2). 고르지 않은 상태(`null`)도
+    /// 정상이다.
+    ///
+    /// **secret이 아니다** — 파일이 어디 있는지일 뿐이며, 그래서 INV-7과 충돌하지 않는다.
+    /// 이 값이 가리키는 파일이 지금 실재하는지는 여기서 말하지 않는다. 그것을 아는 자리는
+    /// `crate::transcription::model` 하나이고, 없으면 §13의 정의된 실패로 드러난다.
+    #[serde(default)]
+    pub transcription_model: Option<String>,
     /// 기본으로 고를 입력 장치의 **선택 키** ([`InputDevicePayload::key`]).
     ///
     /// 고르지 않은 상태(`null`)도 정상이다. 이 값이 가리키는 장치가 지금 목록에 있는지는
@@ -284,6 +447,8 @@ impl From<Settings> for SettingsPayload {
         Self {
             recordings_directory: settings.recordings_directory,
             automatic_processing: settings.automatic_processing,
+            automatic_transcription: settings.automatic_transcription,
+            transcription_model: settings.transcription_model,
             default_microphone: settings.default_microphone,
         }
     }
@@ -299,6 +464,15 @@ impl From<SettingsPayload> for Settings {
                 .map(|directory| directory.trim().to_string())
                 .filter(|directory| !directory.is_empty()),
             automatic_processing: payload.automatic_processing,
+            // 두 토글은 서로를 보지 않는다. 자동 전사를 켰다고 자동 후처리가 켜지지 않는다.
+            automatic_transcription: payload.automatic_transcription,
+            // 공백만 있는 값은 모델 이름이 아니다 — '고르지 않음'과 구분되지 않는 세 번째
+            // 상태를 만들지 않는다. **그것뿐이다**: 이 자리에서 모델을 찾아보지도, 없는
+            // 값을 다른 모델로 바꾸지도 않는다 (ADR-0007 §8.2.3).
+            transcription_model: payload
+                .transcription_model
+                .map(|model| model.trim().to_string())
+                .filter(|model| !model.is_empty()),
             // 같은 이유로 빈 선택은 '고르지 않음'이다. **다만 그것뿐이다** — 알아볼 수 없는
             // 키가 와도 여기서 다른 장치로 바꾸지 않는다. 저장된 값과 지금 있는 장치를
             // 맞춰 보는 일은 목록을 아는 쪽의 일이고, 그 결과는 값으로 구분된다.

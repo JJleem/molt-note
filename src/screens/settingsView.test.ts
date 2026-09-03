@@ -6,7 +6,10 @@ import { describe, expect, it } from 'vitest';
 import type { Failure } from '../ipc/failure';
 import type { Settings } from '../ipc/types';
 import {
+  AUTOMATIC_TRANSCRIPTION_STAYS_ON_NOTICE,
+  HOW_TO_SET_A_TRANSCRIPTION_MODEL,
   LOADING_SETTINGS,
+  NO_TRANSCRIPTION_MODEL_NOTICE,
   editedSettings,
   failedSave,
   failedSettings,
@@ -15,13 +18,23 @@ import {
   savingSettings,
   toForm,
   toSettings,
+  transcriptionModel,
+  transcriptionNotices,
+  type SettingsForm,
 } from './settingsView';
 
 const DEFAULT_SETTINGS: Settings = {
   recordingsDirectory: null,
   automaticProcessing: false,
+  automaticTranscription: false,
+  transcriptionModel: null,
   defaultMicrophone: null,
 };
+
+/** 기본값에서 몇 가지만 다른 폼 값. 테스트가 관심 있는 값만 적는다. */
+function form(changes: Partial<SettingsForm> = {}): SettingsForm {
+  return { ...toForm(DEFAULT_SETTINGS), ...changes };
+}
 
 const storageFailure: Failure = {
   kind: 'storage',
@@ -46,10 +59,12 @@ describe('설정 읽기', () => {
 
     expect(view.kind).toBe('ready');
     if (view.kind !== 'ready') return;
-    // 고르지 않은 디렉터리(null)는 빈 입력이다. 고르지 않은 마이크도 마찬가지다.
+    // 고르지 않은 디렉터리(null)는 빈 입력이다. 고르지 않은 마이크·모델도 마찬가지다.
     expect(view.form).toEqual({
       recordingsDirectory: '',
       automaticProcessing: false,
+      automaticTranscription: false,
+      transcriptionModel: '',
       defaultMicrophone: '',
     });
     expect(view.saving).toBe(false);
@@ -61,12 +76,16 @@ describe('설정 읽기', () => {
     const view = ready({
       recordingsDirectory: '/Users/someone/Recordings',
       automaticProcessing: true,
+      automaticTranscription: true,
+      transcriptionModel: 'ggml-base.bin',
       defaultMicrophone: '0:Studio Mic',
     });
 
     expect(view.kind === 'ready' && view.form).toEqual({
       recordingsDirectory: '/Users/someone/Recordings',
       automaticProcessing: true,
+      automaticTranscription: true,
+      transcriptionModel: 'ggml-base.bin',
       defaultMicrophone: '0:Studio Mic',
     });
   });
@@ -99,11 +118,33 @@ describe('편집', () => {
       { automaticProcessing: true },
     );
 
-    expect(edited.kind === 'ready' && edited.form).toEqual({
-      recordingsDirectory: '/tmp/notes',
-      automaticProcessing: true,
-      defaultMicrophone: '',
-    });
+    expect(edited.kind === 'ready' && edited.form).toEqual(
+      form({ recordingsDirectory: '/tmp/notes', automaticProcessing: true }),
+    );
+  });
+
+  it('두 자동 토글은 서로를 켜지 않는다', () => {
+    // 하나의 boolean에 두 의미가 겹치지 않는다 — 값도, 편집도 따로다.
+    const processing = editedSettings(ready(), { automaticProcessing: true });
+    const transcription = editedSettings(ready(), { automaticTranscription: true });
+
+    expect(processing.kind === 'ready' && processing.form).toEqual(
+      form({ automaticProcessing: true }),
+    );
+    expect(transcription.kind === 'ready' && transcription.form).toEqual(
+      form({ automaticTranscription: true }),
+    );
+  });
+
+  it('모델을 적는 것이 다른 값을 건드리지 않는다', () => {
+    const edited = editedSettings(
+      editedSettings(ready(), { automaticTranscription: true }),
+      { transcriptionModel: 'ggml-medium.bin' },
+    );
+
+    expect(edited.kind === 'ready' && edited.form).toEqual(
+      form({ automaticTranscription: true, transcriptionModel: 'ggml-medium.bin' }),
+    );
   });
 
   it('마이크를 고르는 것이 다른 값을 건드리지 않는다', () => {
@@ -112,11 +153,9 @@ describe('편집', () => {
       { defaultMicrophone: '1:USB Microphone' },
     );
 
-    expect(edited.kind === 'ready' && edited.form).toEqual({
-      recordingsDirectory: '/tmp/notes',
-      automaticProcessing: false,
-      defaultMicrophone: '1:USB Microphone',
-    });
+    expect(edited.kind === 'ready' && edited.form).toEqual(
+      form({ recordingsDirectory: '/tmp/notes', defaultMicrophone: '1:USB Microphone' }),
+    );
   });
 
   it('편집하면 "저장됨" 표시가 사라진다', () => {
@@ -145,38 +184,47 @@ describe('저장', () => {
   });
 
   it('빈 입력은 "고르지 않음"으로 보낸다', () => {
-    expect(
-      toSettings({ recordingsDirectory: '', automaticProcessing: true, defaultMicrophone: '' }),
-    ).toEqual({
-      recordingsDirectory: null,
+    expect(toSettings(form({ automaticProcessing: true }))).toEqual({
+      ...DEFAULT_SETTINGS,
       automaticProcessing: true,
-      defaultMicrophone: null,
     });
     expect(
-      toSettings({ recordingsDirectory: '   ', automaticProcessing: false, defaultMicrophone: '' }),
-    ).toEqual({
-      recordingsDirectory: null,
-      automaticProcessing: false,
-      defaultMicrophone: null,
-    });
+      toSettings(form({ recordingsDirectory: '   ', transcriptionModel: '  \n ' })),
+    ).toEqual(DEFAULT_SETTINGS);
   });
 
   it('고른 마이크 키는 그대로 저장하러 간다', () => {
     // 지금 없는 장치의 키라도 화면이 바꾸지 않는다 — 사용자가 고른 값이다.
+    expect(toSettings(form({ defaultMicrophone: '0:Studio Mic' })).defaultMicrophone).toBe(
+      '0:Studio Mic',
+    );
+  });
+
+  it('적은 모델 값은 그대로 저장하러 간다', () => {
+    // 지금 그 자리에 없는 파일이라도 화면이 바꾸지 않는다 — 사용자가 고른 값이다.
+    // 파일을 찾아보는 것은 전사를 시작할 때이며, 그것은 화면의 일이 아니다.
     expect(
-      toSettings({
-        recordingsDirectory: '',
-        automaticProcessing: false,
-        defaultMicrophone: '0:Studio Mic',
-      }).defaultMicrophone,
-    ).toBe('0:Studio Mic');
+      toSettings(form({ transcriptionModel: '  /Users/someone/models/ggml-large-v3.bin ' }))
+        .transcriptionModel,
+    ).toBe('/Users/someone/models/ggml-large-v3.bin');
+  });
+
+  it('모델이 없어도 자동 전사 토글은 사용자가 둔 값 그대로 간다', () => {
+    // 앱이 대신 끄지 않는다 (ADR-0007 §8.2.3).
+    const saved = toSettings(form({ automaticTranscription: true, transcriptionModel: '' }));
+
+    expect(saved.automaticTranscription).toBe(true);
+    expect(saved.transcriptionModel).toBeNull();
   });
 
   it('저장 뒤 폼은 저장소가 돌려준 값으로 다시 채워진다', () => {
     // Rust가 정규화한 값이 있으면 화면은 그 값을 본다 — 보낸 값을 그대로 믿지 않는다.
     const view = savedSettings({
+      ...DEFAULT_SETTINGS,
       recordingsDirectory: '/tmp/notes',
       automaticProcessing: true,
+      automaticTranscription: true,
+      transcriptionModel: 'ggml-base.bin',
       defaultMicrophone: '0:Studio Mic',
     });
 
@@ -185,6 +233,8 @@ describe('저장', () => {
     expect(view.form).toEqual({
       recordingsDirectory: '/tmp/notes',
       automaticProcessing: true,
+      automaticTranscription: true,
+      transcriptionModel: 'ggml-base.bin',
       defaultMicrophone: '0:Studio Mic',
     });
     expect(view.saving).toBe(false);
@@ -223,15 +273,65 @@ describe('폼과 설정의 변환', () => {
   it('읽은 값을 그대로 돌려보낼 수 있다', () => {
     for (const settings of [
       DEFAULT_SETTINGS,
-      { recordingsDirectory: '/tmp/notes', automaticProcessing: true, defaultMicrophone: null },
+      { ...DEFAULT_SETTINGS, recordingsDirectory: '/tmp/notes', automaticProcessing: true },
       // 지금 목록에 없는 장치의 키도 돌려보낼 때 그대로여야 한다.
-      {
-        recordingsDirectory: null,
-        automaticProcessing: false,
-        defaultMicrophone: '3:USB Microphone',
-      },
+      { ...DEFAULT_SETTINGS, defaultMicrophone: '3:USB Microphone' },
+      // 두 토글의 네 조합이 전부 그대로 돌아와야 서로 다른 값이라고 말할 수 있다.
+      { ...DEFAULT_SETTINGS, automaticProcessing: true, automaticTranscription: false },
+      { ...DEFAULT_SETTINGS, automaticProcessing: false, automaticTranscription: true },
+      { ...DEFAULT_SETTINGS, automaticProcessing: true, automaticTranscription: true },
+      // 지금 그 자리에 없을 수 있는 모델 값도 마찬가지다.
+      { ...DEFAULT_SETTINGS, automaticTranscription: true, transcriptionModel: '없는-모델.bin' },
     ] satisfies Settings[]) {
       expect(toSettings(toForm(settings))).toEqual(settings);
     }
+  });
+});
+
+describe('모델이 없는 상태는 화면 상태다', () => {
+  // 조용한 skip도, 설정을 대신 고치는 것도 아니다 (ADR-0007 §8.2.3 · §13).
+
+  it('모델을 고르지 않았다는 것과 골랐다는 것이 서로 다른 상태다', () => {
+    expect(transcriptionModel(form())).toEqual({ kind: 'notChosen' });
+    expect(transcriptionModel(form({ transcriptionModel: '   ' }))).toEqual({ kind: 'notChosen' });
+    expect(transcriptionModel(form({ transcriptionModel: ' ggml-base.bin ' }))).toEqual({
+      kind: 'chosen',
+      value: 'ggml-base.bin',
+    });
+  });
+
+  it('모델이 없으면 지금 전사할 수 없다는 사실과 푸는 방법을 함께 보여준다', () => {
+    const notices = transcriptionNotices(form());
+
+    expect(notices).toContain(NO_TRANSCRIPTION_MODEL_NOTICE);
+    expect(notices).toContain(HOW_TO_SET_A_TRANSCRIPTION_MODEL);
+  });
+
+  it('자동 전사가 켜져 있으면 그 값이 그대로 남는다는 사실도 말한다', () => {
+    const on = form({ automaticTranscription: true });
+
+    expect(transcriptionNotices(on)).toContain(AUTOMATIC_TRANSCRIPTION_STAYS_ON_NOTICE);
+    // 말이 늘어날 뿐 값은 그대로다 — 앱이 사용자의 토글을 대신 끄지 않는다.
+    expect(on.automaticTranscription).toBe(true);
+    expect(toSettings(on).automaticTranscription).toBe(true);
+  });
+
+  it('모델을 골랐으면 할 말이 없다', () => {
+    // 그 파일이 실제로 그 자리에 있는지는 화면이 알 수 없다. 아는 척하지 않는다.
+    expect(transcriptionNotices(form({ transcriptionModel: 'ggml-base.bin' }))).toEqual([]);
+    expect(
+      transcriptionNotices(
+        form({ transcriptionModel: 'ggml-base.bin', automaticTranscription: true }),
+      ),
+    ).toEqual([]);
+  });
+
+  it('상태를 읽는 것이 폼 값을 바꾸지 않는다', () => {
+    const before = form({ automaticTranscription: true });
+
+    transcriptionNotices(before);
+    transcriptionModel(before);
+
+    expect(before).toEqual(form({ automaticTranscription: true }));
   });
 });

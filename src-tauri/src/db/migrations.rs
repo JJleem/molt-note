@@ -160,6 +160,32 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "add_default_microphone_to_settings",
         sql: "ALTER TABLE settings ADD COLUMN default_microphone TEXT;",
     },
+    // `phase-prompt/03`의 전사 설정 두 값. 앞의 migration을 고치지 않고 **열을 더한다** —
+    // version 4까지 적용된 사용자 DB가 이미 있을 수 있고, 그 행의 값은 그대로 남아야 한다.
+    //
+    // `automatic_transcription`은 `automatic_processing`과 **별개의 값이다.** 하나의 boolean에
+    // 두 의미를 겹치지 않는다 — 녹음이 끝난 뒤 후처리를 자동으로 돌리는 것과 전사를 자동으로
+    // 시작하는 것은 사용자가 따로 정하며, 한쪽을 켰다고 다른 쪽이 켜지지 않는다.
+    //
+    // **NOT NULL도 DEFAULT도 두지 않는다.** SQLite에서 이미 행이 있는 테이블에 NOT NULL 열을
+    // 더하려면 스키마에 DEFAULT를 적어야 하는데, 기본값 정책은 스키마가 아니라
+    // `domain::settings::Settings::DEFAULT`가 갖는다는 것이 이 테이블의 규약이다 (version 3의
+    // 주석). 그래서 NULL을 허용하고, **NULL은 '아직 저장한 적 없음'으로 읽힌다** — 그때 무엇을
+    // 쓸지는 코드가 답한다 (`crate::db::settings::load`). CHECK는 NULL을 막지 않으므로
+    // 이미 있던 행도 그대로 통과하고, 새로 저장되는 값은 여전히 0 또는 1이어야 한다.
+    //
+    // `transcription_model`은 **모델 파일의 이름 또는 경로**다 (ADR-0007 §8.2). 그 값을 실제
+    // 파일 하나로 해석하는 자리는 `crate::transcription::model` 하나뿐이며, 저장소는 그것이
+    // 지금 실재하는지 묻지 않는다 — `default_microphone`과 같은 이유다.
+    //
+    // INV-7: 여기서도 secret 열은 만들지 않는다. 모델의 자리는 secret이 아니다.
+    Migration {
+        version: 5,
+        name: "add_transcription_settings",
+        sql: "ALTER TABLE settings ADD COLUMN automatic_transcription INTEGER
+                  CHECK (automatic_transcription IN (0, 1));
+              ALTER TABLE settings ADD COLUMN transcription_model TEXT;",
+    },
 ];
 
 /// 코드가 알고 있는 최신 스키마 버전. migration이 없으면 0이다.
@@ -261,6 +287,48 @@ mod tests {
             latest_version(),
             MIGRATIONS.last().expect("migration이 최소 하나 있어야 한다").version
         );
+    }
+
+    #[test]
+    fn released_migrations_keep_their_version_and_name() {
+        // 이미 적용된 적이 있는 migration의 version을 바꾸면, 그 스키마로 저장된 사용자 DB가
+        // 적용 여부를 잘못 판단한다. 새 migration은 **언제나 목록 끝에 붙는다.**
+        let declared: Vec<(i64, &str)> = MIGRATIONS
+            .iter()
+            .map(|migration| (migration.version, migration.name))
+            .collect();
+
+        assert_eq!(
+            declared,
+            vec![
+                (1, "create_schema_migrations"),
+                (2, "create_domain_tables"),
+                (3, "create_settings"),
+                (4, "add_default_microphone_to_settings"),
+                (5, "add_transcription_settings"),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_new_settings_column_is_added_by_a_new_migration_instead_of_editing_an_old_one() {
+        // `create_settings`를 고쳐 열을 넣으면 version 3까지 적용된 DB에는 그 열이 영영 생기지
+        // 않는다 — migration은 다시 실행되지 않기 때문이다.
+        let create_settings = MIGRATIONS
+            .iter()
+            .find(|migration| migration.name == "create_settings")
+            .expect("설정 테이블을 만드는 migration이 있어야 한다");
+
+        for column in [
+            "default_microphone",
+            "automatic_transcription",
+            "transcription_model",
+        ] {
+            assert!(
+                !create_settings.sql.contains(column),
+                "나중에 생긴 열 {column}이 이미 적용된 migration 안에 들어가 있다"
+            );
+        }
     }
 
     #[test]

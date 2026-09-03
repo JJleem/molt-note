@@ -10,8 +10,10 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use molt_note_lib::commands::{NewRecording, SettingsPayload, Storage};
-use molt_note_lib::db;
-use molt_note_lib::domain::FailureKind;
+use molt_note_lib::db::{self, store};
+use molt_note_lib::domain::{
+    FailureKind, RecordingId, Transcript, TranscriptId, TranscriptSegment,
+};
 use molt_note_lib::platform::app_data_dir::AppDataDirectory;
 
 static COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -102,6 +104,8 @@ fn every_command_returns_the_initialization_failure_rather_than_pretending_to_wo
         .update_settings(SettingsPayload {
             recordings_directory: Some("/tmp/recordings".to_string()),
             automatic_processing: true,
+            automatic_transcription: false,
+            transcription_model: None,
             default_microphone: None,
         })
         .expect_err("설정 갱신이 실패해야 한다");
@@ -270,6 +274,78 @@ fn deleting_a_recording_removes_it_from_the_list() {
     assert_eq!(storage.recording(&created.id).expect("조회한다"), None);
 }
 
+// --- 저장된 Transcript 읽기 (phase-prompt/03 요구 6) ----------------------------------
+
+#[test]
+fn a_stored_transcript_comes_back_through_the_command_surface_with_its_segments() {
+    // 화면이 Transcript 탭에 무엇을 그릴 수 있는지가 여기서 정해진다 — segment마다
+    // **밀리초 두 개와 문장**이다. 단위를 여기서 다시 바꾸지 않는다 (§14.4.1의 ×10 · ×100 사고).
+    let temp = TempRoot::new("transcript");
+    let app_data_dir = AppDataDirectory::new(temp.path().join("app-data"));
+    let storage = Storage::open(&app_data_dir);
+    assert!(storage.failure().is_none(), "사전 조건: 저장소가 열려야 한다");
+
+    let recording = storage
+        .create_recording(a_recording("전사된 녹음"))
+        .expect("녹음을 저장할 수 있어야 한다");
+
+    // 전사 경로가 하는 일을 저장소 API로 그대로 재현한다 — 이 테스트가 보는 것은 읽기 쪽이다.
+    let mut connection = db::open_in(&app_data_dir).expect("사전 조건: 같은 DB를 연다");
+    let transcript = Transcript {
+        id: TranscriptId::new("t-1"),
+        recording_id: RecordingId::new(&recording.id),
+        language: Some("ko".to_string()),
+        segments: vec![
+            TranscriptSegment {
+                start_ms: 134_000,
+                end_ms: 141_000,
+                text: "그러면 이번에는 PLY 먼저 변환하고".to_string(),
+            },
+            TranscriptSegment {
+                start_ms: 141_000,
+                end_ms: 148_500,
+                text: "그다음 SOG 변환 확인하면 될 것 같아요.".to_string(),
+            },
+        ],
+        raw_text: "그러면 이번에는 PLY 먼저 변환하고\n그다음 SOG 변환 확인하면 될 것 같아요.".to_string(),
+        created_at: "2026-09-03T04:50:26.000Z".to_string(),
+        engine: "stub".to_string(),
+        model: "ggml-base.bin".to_string(),
+    };
+    store::append_transcript(&mut connection, &transcript).expect("사전 조건: Transcript를 남긴다");
+
+    let found = storage
+        .transcript("t-1")
+        .expect("조회가 성공해야 한다")
+        .expect("저장한 Transcript가 있어야 한다");
+
+    assert_eq!(found.id, "t-1");
+    assert_eq!(found.recording_id, recording.id);
+    assert_eq!(found.language.as_deref(), Some("ko"));
+    assert_eq!(found.engine, "stub", "무엇으로 만들어졌는지가 함께 온다 (§7)");
+    assert_eq!(found.model, "ggml-base.bin");
+
+    // 순서도 밀리초 값도 저장된 그대로다.
+    assert_eq!(
+        found
+            .segments
+            .iter()
+            .map(|segment| (segment.start_ms, segment.end_ms))
+            .collect::<Vec<_>>(),
+        vec![(134_000, 141_000), (141_000, 148_500)]
+    );
+    assert_eq!(found.segments[0].text, "그러면 이번에는 PLY 먼저 변환하고");
+}
+
+#[test]
+fn looking_up_an_unknown_transcript_is_an_empty_answer_not_a_failure() {
+    // Recording에 아직 Transcript가 없는 것은 정상 상태다 (§7.2) — 실패로 만들지 않는다.
+    let temp = TempRoot::new("transcript-unknown");
+    let storage = open_storage(&temp);
+
+    assert_eq!(storage.transcript("없는-id").expect("조회 자체는 성공한다"), None);
+}
+
 #[test]
 fn an_empty_store_answers_with_an_empty_list_and_the_default_settings() {
     let temp = TempRoot::new("empty");
@@ -284,6 +360,9 @@ fn an_empty_store_answers_with_an_empty_list_and_the_default_settings() {
         SettingsPayload {
             recordings_directory: None,
             automatic_processing: false,
+            // 자동 전사도 기본값은 OFF다. 두 토글은 서로 다른 값이다.
+            automatic_transcription: false,
+            transcription_model: None,
             default_microphone: None,
         },
         "저장된 적이 없으면 기본값이다"
@@ -299,6 +378,8 @@ fn updated_settings_are_stored_and_read_back() {
         .update_settings(SettingsPayload {
             recordings_directory: Some("/Users/someone/Recordings".to_string()),
             automatic_processing: true,
+            automatic_transcription: true,
+            transcription_model: Some("ggml-base.bin".to_string()),
             default_microphone: Some("0:Studio Mic".to_string()),
         })
         .expect("설정을 저장할 수 있어야 한다");
@@ -313,10 +394,61 @@ fn updated_settings_are_stored_and_read_back() {
         Some("/Users/someone/Recordings")
     );
     assert!(saved.automatic_processing);
+    assert!(
+        saved.automatic_transcription,
+        "자동 전사 토글도 그대로 저장되고 그대로 돌아와야 한다"
+    );
+    assert_eq!(
+        saved.transcription_model.as_deref(),
+        Some("ggml-base.bin"),
+        "고른 모델도 그대로 저장되고 그대로 돌아와야 한다"
+    );
     assert_eq!(
         saved.default_microphone.as_deref(),
         Some("0:Studio Mic"),
         "고른 장치 키가 그대로 저장되고 그대로 돌아와야 한다"
+    );
+}
+
+#[test]
+fn the_two_automatic_toggles_do_not_share_one_value() {
+    // 하나를 켜고 다른 하나를 끈 채로 저장했을 때 그대로 돌아오지 않으면, 두 토글이 사실은
+    // 한 값이라는 뜻이다.
+    let temp = TempRoot::new("independent-toggles");
+    let storage = open_storage(&temp);
+
+    let processing_only = storage
+        .update_settings(SettingsPayload {
+            recordings_directory: None,
+            automatic_processing: true,
+            automatic_transcription: false,
+            transcription_model: None,
+            default_microphone: None,
+        })
+        .expect("설정을 저장할 수 있어야 한다");
+    assert!(processing_only.automatic_processing);
+    assert!(
+        !processing_only.automatic_transcription,
+        "후처리를 켜는 것이 자동 전사를 켜지 않는다"
+    );
+
+    let transcription_only = storage
+        .update_settings(SettingsPayload {
+            recordings_directory: None,
+            automatic_processing: false,
+            automatic_transcription: true,
+            transcription_model: None,
+            default_microphone: None,
+        })
+        .expect("설정을 저장할 수 있어야 한다");
+    assert!(
+        !transcription_only.automatic_processing,
+        "자동 전사를 켜는 것이 후처리를 켜지 않는다"
+    );
+    assert!(transcription_only.automatic_transcription);
+    assert_eq!(
+        transcription_only.transcription_model, None,
+        "모델을 고르지 않은 채로 자동 전사를 켤 수 있다 — 앱이 대신 고르지 않는다"
     );
 }
 
@@ -329,6 +461,8 @@ fn a_blank_directory_is_stored_as_not_chosen_rather_than_as_an_empty_path() {
         .update_settings(SettingsPayload {
             recordings_directory: Some("   ".to_string()),
             automatic_processing: false,
+            automatic_transcription: false,
+            transcription_model: Some("  \n ".to_string()),
             default_microphone: Some("  ".to_string()),
         })
         .expect("설정을 저장할 수 있어야 한다");
@@ -340,6 +474,38 @@ fn a_blank_directory_is_stored_as_not_chosen_rather_than_as_an_empty_path() {
     assert_eq!(
         saved.default_microphone, None,
         "빈 선택도 '아직 고르지 않음'이다 — 어떤 장치의 키도 아닌 값을 저장하지 않는다"
+    );
+    assert_eq!(
+        saved.transcription_model, None,
+        "공백뿐인 모델 값도 '아직 고르지 않음'이다 — 어떤 파일도 가리키지 않는 값을 저장하지 않는다"
+    );
+}
+
+#[test]
+fn a_model_that_is_not_there_is_stored_as_chosen_not_replaced() {
+    // 저장 경로는 파일을 찾아보지 않는다. 그 자리에 파일이 없어도 **사용자가 고른 값 그대로**
+    // 남는다 — 지금 쓸 수 있는지 말하는 것은 전사를 시작할 때다 (ADR-0007 §8.2.3).
+    let temp = TempRoot::new("missing-model");
+    let storage = open_storage(&temp);
+
+    let saved = storage
+        .update_settings(SettingsPayload {
+            recordings_directory: None,
+            automatic_processing: false,
+            automatic_transcription: true,
+            transcription_model: Some("  없는-모델.bin  ".to_string()),
+            default_microphone: None,
+        })
+        .expect("설정을 저장할 수 있어야 한다");
+
+    assert_eq!(
+        saved.transcription_model.as_deref(),
+        Some("없는-모델.bin"),
+        "앞뒤 공백만 다듬고, 없는 파일이라고 해서 지우거나 다른 모델로 바꾸지 않는다"
+    );
+    assert!(
+        saved.automatic_transcription,
+        "모델을 찾지 못했다고 해서 토글이 뒤집히지 않는다"
     );
 }
 
@@ -355,6 +521,8 @@ fn a_default_microphone_that_no_longer_exists_is_stored_as_chosen_not_replaced()
         .update_settings(SettingsPayload {
             recordings_directory: None,
             automatic_processing: false,
+            automatic_transcription: false,
+            transcription_model: None,
             default_microphone: Some("7:장치가 빠진 마이크".to_string()),
         })
         .expect("설정을 저장할 수 있어야 한다");

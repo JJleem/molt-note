@@ -1,0 +1,64 @@
+# automatic_transcription 설정과 모델 설정 · 자동 전사 트리거
+# Runtime이 PLAN-20260903T015253Z 승인 시점에 생성했다 (proposal P7). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-029
+status: DONE
+
+request: |-
+  전사 설정을 end-to-end로 추가한다. (1) src-tauri/src/db/migrations.rs의 MIGRATIONS 목록 **끝에 새 migration을 추가**해 automatic_transcription 열을 만든다 — 이미 적용된 migration의 version이나 sql을 고치지 않고, 기존 데이터를 지우지 않는다. 기존 automatic_processing을 재사용하거나 그 값에 의미를 겹치지 않는다. 이것은 별도 값이며 V1 기본값은 OFF다(기본값 정책은 스키마 DEFAULT가 아니라 domain::settings::Settings::DEFAULT에 둔다 — 기존 규약). (2) ADR-0007의 모델 관리 정책에 따라 모델 위치/선택을 나타내는 설정 값도 같은 방식으로 추가한다. INV-7에 따라 secret 열은 만들지 않는다. (3) domain::settings::Settings · db::settings · commands::payload::SettingsPayload · src/ipc/types.ts · src/screens/settingsView.ts · SettingsScreen에 반영해 사용자가 자동 전사를 켜고 끄고 모델을 지정할 수 있게 한다. (4) automatic_transcription이 ON일 때만 Stop 성공 후 전사를 시작하고, OFF면 시작하지 않는다. 수동 전사는 설정과 무관하게 언제나 가능하다. (5) 모델이 없는 상태는 설정을 조용히 바꾸는 것이 아니라 제품 상태로 표현한다 — 설정 화면이 '모델이 없어서 지금은 전사할 수 없다'는 사실과 어떻게 해결하는지를 보여주고, 자동 전사 토글 값을 앱이 임의로 뒤집지 않는다. 테스트: 기본값이 OFF다 · automatic_processing과 automatic_transcription이 서로 독립적으로 저장·복원된다 · 새 migration이 기존 설정 행의 값을 보존한다 · 자동 전사 ON/OFF에 따라 Stop 후 전사가 시작되거나 시작되지 않는다 · 모델 없음 상태가 화면 상태로 표현된다.
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-028
+
+stop_condition:
+  gates: [build, lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 3
+
+acceptance_criteria:
+  - id: AC1
+    description: |-
+      npm run build가 통과한다.
+    verification:
+      type: gate
+      ref: build
+  - id: AC2
+    description: |-
+      npm run lint가 통과한다.
+    verification:
+      type: gate
+      ref: lint
+  - id: AC3
+    description: |-
+      npm run test가 통과한다.
+    verification:
+      type: gate
+      ref: test
+  - id: AC4
+    description: |-
+      automatic_transcription이 automatic_processing과 별개의 값으로 존재하고 기본값이 OFF다. 하나의 boolean에 두 의미가 겹치지 않는다는 것이 테스트로 확인된다.
+    verification:
+      type: verifier
+  - id: AC5
+    description: |-
+      새 migration이 목록 끝에 추가됐고 기존 migration의 version·sql이 수정되지 않았으며, 이미 저장된 설정 값이 보존된다는 테스트가 있다.
+    verification:
+      type: verifier
+  - id: AC6
+    description: |-
+      자동 전사가 ON일 때만 Stop 후 전사가 시작되고, 수동 전사는 설정과 무관하게 가능하다.
+    verification:
+      type: verifier
+  - id: AC7
+    description: |-
+      모델이 없는 상태에서 앱이 설정 값을 임의로 바꾸지 않고 제품 상태로 알린다. secret 열이 추가되지 않았다(INV-7).
+    verification:
+      type: verifier
+
+evidence: []
+
+failure_memo: []

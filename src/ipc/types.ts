@@ -4,6 +4,7 @@
  * `src-tauri/src/commands/payload.rs`의 직렬화 형태와 1:1이다. 여기 없는 것은 프론트엔드가
  * 알 수 없다 — 저장소도, SQL도, 스키마도 이 경계를 넘어오지 않는다.
  */
+import type { Failure } from './failure';
 
 /** 후처리 상태 (PRODUCT-SPEC §7). `none`은 아직 시도하지 않았다는 정상 상태다. */
 export type ProcessingStatus = 'none' | 'pending' | 'running' | 'done' | 'failed';
@@ -142,6 +143,84 @@ export interface SessionStatus {
 }
 
 /**
+ * 전사 한 건이 있을 수 있는 상태.
+ *
+ * **{@link ProcessingStatus}와 다른 값이다.** 저쪽은 녹음 하나에 저장된 후처리 상태(§7)이고,
+ * 이쪽은 지금 이 앱이 실제로 돌리고 있는 전사 한 건이다. 그래서 `none`도 `pending`도 없다 —
+ * 아직 아무것도 걸지 않은 상태가 `idle`이며, 시작한 순간부터 `running`이다.
+ */
+export type TranscriptionState = 'idle' | 'running' | 'done' | 'failed';
+
+/**
+ * 지금 전사가 어떤 상태인지 (`phase-prompt/03` 요구 3).
+ *
+ * **진행 중인 전사를 들고 있는 것은 backend다.** 화면은 그것을 소유하지 않고 물어본다 —
+ * 그래서 화면이 다시 그려지거나 사용자가 다른 화면에 다녀와도 같은 답이 온다. 전사가 도는
+ * 동안에도 이 질의는 즉시 답한다 (`src-tauri/src/commands/transcriber.rs`).
+ *
+ * 상태마다 값이 있는 필드가 다르다.
+ *
+ * ```text
+ * state      recordingId   transcriptId   failure
+ * idle       null          null           null
+ * running    있음          null           null
+ * done       있음          있음           null
+ * failed     있음          null           있음
+ * ```
+ */
+export interface TranscriptionStatus {
+  readonly state: TranscriptionState;
+  /** 지금 전사 중이거나 마지막으로 전사한 녹음. */
+  readonly recordingId: string | null;
+  /** 성공했을 때 **추가된** Transcript (§7.1). 그 시점에 이미 current다 (§7.2). */
+  readonly transcriptId: string | null;
+  /**
+   * 실패했을 때 그 실패 그대로.
+   *
+   * 종류가 뭉개지지 않는다 — 모델이 없는 것과 엔진이 죽은 것은 사용자가 할 일이 다르다 (§13).
+   */
+  readonly failure: Failure | null;
+}
+
+/**
+ * Transcript 안의 구간 하나 (§7의 `segments[] { start · end · text }`).
+ *
+ * **밀리초다.** 엔진마다 다른 단위를 하나로 맞추는 자리는 Rust의 통합 경계 한 곳뿐이며
+ * (`src-tauri/src/transcription/parse.rs`), 여기까지 오는 값은 이미 정규화돼 있다.
+ * 화면이 이 값을 다시 나누거나 곱하지 않는다 — 하는 일은 보여줄 형태로 옮기는 것뿐이다
+ * (`src/screens/transcriptView.ts`).
+ */
+export interface TranscriptSegment {
+  /** 녹음 시작 기준 오프셋(밀리초). */
+  readonly startMs: number;
+  readonly endMs: number;
+  readonly text: string;
+}
+
+/**
+ * 전사 결과 하나 (§7). **immutable · versioned다** (§7.1 · INV-2).
+ *
+ * 화면이 읽기만 하는 값이다 — 이 타입을 backend로 되돌려보내는 command가 없고, 재전사는
+ * 기존 것을 고치지 않고 새 Transcript를 추가한다. 그래서 이미 본 Transcript가 다음 전사
+ * 때문에 바뀌는 일은 없다.
+ *
+ * `language`가 없는 것도 정상이다 — 엔진이 언어를 말하지 않았다는 사실이며, 화면이 추측해서
+ * 채우지 않는다. `engine`·`model`은 이 문장들이 무엇으로 만들어졌는지다 (provenance · §7).
+ */
+export interface Transcript {
+  readonly id: string;
+  readonly recordingId: string;
+  readonly language: string | null;
+  /** 저장된 순서 그대로. 화면이 다시 정렬하지 않는다. */
+  readonly segments: readonly TranscriptSegment[];
+  readonly rawText: string;
+  /** ISO-8601 UTC 텍스트. */
+  readonly createdAt: string;
+  readonly engine: string;
+  readonly model: string;
+}
+
+/**
  * 설정 값 (§5 D).
  *
  * **INV-7: secret이 없다.** API key · integration token은 이 타입에도, 저장소에도 없다.
@@ -150,6 +229,28 @@ export interface Settings {
   /** 아직 고르지 않았으면 `null`이다. */
   readonly recordingsDirectory: string | null;
   readonly automaticProcessing: boolean;
+  /**
+   * 녹음을 정지해 저장한 직후에 **전사를 자동으로 시작할지** 여부
+   * (`phase-prompt/03` 요구 4).
+   *
+   * **{@link Settings.automaticProcessing}과 다른 값이다.** 한쪽을 켠다고 다른 쪽이 켜지지
+   * 않는다 — 하나의 boolean에 두 의미가 겹치지 않는다.
+   *
+   * 꺼져 있다는 것은 "자동으로 시작하지 않는다"는 뜻이지 "전사할 수 없다"는 뜻이 아니다.
+   * 수동 전사(`startTranscription`)는 이 값과 무관하게 언제나 할 수 있다.
+   */
+  readonly automaticTranscription: boolean;
+  /**
+   * 전사에 쓸 모델 파일의 **이름 또는 경로** (docs/ADR-0007-transcription-engine.md §8.2).
+   * 아직 고르지 않았으면 `null`이며, 그것도 정상 상태다.
+   *
+   * **secret이 아니다** — 파일이 어디 있는지일 뿐이므로 INV-7과 충돌하지 않는다.
+   *
+   * `defaultMicrophone`과 같은 성질을 갖는다. 이 값이 가리키는 파일이 지금 그 자리에 있는지는
+   * 이 값만으로 알 수 없고, **없다고 해서 앱이 값을 지우거나 다른 모델로 바꾸지 않는다.**
+   * 실제로 찾아보는 것은 전사를 시작할 때이며, 없으면 §13의 실패로 드러난다.
+   */
+  readonly transcriptionModel: string | null;
   /**
    * 기본으로 고를 입력 장치의 **선택 키** ({@link InputDevice.key}). 아직 고르지 않았으면
    * `null`이며, 그것도 정상 상태다.

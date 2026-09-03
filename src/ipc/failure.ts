@@ -11,19 +11,28 @@
 /**
  * 실패의 종류.
  *
- * `storage` · `invalidInput` · `audioDevice` · `microphonePermission`은 Rust의 `FailureKind`와
- * 1:1이다. `unexpected`는 **frontend 경계에서만 만들어진다** — command가 계약과 다른 값으로
+ * `unexpected`를 뺀 나머지는 전부 Rust의 `FailureKind`와 1:1이다
+ * (`tests/ipc-boundary.test.ts`가 그것을 강제한다).
+ * `unexpected`는 **frontend 경계에서만 만들어진다** — command가 계약과 다른 값으로
  * 거절했을 때 (예: 없는 command 이름, IPC 자체의 오류) 그 사실을 삼키지 않기 위해서다.
  *
  * `microphonePermission`은 `audioDevice`와 따로 있다. 사용자가 할 수 있는 일이 다르기
  * 때문이다 — 장치를 바꾸거나 다시 시도해서 풀리지 않고, 시스템 설정에서 접근을 허용해야 한다.
  * 무엇을 허용해야 하는지는 `message`에 문장으로 들어 있다 (Rust의 `platform::microphone`).
+ *
+ * `transcription*` 넷도 같은 이유로 서로 따로 있다 (§13 · Rust의 `transcription::engine`).
+ * 모델을 구해 와야 하는 것 · 다른 모델을 골라야 하는 것 · 다시 시도해 볼 수 있는 것 ·
+ * 다시 시도해도 같은 것은 사용자에게 전부 다른 상황이다.
  */
 export type FailureKind =
   | 'storage'
   | 'invalidInput'
   | 'audioDevice'
   | 'microphonePermission'
+  | 'transcriptionModelMissing'
+  | 'transcriptionModelUnusable'
+  | 'transcriptionEngineFailed'
+  | 'transcriptionOutputUnusable'
   | 'unexpected';
 
 export interface Failure {

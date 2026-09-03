@@ -20,6 +20,13 @@ const DATABASE_FILE_NAME: &str = "molt-note.db";
 /// 녹음 파일을 두는 하위 디렉터리 이름. DB와 같은 방식으로 루트에서 파생된다.
 const RECORDINGS_DIR_NAME: &str = "recordings";
 
+/// 전사 모델 파일을 두는 하위 디렉터리 이름.
+///
+/// **저장소 밖에서 오는 것은 모델 파일 하나뿐이고, 그것이 놓이는 자리가 여기다**
+/// (ADR-0007 §8.2). 수백 MB~수 GB짜리 파일이므로 앱에 번들하지도, 저장소에 커밋하지도
+/// 않는다 — 사용자가 두고 앱은 그 자리를 안다.
+const MODELS_DIR_NAME: &str = "models";
+
 /// 앱이 자신의 데이터를 두는 디렉터리.
 ///
 /// 임의의 base path로 생성할 수 있으므로 테스트는 임시 디렉터리를 주입해
@@ -79,6 +86,26 @@ impl AppDataDirectory {
     /// 녹음 파일은 그대로 남는다 (INV-1 · INV-4).
     pub fn ensure_recordings_dir(&self) -> Result<PathBuf, AppDataDirError> {
         let directory = self.recordings_dir();
+        create(&directory)?;
+        Ok(directory)
+    }
+
+    /// 전사 모델 파일을 두는 디렉터리. 같은 루트면 항상 같은 값이다.
+    ///
+    /// **모델 파일의 자리를 정하는 코드는 여기 하나다.** 전사 경계는 이 값을 받아 쓸 뿐
+    /// 플랫폼 경로를 스스로 만들지 않는다 (INV-10 · ADR-0007 §8.2 · §11 — 이 Phase에서
+    /// 플랫폼이 실제로 갈리는 지점은 이 경로 하나이며, 그 차이는 Tauri가 흡수한다).
+    pub fn models_dir(&self) -> PathBuf {
+        self.root.join(MODELS_DIR_NAME)
+    }
+
+    /// 모델 디렉터리가 없으면 만들고 그 경로를 돌려준다.
+    ///
+    /// 디렉터리를 만드는 것뿐이다 — **모델 파일을 내려받지 않는다.** 자동 다운로드는
+    /// DEFERRED이며, 그 결정은 §12의 privacy 경계에 네트워크 경로를 여는 일이라 별도로
+    /// 내린다 (ADR-0007 §8.1).
+    pub fn ensure_models_dir(&self) -> Result<PathBuf, AppDataDirError> {
+        let directory = self.models_dir();
         create(&directory)?;
         Ok(directory)
     }
@@ -246,6 +273,50 @@ mod tests {
         );
         assert_eq!(dir.recordings_dir().parent(), Some(root.as_path()));
         assert_ne!(dir.recordings_dir(), dir.database_path());
+    }
+
+    #[test]
+    fn the_models_directory_is_derived_from_the_same_root_and_is_not_the_recordings_directory() {
+        // 모델 파일의 자리도 다른 모든 경로와 같은 루트에서 나온다 (INV-10 · ADR-0007 §8.2).
+        // 녹음 디렉터리와 같아지면 사용자가 둔 모델이 녹음 목록에 섞인다.
+        let temp = TempRoot::new("models-derived");
+        let root = temp.path().join("app-data");
+
+        let dir = AppDataDirectory::new(&root);
+
+        assert_eq!(dir.models_dir(), root.join(MODELS_DIR_NAME));
+        assert_eq!(
+            dir.models_dir(),
+            AppDataDirectory::new(&root).models_dir(),
+            "같은 루트면 같은 경로가 나와야 한다"
+        );
+        assert_eq!(dir.models_dir().parent(), Some(root.as_path()));
+        assert_ne!(dir.models_dir(), dir.recordings_dir());
+        assert_ne!(dir.models_dir(), dir.database_path());
+    }
+
+    #[test]
+    fn ensuring_the_models_directory_keeps_the_model_that_is_already_there() {
+        // 모델은 수백 MB~수 GB다. 디렉터리를 준비하는 일이 그것을 지우면 사용자가 다시
+        // 구해 와야 한다.
+        let temp = TempRoot::new("models-kept");
+        let dir = AppDataDirectory::new(temp.path().join("app-data"));
+
+        let created = dir
+            .ensure_models_dir()
+            .expect("모델 디렉터리를 만들 수 있어야 한다");
+        let existing = created.join("ggml-earlier.bin");
+        std::fs::write(&existing, "이전 모델").expect("사전 조건: 이전 모델을 둔다");
+
+        let again = dir
+            .ensure_models_dir()
+            .expect("두 번째 호출도 성공해야 한다");
+
+        assert_eq!(again, created);
+        assert_eq!(
+            std::fs::read_to_string(&existing).expect("이전 모델이 남아 있어야 한다"),
+            "이전 모델"
+        );
     }
 
     #[test]

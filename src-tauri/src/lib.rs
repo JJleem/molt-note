@@ -3,10 +3,11 @@ pub mod commands;
 pub mod db;
 pub mod domain;
 pub mod platform;
+pub mod transcription;
 
 use tauri::Manager;
 
-use commands::{AudioDevices, Recorder, Storage};
+use commands::{AudioDevices, Recorder, Storage, Transcriber};
 use platform::app_data_dir::AppDataDirectory;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -32,6 +33,16 @@ pub fn run() {
             // 자리를 얻지 못하면 그 실패를 값으로 들고 있다가 녹음을 시작하려 할 때
             // 알린다 — 앱 시작을 막지 않는다 (§13).
             app.manage(Recorder::open_for(app));
+
+            // 진행 중인 전사의 소유자도 여기다 — 녹음과 같은 이유이며 하나가 더 있다.
+            // 전사는 1시간 분량이면 오래 걸리므로 **배경 스레드에서 돈다.** 그동안 다른
+            // command와 화면은 계속 응답하고, 화면이 사라져도 돌던 전사는 사라지지 않는다
+            // (`phase-prompt/03` 요구 3 · crate::commands::transcriber).
+            //
+            // 모델도 엔진도 여기서 열지 않는다. 모델은 전사할 때마다 해석되며, 지정된 모델이
+            // 없는 것은 앱 시작을 막는 문제가 아니라 전사를 시작할 때 알리는 제품 상태다
+            // (§13 · ADR-0007 §8.2).
+            app.manage(Transcriber::open_for(app));
 
             // 저장된 녹음을 재생하려면 webview가 그 파일을 읽을 수 있어야 한다.
             // 그 통로는 Tauri v2의 asset protocol이고(`protocol-asset` feature),
@@ -60,6 +71,9 @@ pub fn run() {
             // frontend가 부를 수 있는 전부다 (crate::commands).
             commands::list_recordings,
             commands::get_recording,
+            // 저장된 Transcript를 segment까지 읽는 자리다. **읽기뿐이다** — Transcript는
+            // immutable이므로 고치거나 지우는 이름은 여기에도 저장소에도 없다 (§7.1 · INV-2).
+            commands::get_transcript,
             commands::create_recording,
             commands::delete_recording,
             commands::get_settings,
@@ -72,6 +86,10 @@ pub fn run() {
             commands::capture_status,
             // 레코드와 파일이 어긋난 상태를 알리는 자리다 — 고치거나 지우지 않는다 (INV-4).
             commands::list_missing_audio,
+            // 전사를 **움직이는** 표면은 이 둘뿐이다 — 한 건 시작과 상태 조회. 여러 Recording을
+            // 줄 세우는 큐는 이 Phase의 범위 밖이다 (PRODUCT-SPEC §16 DEFERRED).
+            commands::start_transcription,
+            commands::transcription_status,
         ])
         .run(tauri::generate_context!());
 

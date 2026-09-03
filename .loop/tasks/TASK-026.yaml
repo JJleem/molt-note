@@ -1,0 +1,68 @@
+# 전사 실행 경계 — 엔진 호출 · 모델/바이너리 해석 · 실패 구분
+# Runtime이 PLAN-20260903T015253Z 승인 시점에 생성했다 (proposal P4). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-026
+status: DONE
+
+request: |-
+  실제 whisper를 실행하는 경계를 만든다 — 실행 계약을 나타내는 trait(예: TranscriptionEngine)과 ADR-0007이 선택한 실제 구현(sidecar 프로세스 실행 또는 whisper-rs 호출), 그리고 테스트가 쓰는 test double이다. 모델 파일 위치와, sidecar를 택했다면 바이너리 위치를 해석하는 지점을 한 곳에 가둔다(PRODUCT-SPEC §3.1의 TranscriptionRunner · SidecarResolver 방향). 플랫폼에 따라 갈리는 것은 그 지점에만 두고, 그 밖에 Windows를 위한 추상화를 선입금하지 않는다 — Windows 빌드 · Windows 바이너리 확보 · Windows 실행 검증은 이 Task가 하지 않는다(Phase 6). 다음을 서로 구분되는 제품 실패로 돌려준다(§13): 모델 파일이 없음 · 모델 파일을 읽을 수 없거나 지원하지 않는 모델 · 엔진 실행 실패/비정상 종료 · 출력이 없거나 해석할 수 없음. 오디오는 로컬 프로세스/라이브러리 밖으로 나가지 않는다 — 네트워크로 오디오나 전사 결과를 보내는 경로를 만들지 않는다(§12). 자동 테스트는 실제 whisper 바이너리와 모델 없이 통과해야 하며, test double로 정상 출력 · 모델 없음 · 실행 실패 세 경로를 검증한다. 큰 바이너리와 모델 파일은 저장소에 커밋하지 않는다 — 바이너리를 두는 디렉터리가 생기면 .gitignore에 규칙을 추가한다. sidecar를 택했다면 tauri.conf.json의 bundle.externalBin과 capabilities의 shell 권한을 target triple 접미사 규칙대로(macOS는 -aarch64-apple-darwin) 설정하되, 바이너리 파일 자체는 커밋하지 않고 그 파일이 없을 때 gate와 앱이 어떻게 동작하는지를 명시한다.
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-023
+  - TASK-024
+  - TASK-025
+
+stop_condition:
+  gates: [build, lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 3
+
+acceptance_criteria:
+  - id: AC1
+    description: |-
+      npm run build가 통과한다.
+    verification:
+      type: gate
+      ref: build
+  - id: AC2
+    description: |-
+      npm run lint가 통과한다.
+    verification:
+      type: gate
+      ref: lint
+  - id: AC3
+    description: |-
+      npm run test가 통과한다.
+    verification:
+      type: gate
+      ref: test
+  - id: AC4
+    description: |-
+      모델 없음 · 지원하지 않는 모델 · 실행 실패 · 해석 불가가 서로 구분되는 실패로 표현되고, test double로 각각 테스트된다.
+    verification:
+      type: verifier
+  - id: AC5
+    description: |-
+      실제 whisper 바이너리와 모델 파일이 없는 환경에서 세 Gate가 전부 통과한다 — 자동 검증이 하드웨어·모델에 의존하지 않는다.
+    verification:
+      type: verifier
+      instruction: |-
+        테스트가 실제 엔진을 호출하는 경로를 타지 않는지, 모델 경로가 없을 때 skip이 아니라 정의된 실패로 판정되는지 확인한다.
+  - id: AC6
+    description: |-
+      모델 파일·큰 바이너리가 저장소에 커밋되지 않았고, 그것들을 두는 위치가 생겼다면 .gitignore에 규칙이 있다.
+    verification:
+      type: verifier
+  - id: AC7
+    description: |-
+      오디오나 전사 결과를 외부로 보내는 네트워크 경로가 없다(§12). 플랫폼 분기는 바이너리/모델 해석 지점에만 있고, Windows용 미사용 추상화를 미리 만들지 않았다.
+    verification:
+      type: verifier
+
+evidence: []
+
+failure_memo: []
