@@ -1170,6 +1170,147 @@ Rust unit/integration test로 하드웨어·DOM 없이 검증 가능하다
 **Phase 5는 이것을 가장 먼저 직접 확인하고**, 확인되지 않으면 블록 JSON을 직접 만든다.
 확인 전까지 이 사실에 의존하는 설계를 확정하지 않는다.
 
+### 14.9.1 재확인 (2026-09-04) — Phase 5 계획 시점
+
+> §14.9는 2026-09-01 기준이다. Phase 5 계획을 위해 **primary source에서 재확인**했다.
+> 아래가 그 결과이며, 위 본문과 어긋나는 항목은 **아래가 우선한다.**
+
+#### ⚠️ 가장 중요한 변화 — §14.9의 UNVERIFIED 항목이 VERIFIED가 됐다
+
+**Notion은 블록 JSON 대신 `markdown` 문자열을 직접 받는다.** 2026-02에 Markdown Content API가
+정식 출시됐고, §14.9가 "확인 전까지 이 사실에 의존하는 설계를 확정하지 않는다"고 남겨 둔
+항목이 이제 확인됐다 (developers.notion.com/guides/data-apis/working-with-markdown-content).
+
+| 항목 | 확인된 사실 (2026-09-04) | 상태 |
+| --- | --- | --- |
+| 페이지 생성 | `POST /v1/pages` 의 **`markdown` body param** | **VERIFIED** |
+| 페이지 읽기 | `GET /v1/pages/:page_id/markdown` | **VERIFIED** |
+| 페이지 갱신 | `PATCH /v1/pages/:page_id/markdown` (`update_content` · `replace_content` · legacy `insert_content`) | **VERIFIED** |
+| 끝에 이어붙이기 | `insert_content` + `"position": { "type": "end" }` | **VERIFIED** |
+| `markdown`과 `children`/`content` | **같은 요청에 함께 쓸 수 없다** | **VERIFIED** |
+| 줄바꿈 | `markdown`은 실제 개행을 기대한다. JSON에서는 `\n`. 문단 안 줄바꿈은 `<br>` | **VERIFIED** |
+| 제목 | `properties.title`을 생략하면 **첫 `# h1`이 페이지 제목으로 쓰인다** | **VERIFIED** |
+| 큰 본문 | `allow_async: true` → HTTP `202` + `async_task`(`status_url` · `poll_after_seconds`)를 폴링 | **VERIFIED** |
+| 지원되지 않는 블록 | bookmark · embed · link preview · breadcrumb · template → `<unknown url="..." alt="block_type"/>` | **VERIFIED** |
+
+요청 본문 형태 (문서 인용):
+
+```json
+{
+  "parent": { "page_id": "YOUR_PAGE_ID" },
+  "markdown": "# Meeting Notes\nDiscussed roadmap priorities."
+}
+```
+
+```json
+{
+  "type": "insert_content",
+  "insert_content": {
+    "content": "## Appendix\nAdded at the end of the page.",
+    "position": { "type": "end" }
+  }
+}
+```
+
+#### 변하지 않은 것
+
+| 항목 | 확인된 사실 (2026-09-04) | 상태 |
+| --- | --- | --- |
+| `Notion-Version` 헤더 | **`2026-03-11`** | **VERIFIED** (아래 §14.9.2에서 두 번째 재확인) |
+| 인증 | integration token을 `Authorization: Bearer <secret>` (+ `Notion-Version`) | **VERIFIED** |
+| 연결 확인 수단 | `GET /v1/users/me` — 토큰에 딸린 사용자를 돌려주며 **토큰 유효성 확인이 된다**. bot이면 `workspace_name` · `workspace_id`를 준다 | **VERIFIED** |
+| 부모 페이지 밑 생성 | `parent: { page_id: ... }` — page ID만 있으면 된다 | **VERIFIED** (재확인) |
+| 단일 rich text | **2000자** | **VERIFIED** (재확인) |
+| 블록 배열 | **요청당 100개** | **VERIFIED** (재확인) |
+| 실패 코드 | `validation_error` · `unauthorized` · `restricted_resource` · `object_not_found` · `rate_limited` · `conflict_error` · `invalid_json` · `invalid_request_url` · `invalid_request` · `internal_server_error` · `service_unavailable` | **VERIFIED** |
+
+#### 새로 확인된 한도
+
+| 항목 | 확인된 사실 | 상태 |
+| --- | --- | --- |
+| rate limit | 연결당 **평균 초당 3회**, 짧은 버스트 허용. workspace 한도는 요금제에 따르며 모든 연결이 공유한다 | **VERIFIED** |
+| `429` 응답 | `"rate_limited"` 코드 + HTTP `429`. **`Retry-After` 헤더를 읽고 새 요청을 멈춘다.** 문서 인용: *"The header value is an integer number of seconds."* | **VERIFIED** |
+| `529` 응답 | 일시적 과부하. *"Respect the `Retry-After` response header and try again later."* | **VERIFIED** |
+| 요청 전체 | reference/request-limits가 **"1000 block elements and 500KB overall"** 로 적는다 | **VERIFIED (문서 인용)** |
+| **markdown 엔드포인트 전용** 본문 크기 상한 | markdown 가이드는 **아무 값도 명시하지 않는다.** "keep pages under a few thousand blocks"만 적는다 | ⚠️ **UNVERIFIED — 값이 존재하는지조차 확인되지 않았다** |
+| 페이지 전체 | 약 **20,000 블록** 이후 잘린다 | **VERIFIED** |
+
+#### 이것이 Phase 5 설계에 뜻하는 것
+
+**블록 JSON을 직접 만들 필요가 없어졌다.** §11의 Markdown export 산출물을 그대로 전송한다.
+따라서 §14.9가 요구한 "2000자 청킹과 100블록 배치 전송"은 **블록 JSON 경로의 요구사항이었고,
+그 경로를 쓰지 않으므로 그 형태로는 필요하지 않다.**
+
+**그러나 그 요구사항이 지키려던 것은 그대로 남는다.**
+
+```text
+1시간 transcript가 잘리거나 조용히 유실되어서는 안 된다.
+```
+
+한 요청에 담을 수 없는 분량은 여전히 존재한다(요청당 1000 블록 / 500KB · 페이지당 20,000 블록).
+그러므로 Phase 5는 **markdown 문자열 수준에서 안전한 경계로 나누어 순차 전송**하고,
+`allow_async`를 쓸지 결정하며, **어떤 경우에도 조용히 자르지 않는다.**
+
+⚠️ **두 가지를 섞지 않는다.**
+
+```text
+VERIFIED    일반 요청 한도 — 요청당 1000 block elements · 500KB overall
+            (reference/request-limits · 모든 엔드포인트에 적용되는 값으로 문서화돼 있다)
+
+UNVERIFIED  markdown 엔드포인트 **전용** 상한 — 그런 값이 따로 있는지조차 확인되지 않았다.
+            markdown 가이드는 어떤 숫자도 적지 않는다.
+```
+
+**markdown 전용 상수를 외부 사실로 지어내지 않는다.** 특히 웹 검색에서 보이는 750KB 같은
+값은 primary source에서 확인되지 않았으므로 **이 문서는 그것을 사실로 기록하지 않는다.**
+
+구현이 할 수 있는 것은 하나다 — **VERIFIED된 일반 요청 한도(500KB) 아래에서 앱이 스스로
+보수적인 내부 chunk 예산을 고르는 것**이다. JSON 이스케이프 · 헤더 · 요청 부가분이 본문보다
+크게 잡히므로 여유를 둔다. 그 값은 **이 앱이 고른 값이지 확인된 API 한도가 아니다** —
+코드와 ADR이 그렇게 표시한다.
+
+핵심 판정 기준은 상수의 크기가 아니라 이것이다:
+
+```text
+전체 문서가 · 순서대로 · 무손실로 전송되거나, 실패가 그 사실을 드러내고 재시도된다.
+```
+
+### 14.9.2 `Notion-Version` 두 번째 재확인 (2026-09-04 · 운영자 지시)
+
+Phase 5 Human Review에서 **API 버전 근거를 다시 확인하라는 지시**가 있었다. 재확인 결과다.
+
+| 확인한 곳 | 결과 |
+| --- | --- |
+| developers.notion.com/reference/versioning | *"The most recent `Notion-Version` is `2026-03-11`"* |
+| developers.notion.com/page/changelog (2026-08-27 ~ 2026-09-02 최신 항목까지 열람) | **`2026-03-11`보다 새로운 API 버전 발표 없음** |
+
+```text
+확정 값:  Notion-Version: 2026-03-11
+```
+
+`2026-03-11`은 breaking change를 포함한 릴리스다 — `after` → `position`,
+`archived` → `in_trash`, `transcription` → `meeting_notes`.
+
+#### ⚠️ 버전을 조사 날짜에서 유추하지 않는다
+
+§14.9는 **2026-09-01에 조사**됐고 §14.9.1은 **2026-09-04에 조사**됐다. **그 날짜들은 API
+버전이 아니다.** 이 문서의 어떤 조사 날짜도 `Notion-Version` 값으로 쓰지 않는다.
+
+> §14.9.1 최초 작성 시 `Notion-Version` 행에 "2026-09-01 값과 같다"라고 적었다. 이는
+> "2026-09-01에 조사한 값과 같다"는 뜻이었으나 **버전 문자열처럼 읽히는 문장이었고 실제로
+> 오해를 일으켰다.** 기록된 값 자체는 처음부터 `2026-03-11`이었다. 문장을 정정했다.
+
+#### 혼동하기 쉬운 다른 버전 문자열
+
+| 문자열 | 정체 | API 버전인가 |
+| --- | --- | --- |
+| `2026-07-28` | Notion MCP가 지원하는 **MCP 프로토콜 버전** (2026-08-03 changelog) | **아니다** |
+| `2025-09-03` | 업그레이드 가이드가 참조하는 **과거 버전** | 아니다 (최신 아님) |
+| `2022-06-28` | SDK 문맥의 **deprecated 버전** | 아니다 |
+
+**구현은 `2026-03-11` 외의 값을 헤더로 보내지 않는다.** 조사 날짜에서 만들어 낸 값
+(예: `2026-09-01`)을 보내는 것은 명백한 오류다.
+
 ---
 
 ## 15. Non-Goals
