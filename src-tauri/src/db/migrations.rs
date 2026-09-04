@@ -186,6 +186,34 @@ pub const MIGRATIONS: &[Migration] = &[
                   CHECK (automatic_transcription IN (0, 1));
               ALTER TABLE settings ADD COLUMN transcription_model TEXT;",
     },
+    // `docs/ADR-0008-note-ai-provider.md` §11.1의 AI provider 설정. 앞의 migration을 고치지 않고
+    // **열을 더한다** — version 5까지 적용된 사용자 DB가 이미 있을 수 있고, 그 행의 값은 그대로
+    // 남아야 한다. 이미 있는 행의 새 열은 NULL, 즉 '아직 고르지 않음'으로 시작한다.
+    //
+    // 세 값은 서로 다른 것을 가리키므로 한 열에 겹치지 않는다 — **어떤 provider를 쓰는가** ·
+    // **어디에 연결하는가** · **어떤 모델로 만드는가**. 하나를 고른다고 나머지가 정해지지 않는다.
+    //
+    // **NOT NULL도 DEFAULT도 두지 않는다.** 기본값 정책은 스키마가 아니라
+    // `domain::settings::Settings::DEFAULT`가 갖는다는 것이 이 테이블의 규약이다 (version 3의
+    // 주석). NULL은 '아직 고르지 않았다'는 **정상 상태**이며, 특히 `ai_provider`가 NULL인 것은
+    // 오류가 아니다 — 그 상태에서 녹음·전사·열람은 그대로 동작한다 (INV-8 · ADR-0008 §11.1).
+    //
+    // `ai_provider`는 벤더 중립 자유 식별자다. 허용 값 목록을 두지 않는다 — `ai_notes.provider`가
+    // 이미 같은 규칙을 따른다 (INV-9). `ai_base_url`이 가리키는 서버가 지금 살아 있는지,
+    // `ai_model`이 가리키는 모델이 지금 설치돼 있는지를 저장소는 묻지 않는다.
+    // `default_microphone` · `transcription_model`과 같은 이유이며, 그 사실 때문에 저장된 선택을
+    // 조용히 지우거나 바꾸지 않는다.
+    //
+    // INV-7: 여기서도 secret 열은 만들지 않는다. 로컬 AI 서버는 API key도 token도 요구하지
+    // 않으며, **언젠가 필요할지 모른다는 이유로 빈 자리를 파 두지 않는다** (ADR-0008 §11.3).
+    // 주소는 secret이 아니다 — 어디에 연결하는지일 뿐이다.
+    Migration {
+        version: 6,
+        name: "add_ai_provider_settings",
+        sql: "ALTER TABLE settings ADD COLUMN ai_provider TEXT;
+              ALTER TABLE settings ADD COLUMN ai_base_url TEXT;
+              ALTER TABLE settings ADD COLUMN ai_model TEXT;",
+    },
 ];
 
 /// 코드가 알고 있는 최신 스키마 버전. migration이 없으면 0이다.
@@ -306,6 +334,7 @@ mod tests {
                 (3, "create_settings"),
                 (4, "add_default_microphone_to_settings"),
                 (5, "add_transcription_settings"),
+                (6, "add_ai_provider_settings"),
             ]
         );
     }
@@ -323,11 +352,32 @@ mod tests {
             "default_microphone",
             "automatic_transcription",
             "transcription_model",
+            // Phase 4가 더한 AI provider 설정 (ADR-0008 §11.1).
+            "ai_provider",
+            "ai_base_url",
+            "ai_model",
         ] {
             assert!(
                 !create_settings.sql.contains(column),
                 "나중에 생긴 열 {column}이 이미 적용된 migration 안에 들어가 있다"
             );
+        }
+    }
+
+    #[test]
+    fn no_migration_creates_a_place_to_put_a_secret() {
+        // INV-7: 저장하지 않는 값은 담을 곳도 없어야 한다. 빈 secret 열은 언젠가 채워진다 —
+        // 그래서 "지금은 안 쓴다"는 열도 만들지 않는다 (ADR-0008 §11.3).
+        for migration in MIGRATIONS {
+            let sql = migration.sql.to_lowercase();
+            for forbidden in ["api_key", "apikey", "token", "password", "secret", "credential"] {
+                assert!(
+                    !sql.contains(forbidden),
+                    "migration {} ({})이 secret을 담을 자리를 만든다: {forbidden}",
+                    migration.version,
+                    migration.name
+                );
+            }
         }
     }
 

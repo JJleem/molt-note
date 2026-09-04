@@ -1,7 +1,7 @@
 /**
  * 프론트엔드가 부를 수 있는 동작의 전부.
  *
- * `src-tauri/src/lib.rs`가 등록한 열여섯 개 command와 1:1이며, 그 밖의 경로는 없다 —
+ * `src-tauri/src/lib.rs`가 등록한 스물한 개 command와 1:1이며, 그 밖의 경로는 없다 —
  * **임의의 질의를 보낼 수단이 없다.** 저장소를 아는 코드는 Rust 안에만 있다
  * (`docs/ADR-0001-local-persistence.md` · PRODUCT-SPEC §12).
  *
@@ -19,9 +19,13 @@
 import { convertFileSrc, invoke } from '@tauri-apps/api/core';
 import { toFailure } from './failure';
 import type {
+  AiNote,
+  AiNoteStatus,
+  AiProviderStatus,
   InputDevice,
   MissingAudio,
   NewRecording,
+  NoteMode,
   Recording,
   SessionStatus,
   Settings,
@@ -32,16 +36,27 @@ import type {
 
 export type { Failure, FailureKind } from './failure';
 export type {
+  AiNote,
+  AiNoteState,
+  AiNoteStatus,
+  AiProviderLocality,
+  AiProviderState,
+  AiProviderStatus,
   CaptureReport,
   InputDevice,
+  MeetingNote,
   MissingAudio,
   NewRecording,
+  NoteMode,
   ProcessingStatus,
   Recording,
   SessionState,
   SessionStatus,
   Settings,
   StoppedRecording,
+  StructuredNote,
+  StudyNote,
+  SummaryNote,
   Transcript,
   TranscriptSegment,
   TranscriptionState,
@@ -223,4 +238,72 @@ export function startTranscription(recordingId: string): Promise<TranscriptionSt
  */
 export function transcriptionStatus(): Promise<TranscriptionStatus> {
   return call<TranscriptionStatus>('transcription_status');
+}
+
+/**
+ * 고른 AI provider가 지금 어떤 상태인지 물어본다 — 무엇을 골랐는지 · 쓸 수 있는지 · 어떤
+ * 모델이 있는지 · **로컬인지 외부인지** (`phase-prompt/04` 요구 8 · 9 · 15 · INV-5).
+ *
+ * **provider를 고르지 않았거나 서버가 응답하지 않는 것은 실패가 아니다** — 그 사실이
+ * {@link AiProviderStatus.state}로 온다 (INV-8). 이 호출이 실패하는 경우는 저장소에서 설정을
+ * 읽지 못했을 때뿐이며, 그것은 provider와 무관하다.
+ *
+ * **어디에 어떻게 연결하는지는 화면이 알지 않는다.** 주소도 엔드포인트도 backend 안에만 있고,
+ * webview에는 AI 서버로 가는 통로가 없다 (docs/ADR-0008-note-ai-provider.md §5 · INV-9).
+ *
+ * 서버가 응답하지 않으면 이 호출은 그 시간만큼 걸릴 수 있다 — 그동안에도 다른 command와 화면은
+ * 계속 응답한다 (backend가 이 질의를 main thread에서 처리하지 않는다).
+ */
+export function aiProviderStatus(): Promise<AiProviderStatus> {
+  return call<AiProviderStatus>('ai_provider_status');
+}
+
+/**
+ * 녹음 하나의 AI 노트 생성을 시작한다. **돌아오는 것은 접수 사실이지 노트가 아니다.**
+ *
+ * 실제 생성은 backend의 배경 스레드에서 돌므로 이 호출은 바로 끝난다 — 로컬 모델이 몇 분을 써도
+ * 화면과 다른 command가 멈추지 않는다. 결과는 {@link aiNoteStatus}로 물어보고, 만들어진 노트는
+ * {@link getAiNote} · {@link listAiNotes}로 읽는다.
+ *
+ * **재생성도 이 함수다.** 이미 노트가 있는 녹음에 다시 걸면 노트가 하나 더 생기고 이전 노트는
+ * 그대로 남는다 (ADR-0008 §9.2) — 그래서 "다시 만들기"를 위한 별도의 이름이 없다.
+ *
+ * 이미 생성 중이면 실패한다 — 같은 녹음이어도 마찬가지이며, 두 번째 요청이 조용히 사라지지
+ * 않는다. **provider를 고르지 않았다는 이유로는 실패하지 않는다** (INV-8): 그때는 접수된 뒤
+ * `failed` 상태에 §13의 `aiProviderNotConfigured`가 실려 온다.
+ *
+ * `mode`는 만들 노트의 종류다 (§9.5). 세 값 중 하나가 아니면 실패한다.
+ */
+export function startAiNote(recordingId: string, mode: NoteMode): Promise<AiNoteStatus> {
+  return call<AiNoteStatus>('start_ai_note', { recordingId, mode });
+}
+
+/**
+ * 지금 AI 노트 생성이 어떤 상태인지 물어본다. **생성이 도는 동안에도 즉시 답한다.**
+ *
+ * 아직 아무것도 걸지 않았으면 `idle`이 온다 — 오류가 아니다. 실패했으면 그 {@link Failure}가
+ * 그대로 실려 오므로 화면은 무엇이 실패했는지, 원본이 안전한지, 다시 시도할 수 있는지를 그
+ * 값에서 읽는다 (§13).
+ */
+export function aiNoteStatus(): Promise<AiNoteStatus> {
+  return call<AiNoteStatus>('ai_note_status');
+}
+
+/**
+ * 그 Transcript에서 만들어진 AI 노트를 **만들어진 순서대로** 읽는다. 하나도 없으면 빈 배열이다.
+ *
+ * 화면은 `Recording.currentTranscriptId`가 가리키는 Transcript의 노트를 이 함수로 읽는다 (§7.2).
+ * **이력이 그대로 온다** — 재생성은 대체가 아니라 추가이므로 같은 mode의 노트가 여럿일 수 있고,
+ * 그중 무엇을 보여줄지는 화면이 정한다 (ADR-0008 §9.2).
+ *
+ * **읽기뿐이다.** 노트를 고치거나 지우는 command는 없다 — 저장소가 내놓는 쓰기 경로도 추가
+ * 하나뿐이므로, 화면에서 시작한 어떤 동작도 이미 만들어진 노트를 바꾸지 못한다.
+ */
+export function listAiNotes(transcriptId: string): Promise<AiNote[]> {
+  return call<AiNote[]>('list_ai_notes', { transcriptId });
+}
+
+/** AI 노트 하나를 읽는다. 그런 id가 없으면 `null`이다. */
+export function getAiNote(aiNoteId: string): Promise<AiNote | null> {
+  return call<AiNote | null>('get_ai_note', { aiNoteId });
 }

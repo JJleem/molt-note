@@ -1,3 +1,4 @@
+pub mod ai;
 pub mod audio;
 pub mod commands;
 pub mod db;
@@ -7,7 +8,7 @@ pub mod transcription;
 
 use tauri::Manager;
 
-use commands::{AudioDevices, Recorder, Storage, Transcriber};
+use commands::{AudioDevices, NoteGenerator, Recorder, Storage, Transcriber};
 use platform::app_data_dir::AppDataDirectory;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -43,6 +44,17 @@ pub fn run() {
             // 없는 것은 앱 시작을 막는 문제가 아니라 전사를 시작할 때 알리는 제품 상태다
             // (§13 · ADR-0007 §8.2).
             app.manage(Transcriber::open_for(app));
+
+            // 진행 중인 AI 노트 생성의 소유자도 여기다 — 전사와 같은 이유이며, 로컬 모델의
+            // 생성은 그보다 더 오래 걸릴 수 있다 (ADR-0008 §12.2). 그래서 같은 규약을 쓴다:
+            // **배경 스레드에서 돌고, 화면은 상태를 물어본다**
+            // (crate::commands::notes · phase-prompt/04 요구 16).
+            //
+            // provider는 여기서 만들지 않는다. 어떤 provider에 어떤 모델로 연결할지는 생성할
+            // 때마다 설정에서 읽으며 (ADR-0008 §11.1), **고르지 않은 상태는 앱 시작을 막는
+            // 문제가 아니라 정상 상태다** — AI를 설정하지 않은 사용자에게도 녹음 · 전사 ·
+            // 열람은 그대로 동작한다 (INV-8).
+            app.manage(NoteGenerator::open_for(app));
 
             // 저장된 녹음을 재생하려면 webview가 그 파일을 읽을 수 있어야 한다.
             // 그 통로는 Tauri v2의 asset protocol이고(`protocol-asset` feature),
@@ -90,6 +102,17 @@ pub fn run() {
             // 줄 세우는 큐는 이 Phase의 범위 밖이다 (PRODUCT-SPEC §16 DEFERRED).
             commands::start_transcription,
             commands::transcription_status,
+            // AI 노트의 표면은 이 다섯이다 — provider 상태 조회 · 생성 시작 · 진행 상태 조회 ·
+            // 저장된 노트 읽기 둘. **고치거나 지우는 이름은 없다**: 재생성은 대체가 아니라
+            // 추가이며 (ADR-0008 §9.2), 저장소의 `ai_notes` 쓰기 경로도 추가 하나뿐이다.
+            //
+            // 벤더 이름이 이 목록에 없다는 것이 INV-9의 표현이다 — 어떤 provider를 쓰는지는
+            // 설정 값이고, 그것을 아는 코드는 adapter 안에만 있다.
+            commands::ai_provider_status,
+            commands::start_ai_note,
+            commands::ai_note_status,
+            commands::list_ai_notes,
+            commands::get_ai_note,
         ])
         .run(tauri::generate_context!());
 

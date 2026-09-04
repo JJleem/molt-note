@@ -1,0 +1,72 @@
+# AI provider 설정 영속화 (migration 6 · INV-7)
+# Runtime이 PLAN-20260903T053705Z 승인 시점에 생성했다 (proposal P4). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-035
+status: DONE
+
+request: |-
+  AI provider 설정을 로컬 저장소에 영속화한다. src-tauri/src/db/migrations.rs의 MIGRATIONS **목록 끝에** version 6을 추가해 settings 테이블에 ADR-0008이 정한 열을 더한다(선택된 provider 식별자 · 연결 대상 host/port 또는 base URL · 선택된 모델 식별자). 기존 migration은 version도 sql도 고치지 않는다 — 이미 그 스키마로 저장된 사용자 DB가 있을 수 있다. NOT NULL과 DEFAULT를 두지 않고 NULL은 '아직 고르지 않았다'는 정상 상태로 읽는다(기본값 정책은 스키마가 아니라 domain::settings::Settings::DEFAULT가 갖는다는 기존 규약을 지킨다). **INV-7: API key · token · password를 담는 열을 만들지 않는다** — 로컬 Ollama는 그런 값을 필요로 하지 않으며, 자리를 미리 만들어 두지도 않는다. 이어서 domain::settings::Settings와 DEFAULT(provider 미선택이 정상 기본값이다), db::settings의 저장·복원, commands::payload의 설정 payload, src/ipc/types.ts의 Settings 타입을 함께 갱신해 값이 재시작 후에도 유지되는 것을 테스트로 확인한다. 연결 대상의 기본값은 ADR-0008이 재확인한 §14.5의 값을 쓰고, 그 값을 코드 여러 곳에 흩어 두지 않는다. UI는 이 Task의 범위가 아니다.
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-032
+
+stop_condition:
+  gates: [build, lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 3
+
+acceptance_criteria:
+  - id: AC1
+    description: |-
+      build Gate가 통과한다.
+    verification:
+      type: gate
+      ref: build
+  - id: AC2
+    description: |-
+      lint Gate가 통과한다.
+    verification:
+      type: gate
+      ref: lint
+  - id: AC3
+    description: |-
+      test Gate가 통과한다.
+    verification:
+      type: gate
+      ref: test
+  - id: AC4
+    description: |-
+      migration이 목록 끝에 version 6으로 추가되었고 version 1~5의 version · name · sql이 변경되지 않았으며, 데이터를 지우는 문장이 없다.
+    verification:
+      type: verifier
+      instruction: |-
+        MIGRATIONS 목록과 기존 테스트(released_migrations_keep_their_version_and_name 등)를 확인한다. 기존 migration의 sql이 한 글자라도 바뀌었으면 FAIL이다.
+  - id: AC5
+    description: |-
+      secret을 담는 열이나 필드가 추가되지 않았다 (INV-7).
+    verification:
+      type: verifier
+      instruction: |-
+        새 열 이름과 Settings 필드를 확인한다. key · token · secret · password 성격의 값을 담을 자리가 있으면 FAIL이다.
+  - id: AC6
+    description: |-
+      provider가 선택되지 않은 상태가 기본값이자 정상 상태이고, 저장된 값이 재시작(같은 경로로 DB를 다시 열기) 후에도 유지되는 것이 테스트로 확인된다.
+    verification:
+      type: verifier
+      instruction: |-
+        Settings::DEFAULT와 저장/복원 테스트를 확인한다. 앱이 임의의 provider를 기본으로 굳혀 두면 FAIL이다.
+  - id: AC7
+    description: |-
+      Rust의 설정 payload와 src/ipc/types.ts의 Settings가 서로 어긋나지 않는다.
+    verification:
+      type: verifier
+      instruction: |-
+        필드 이름과 선택성(optional/null 허용)을 양쪽에서 대조한다.
+
+evidence: []
+
+failure_memo: []

@@ -1,0 +1,4 @@
+    1175 docs/ADR-0008-note-ai-provider.md
+     564 docs/PHASE-4-AI-NOTE-REVIEW.md
+     445 docs/SYSTEM-MAP.md
+    2184 total

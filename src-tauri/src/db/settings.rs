@@ -22,7 +22,8 @@ const SETTINGS_ROW_ID: i64 = 1;
 pub fn load(connection: &Connection) -> Result<Settings, DatabaseError> {
     let row = connection.query_row(
         "SELECT recordings_directory, automatic_processing, default_microphone,
-                automatic_transcription, transcription_model
+                automatic_transcription, transcription_model,
+                ai_provider, ai_base_url, ai_model
          FROM settings WHERE id = ?1",
         [SETTINGS_ROW_ID],
         |row| {
@@ -32,6 +33,9 @@ pub fn load(connection: &Connection) -> Result<Settings, DatabaseError> {
                 row.get::<_, Option<String>>(2)?,
                 row.get::<_, Option<i64>>(3)?,
                 row.get::<_, Option<String>>(4)?,
+                row.get::<_, Option<String>>(5)?,
+                row.get::<_, Option<String>>(6)?,
+                row.get::<_, Option<String>>(7)?,
             ))
         },
     );
@@ -43,6 +47,9 @@ pub fn load(connection: &Connection) -> Result<Settings, DatabaseError> {
             default_microphone,
             automatic_transcription,
             transcription_model,
+            ai_provider,
+            ai_base_url,
+            ai_model,
         )) => Ok(Settings {
             recordings_directory,
             automatic_processing: decode_toggle("automatic_processing", automatic_processing)?,
@@ -59,6 +66,16 @@ pub fn load(connection: &Connection) -> Result<Settings, DatabaseError> {
             // 같은 이유로 그 모델 파일이 지금 그 자리에 있는지도 묻지 않는다. 파일을 찾는 일은
             // `crate::transcription::model`의 몫이며, 없다고 해서 저장된 선택이 지워지지 않는다.
             transcription_model,
+            // 이 세 열은 version 6에서 더해졌고 NULL을 허용한다. 그 이전에 저장된 행에는 값이
+            // 없으며, **NULL은 '아직 고르지 않았다'는 정상 상태다** — 특히 provider를 고르지
+            // 않은 것은 오류가 아니다 (INV-8 · ADR-0008 §11.1).
+            //
+            // 저장소는 셋 중 어느 것도 지금 유효한지 묻지 않는다. 고른 provider의 서버가
+            // 응답하는지, 고른 모델이 그 서버에 있는지는 물어본 쪽이 알며, 아니라고 해서
+            // 저장된 선택을 여기서 지우거나 바꾸지 않는다.
+            ai_provider,
+            ai_base_url,
+            ai_model,
         }),
         // 행이 없는 것은 오류가 아니다 — 기본값 정책이 답을 갖고 있다.
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(Settings::DEFAULT),
@@ -74,14 +91,17 @@ pub fn save(connection: &Connection, settings: &Settings) -> Result<(), Database
         .execute(
             "INSERT INTO settings (id, recordings_directory, automatic_processing,
                                    default_microphone, automatic_transcription,
-                                   transcription_model)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                                   transcription_model, ai_provider, ai_base_url, ai_model)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
              ON CONFLICT (id) DO UPDATE
              SET recordings_directory = excluded.recordings_directory,
                  automatic_processing = excluded.automatic_processing,
                  default_microphone = excluded.default_microphone,
                  automatic_transcription = excluded.automatic_transcription,
-                 transcription_model = excluded.transcription_model",
+                 transcription_model = excluded.transcription_model,
+                 ai_provider = excluded.ai_provider,
+                 ai_base_url = excluded.ai_base_url,
+                 ai_model = excluded.ai_model",
             rusqlite::params![
                 SETTINGS_ROW_ID,
                 settings.recordings_directory,
@@ -90,6 +110,11 @@ pub fn save(connection: &Connection, settings: &Settings) -> Result<(), Database
                 // 두 토글은 서로의 값을 보지 않는다 — 각자 자기 열에만 쓰인다.
                 i64::from(settings.automatic_transcription),
                 settings.transcription_model,
+                // 세 값도 각자 자기 열에만 쓰인다. 고르지 않은 값(`None`)은 NULL로 남고,
+                // 다른 값에서 채워 넣지 않는다 — 주소를 골랐다고 provider가 골라지지 않는다.
+                settings.ai_provider,
+                settings.ai_base_url,
+                settings.ai_model,
             ],
         )
         .map_err(DatabaseError::Sql)?;

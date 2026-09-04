@@ -260,4 +260,204 @@ export interface Settings {
    * 조용히 다른 장치로 바꾸지 않는다.**
    */
   readonly defaultMicrophone: string | null;
+  /**
+   * 노트를 만들 때 쓸 AI provider의 **식별자**
+   * (docs/ADR-0008-note-ai-provider.md §11.1).
+   *
+   * **아직 고르지 않았으면 `null`이고, 그것이 기본이자 정상 상태다** — 오류가 아니다.
+   * 고르지 않은 동안에도 녹음 · 전사 · 열람은 그대로 동작하며, 화면은 그 상태를 실패가
+   * 아니라 "AI 기능이 아직 켜지지 않았다"로 말한다 (INV-8).
+   *
+   * 벤더 중립 자유 식별자다 — 이 타입은 어떤 값이 올 수 있는지 열거하지 않는다 (INV-9).
+   */
+  readonly aiProvider: string | null;
+  /**
+   * AI provider에 연결할 **주소**. 아직 고르지 않았으면 `null`이며, 그것도 정상 상태다.
+   *
+   * **`null`이 "연결할 곳이 없다"는 뜻은 아니다** — 고르지 않았을 때 실제로 어디에
+   * 연결하는지는 backend가 알고 있고, 그 기본값은 이 화면이 아니라 backend 한 곳에만 있다.
+   *
+   * **secret이 아니다** — 어디에 연결하는지일 뿐이므로 INV-7과 충돌하지 않는다.
+   */
+  readonly aiBaseUrl: string | null;
+  /**
+   * 노트를 만들 때 쓸 **모델 식별자**. 아직 고르지 않았으면 `null`이며, 그것도 정상 상태다.
+   *
+   * `transcriptionModel` · `defaultMicrophone`과 같은 성질을 갖는다. 이 모델이 지금 그 서버에
+   * 설치돼 있는지는 이 값만으로 알 수 없고, **없다고 해서 앱이 값을 지우거나 다른 모델로
+   * 바꾸지 않는다.**
+   */
+  readonly aiModel: string | null;
+}
+
+/**
+ * 고른 AI provider가 지금 있을 수 있는 상태 (PRODUCT-SPEC §13 · INV-8).
+ *
+ * **`notConfigured`는 오류가 아니다.** provider를 고르지 않은 것은 정상 상태이며, 화면은 그것을
+ * 경고가 아니라 "AI 기능이 아직 켜지지 않았다"는 담담한 상태로 그린다.
+ *
+ * 나머지 셋을 하나의 boolean으로 합치지 않는 이유는 사용자가 할 일이 다르기 때문이다 —
+ * 모델을 받아 오는 것(`noModels`)과 서버를 켜는 것(`unavailable`)은 다른 일이다
+ * (docs/ADR-0008-note-ai-provider.md §4.2).
+ */
+export type AiProviderState = 'notConfigured' | 'ready' | 'noModels' | 'unavailable';
+
+/**
+ * 전사가 **이 기기를 떠나는가** (§12 · INV-5).
+ *
+ * 사용자가 알아야 하는 것은 어디로 나가는지가 아니라 나가는가이며, 그 답은 둘 중 하나다.
+ * 이 값을 말하는 것은 화면이 아니라 provider 자신이다.
+ */
+export type AiProviderLocality = 'local' | 'external';
+
+/**
+ * 고른 AI provider의 지금 상태 (`phase-prompt/04` 요구 8 · 9 · 15).
+ *
+ * **이 값을 얻는 데 실패하는 경우는 provider와 무관하다.** provider를 고르지 않은 것도, 서버가
+ * 응답하지 않는 것도 여기 담긴 상태이지 실패가 아니다 (INV-8).
+ *
+ * ```text
+ * state           providerId/Name/locality   models   failure
+ * notConfigured   null                       []       null
+ * ready           있음                       있음     null
+ * noModels        있음                       []       null
+ * unavailable     있음                       []       있음
+ * ```
+ */
+export interface AiProviderStatus {
+  readonly state: AiProviderState;
+  /**
+   * 저장되는 provenance 식별자. 고른 provider가 없으면 `null`이다.
+   *
+   * **벤더 중립 자유 식별자다** — 이 타입은 어떤 값이 올 수 있는지 열거하지 않는다 (INV-9).
+   */
+  readonly providerId: string | null;
+  /** 사람이 읽는 이름. 화면은 이 값을 그대로 보여준다. */
+  readonly providerName: string | null;
+  /** 전사가 기기를 떠나는지 (§12 · INV-5). 고른 provider가 없으면 `null`이다. */
+  readonly locality: AiProviderLocality | null;
+  /** 지금 고를 수 있는 모델. 쓸 수 없는 상태에서는 빈 배열이다. */
+  readonly models: readonly string[];
+  /** 지금 닿지 못하는 이유. `unavailable`에서만 있다. */
+  readonly failure: Failure | null;
+}
+
+/** 만들 수 있는 노트의 종류 (§9.5). **벤더가 아니라 출력 형태다** (INV-9). */
+export type NoteMode = 'meeting' | 'study' | 'summary';
+
+/**
+ * AI 노트 생성 한 건이 있을 수 있는 상태.
+ *
+ * **{@link ProcessingStatus}와 다른 값이다.** 저쪽은 녹음 하나에 저장된 후처리 상태(§7)이고,
+ * 이쪽은 지금 이 앱이 실제로 돌리고 있는 생성 한 건이다.
+ *
+ * `noTranscript`가 `failed`와 따로 있는 이유는 §7.2다 — **재료가 아직 없는 것은 실패가 아니다.**
+ * 아무것도 저장되지 않았고, 사용자가 할 일은 다시 시도하는 것이 아니라 전사를 먼저 돌리는 것이다.
+ */
+export type AiNoteState = 'idle' | 'running' | 'done' | 'noTranscript' | 'failed';
+
+/**
+ * 지금 AI 노트 생성이 어떤 상태인지 (`phase-prompt/04` 요구 16).
+ *
+ * **진행 중인 생성을 들고 있는 것은 backend다.** 화면은 그것을 소유하지 않고 물어본다 — 그래서
+ * 화면이 다시 그려지거나 사용자가 다른 화면에 다녀와도 같은 답이 온다. 생성이 도는 동안에도 이
+ * 질의는 즉시 답한다 (`src-tauri/src/commands/notes.rs`).
+ *
+ * ```text
+ * state          recordingId   mode    aiNoteId   failure
+ * idle           null          null    null       null
+ * running        있음          있음    null       null
+ * done           있음          있음    있음       null
+ * noTranscript   있음          있음    null       null
+ * failed         있음          있음    null       있음
+ * ```
+ *
+ * `failure`에는 §13의 AI 실패가 그대로 실려 온다. **provider를 고르지 않은 상태에서 생성을
+ * 요청했을 때의 답도 여기로 온다** (`aiProviderNotConfigured`) — 그것은 command의 실패가 아니라
+ * 상태값이며, 화면은 오류가 아니라 "AI를 먼저 설정해야 한다"로 그린다 (INV-8).
+ */
+export interface AiNoteStatus {
+  readonly state: AiNoteState;
+  /** 지금 노트를 만들고 있거나 마지막으로 만든 녹음. */
+  readonly recordingId: string | null;
+  readonly mode: NoteMode | null;
+  /** 성공했을 때 **새로 추가된** 노트. 이전 노트는 그대로 남는다. */
+  readonly aiNoteId: string | null;
+  readonly failure: Failure | null;
+}
+
+/**
+ * Meeting 노트의 본문 (§9.5: Overview · Key Discussions · Decisions · Action Items ·
+ * Open Questions).
+ *
+ * **배열이 비어 있는 것은 정상이다** — "결정된 것이 없었다"는 실제 결과이며, 화면이 그것을
+ * 실패로 그리지 않는다 (docs/ADR-0008-note-ai-provider.md §7.3).
+ */
+export interface MeetingNote {
+  readonly mode: 'meeting';
+  readonly overview: string;
+  readonly keyDiscussions: readonly string[];
+  readonly decisions: readonly string[];
+  readonly actionItems: readonly string[];
+  readonly openQuestions: readonly string[];
+}
+
+/**
+ * Study 노트의 본문
+ * (§9.5: Overview · Key Concepts · Important Details · Questions · Things to Study ·
+ * References Mentioned).
+ */
+export interface StudyNote {
+  readonly mode: 'study';
+  readonly overview: string;
+  readonly keyConcepts: readonly string[];
+  readonly importantDetails: readonly string[];
+  readonly questions: readonly string[];
+  readonly thingsToStudy: readonly string[];
+  /** **"언급된" 참고자료다** — 없는 참고문헌을 채우지 않는다. */
+  readonly referencesMentioned: readonly string[];
+}
+
+/** Summary 노트의 본문 (§9.5: Short Summary · Key Points). */
+export interface SummaryNote {
+  readonly mode: 'summary';
+  readonly shortSummary: string;
+  readonly keyPoints: readonly string[];
+}
+
+/**
+ * 노트 본문 — `mode`로 갈라 읽는 **한 값**이다 (§9.3 · §9.5).
+ *
+ * 세 mode를 옵셔널 필드 하나로 합치지 않는다. 합치면 "Meeting인데 `thingsToStudy`가 있는" 값이
+ * 타입 수준에서 가능해지고, 화면이 없는 섹션을 그리게 된다 (ADR-0008 §7.3).
+ *
+ * **provider 중립 데이터다** (§9.3 · INV-9) — 어느 벤더가 만들었든 이 모양이며, 렌더링은 한
+ * 방향으로만 흐른다: `StructuredNote → 화면`.
+ */
+export type StructuredNote = MeetingNote | StudyNote | SummaryNote;
+
+/**
+ * 저장된 AI 노트 하나 (§7 · §7.3). **derived data이며 언제든 다시 만들 수 있다.**
+ *
+ * 화면이 읽기만 하는 값이다 — 이 타입을 backend로 되돌려보내는 command가 없고, 재생성은 기존
+ * 노트를 고치지 않고 새 노트를 추가한다 (ADR-0008 §9.2). 그래서 이미 본 노트가 다음 생성 때문에
+ * 바뀌는 일은 없고, `promptVersion`이 다른 두 노트를 나란히 볼 수 있다.
+ *
+ * provenance 네 값은 §7.3이 요구하는 것 전부다 — **`transcriptId`가 그중 하나다**: 한 Recording에
+ * Transcript가 여럿일 수 있으므로 (§7.1), 어떤 version에서 나온 노트인지 이 값으로 구분된다.
+ * `provider`는 벤더 중립 자유 식별자이며, 이 타입은 어떤 값이 올 수 있는지 열거하지 않는다 (INV-9).
+ */
+export interface AiNote {
+  readonly id: string;
+  readonly recordingId: string;
+  /** **어떤 Transcript version을 입력으로 썼는가** (§7.3). */
+  readonly transcriptId: string;
+  readonly mode: NoteMode;
+  /** 노트 본문. `note.mode`는 언제나 {@link AiNote.mode}와 같다. */
+  readonly note: StructuredNote;
+  readonly provider: string;
+  readonly model: string;
+  readonly promptVersion: string;
+  /** ISO-8601 UTC 텍스트. */
+  readonly generatedAt: string;
 }

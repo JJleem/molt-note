@@ -17,7 +17,7 @@ use std::fmt;
 
 pub use duration::format_duration_ms;
 pub use failure::{Failure, FailureKind};
-pub use settings::Settings;
+pub use settings::{Settings, DEFAULT_AI_BASE_URL};
 
 /// 문자열 identity를 감싸는 newtype을 만든다.
 ///

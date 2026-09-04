@@ -1,0 +1,72 @@
+# Settings — provider 설정 · 연결 확인 · 모델 선택 · 로컬/외부 표시
+# Runtime이 PLAN-20260903T053705Z 승인 시점에 생성했다 (proposal P9). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-040
+status: DONE
+
+request: |-
+  src/screens/SettingsScreen.tsx에 AI provider 구역을 만든다(§5-D). 담을 것: provider 선택(현재 선택지는 로컬 Ollama와 '설정 안 함'이며, 테스트 전용 fake provider는 선택지가 아니다), 연결 대상 host/port 편집(기본값은 ADR-0008이 재확인한 값), **연결 확인 수단** — Ollama가 실행 중인지와 설치된 모델이 무엇인지 확인하고 결과를 화면에 남긴다, 확인된 목록에서 모델 선택, **모델이 하나도 없을 때의 상태**(오류가 아니라 '설치된 모델이 없다'), 연결되지 않았을 때의 상태(§13대로 무엇을 하면 되는지 안내하되 경고로 몰아붙이지 않는다), 그리고 **전송 경계의 표시** — 선택한 provider가 로컬인지 외부인지를 사용자가 알 수 있게 하고(§12 · INV-5), 전송되는 것이 transcript 텍스트이며 **오디오는 전송되지 않는다**(INV-6)는 사실을 화면에 드러낸다. 판단 로직은 기존 settingsView.ts 계열의 순수 모듈에 두고 컴포넌트는 그리기만 한다. **AI 설정 실패나 provider 부재가 다른 설정의 저장이나 화면 사용을 막지 않는다.** 순수 모듈에 대한 단위 테스트를 함께 쓰며, 실제 Ollama 없이 돈다.
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-038
+
+stop_condition:
+  gates: [build, lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 3
+
+acceptance_criteria:
+  - id: AC1
+    description: |-
+      build Gate가 통과한다.
+    verification:
+      type: gate
+      ref: build
+  - id: AC2
+    description: |-
+      lint Gate가 통과한다.
+    verification:
+      type: gate
+      ref: lint
+  - id: AC3
+    description: |-
+      test Gate가 통과한다.
+    verification:
+      type: gate
+      ref: test
+  - id: AC4
+    description: |-
+      연결 확인 수단이 존재하고, 실행 중 · 미실행 · 모델 없음 세 결과가 서로 구분되어 표현된다.
+    verification:
+      type: verifier
+      instruction: |-
+        순수 모듈의 상태 값과 테스트를 확인한다. 세 상태가 한 덩어리로 뭉쳐 있으면 FAIL이다.
+  - id: AC5
+    description: |-
+      선택한 provider가 로컬인지 외부인지가 화면에 드러나고, 오디오가 전송되지 않는다는 사실이 UI에 표현된다 (INV-5 · INV-6 · §12).
+    verification:
+      type: verifier
+      instruction: |-
+        해당 문구/값이 순수 모듈을 거쳐 화면에 도달하는지 확인한다. 하드코딩된 문자열이라도 provider의 locality 값에 따라 달라지지 않으면 지적한다.
+  - id: AC6
+    description: |-
+      AI 설정 실패나 provider 부재가 다른 설정 저장과 화면 사용을 막지 않는다 (INV-8).
+    verification:
+      type: verifier
+      instruction: |-
+        provider 확인 실패 상태에서 다른 설정 저장 경로가 동작하는 테스트를 확인한다.
+  - id: AC7
+    description: |-
+      테스트 전용 fake provider가 UI의 선택지로 노출되지 않는다.
+    verification:
+      type: verifier
+      instruction: |-
+        provider 선택지 목록을 만드는 코드를 읽는다.
+
+evidence: []
+
+failure_memo: []

@@ -1,0 +1,54 @@
+# Phase 4 결정 기록 정리와 Human Review 절차
+# Runtime이 PLAN-20260903T053705Z 승인 시점에 생성했다 (proposal P11). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-042
+status: DONE
+
+request: |-
+  문서만 바꾸는 Task다 — 소스 · 설정 · 의존성 · 테스트를 건드리지 않는다. (1) docs/ADR-0008-note-ai-provider.md를 실제 구현 결과에 맞춰 정리한다: 최종 structured note schema · 실제로 채택한 구조화 출력 수단 · 호출 주체 · context 전략 · 재생성 정책 · promptVersion 정책 · 실패 매핑이 저장소의 코드와 실제로 일치하는지 확인하고, 어긋난 곳은 **문서를 코드에 맞춘다**(코드를 고치지 않는다 — 어긋남이 설계 결함으로 보이면 문서에 사실로 남긴다). §9.2의 예시 계약에서 벗어난 부분이 있으면 그 이유가 기록되어 있는지 확인한다. (2) docs/PHASE-4-AI-NOTE-REVIEW.md를 새로 써서 운영자가 실제로 실행 중인 로컬 Ollama로 Human Review를 수행하는 절차를 확정한다 — 무엇을 준비하고(사용자가 직접 실행하는 Ollama · 모델 선택, 앱이 Ollama를 설치하거나 번들하지 않는다), 무엇을 관찰하며(실제 녹음에서 나온 노트가 읽을 가치가 있는가 · 한국어+영어 혼용 처리 · 1시간 분량 처리 시간 · Meeting과 Study 출력의 유용성 차이 · provider가 로컬인지 외부인지가 분명한가), 결과를 어디에 어떤 형식으로 남기는가. (3) 이 Phase에서 **실제 Ollama로 한 번도 호출한 적이 없다**는 사실과, A-TRANS-001(실제 Whisper 추론 미실행)이 여전히 유효하다는 사실을 UNVERIFIED로 명시한다 — 실행해 본 적 없는 결과를 꾸며내지 않는다. docs/SYSTEM-MAP.md는 고치지 않는다(Phase 최종 DONE 시 운영자가 갱신한다). commit하지 않는다.
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-041
+
+stop_condition:
+  gates: []
+  requires_verifier: true
+  max_consecutive_failures: 2
+
+acceptance_criteria:
+  - id: AC1
+    description: |-
+      ADR-0008의 결정 기록이 저장소의 실제 구현과 일치한다 — 최종 schema · 구조화 출력 수단 · 호출 주체 · 재생성 정책 · promptVersion 정책 · context 전략 · 실패 매핑.
+    verification:
+      type: verifier
+      instruction: |-
+        문서의 각 항목을 해당 소스 파일과 대조한다. 구현되지 않은 것을 구현된 것처럼 적었으면 FAIL이다.
+  - id: AC2
+    description: |-
+      docs/PHASE-4-AI-NOTE-REVIEW.md가 존재하고, 준비 · 관찰 항목 · 기록 방법이 사람이 그대로 따라 할 수 있을 만큼 구체적이다. Ollama를 앱이 설치하거나 번들하지 않는다는 전제가 명시된다.
+    verification:
+      type: verifier
+      instruction: |-
+        Goal의 Human Review 다섯 항목이 모두 절차에 들어 있는지 확인한다.
+  - id: AC3
+    description: |-
+      실제 Ollama 호출이 이 Phase에서 한 번도 일어나지 않았다는 사실과 A-TRANS-001이 UNVERIFIED로 명시되어 있고, 실행하지 않은 결과가 사실처럼 서술되지 않았다.
+    verification:
+      type: verifier
+      instruction: |-
+        문서에서 실측처럼 읽히는 수치(처리 시간 · 품질 판단 등)를 찾는다. 근거 없는 값이 있으면 FAIL이다.
+  - id: AC4
+    description: |-
+      문서 외의 파일이 변경되지 않았고 docs/SYSTEM-MAP.md도 그대로이며, 새 commit이 없다.
+    verification:
+      type: verifier
+      instruction: |-
+        변경 목록을 확인한다. 소스 · 설정 · SYSTEM-MAP 변경이나 commit이 있으면 FAIL이다.
+
+evidence: []
+
+failure_memo: []

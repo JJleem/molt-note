@@ -1,0 +1,72 @@
+# Recording Detail — AI Note 탭
+# Runtime이 PLAN-20260903T053705Z 승인 시점에 생성했다 (proposal P8). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-039
+status: DONE
+
+request: |-
+  src/screens/RecordingDetailScreen.tsx의 'AI Note' 탭을 실제로 구현해 현재의 빈 상태 placeholder를 대체한다. 판단·표시 로직은 순수 모듈(예: src/screens/aiNoteView.ts)에 두고 컴포넌트는 그리기만 한다 — src/screens/transcriptView.ts와 TranscriptTab이 이미 그 형태다. 담을 상태: mode 선택(Meeting · Study · Summary), 생성과 재생성, **structured note를 구조 그대로 렌더**(Provider가 준 Markdown 문자열을 그대로 뿌리지 않는다 — 렌더링은 Structured Note → UI renderer 한 방향으로 흐른다), provenance 표시(어떤 provider · 모델 · promptVersion · 언제 · 어떤 Transcript version에서), 아직 노트가 없는 상태, 입력이 될 Transcript가 없는 상태, 생성 중 상태, 실패 상태(무엇이 실패했는가 · 원본은 안전한가 · 다시 시도할 수 있는가를 §13대로 보이고 재시도 가능), 그리고 **provider가 설정되지 않았거나 연결되지 않은 상태 — 경고나 에러가 아니라 'AI 기능이 비활성'이라는 담담한 상태로 표현한다**(INV-8 · §13). 이 탭의 어떤 상태도 Transcript 탭과 재생을 막지 않는다. 순수 모듈에 대한 단위 테스트를 함께 쓴다.
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-038
+
+stop_condition:
+  gates: [build, lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 3
+
+acceptance_criteria:
+  - id: AC1
+    description: |-
+      build Gate가 통과한다.
+    verification:
+      type: gate
+      ref: build
+  - id: AC2
+    description: |-
+      lint Gate가 통과한다.
+    verification:
+      type: gate
+      ref: lint
+  - id: AC3
+    description: |-
+      test Gate가 통과한다.
+    verification:
+      type: gate
+      ref: test
+  - id: AC4
+    description: |-
+      세 mode를 사용자가 선택해 생성할 수 있고, 생성된 노트가 structured note의 구조를 따라 렌더된다.
+    verification:
+      type: verifier
+      instruction: |-
+        순수 모듈이 mode별 섹션 구조를 만들어 내는지, 컴포넌트가 content 문자열을 그대로 출력하지 않는지 확인한다.
+  - id: AC5
+    description: |-
+      provider 미설정/미연결이 오류가 아닌 비활성 상태로 표현되고, 그 상태에서도 Transcript 탭과 재생이 정상 동작한다 (INV-8).
+    verification:
+      type: verifier
+      instruction: |-
+        해당 상태의 view 값과 테스트를 확인한다. 실패 표현(FailureNotice 등)으로 렌더되면 FAIL이다.
+  - id: AC6
+    description: |-
+      실패 상태가 §13의 세 질문에 답하고 재시도 수단을 제공하며, provenance가 화면에 표시된다.
+    verification:
+      type: verifier
+      instruction: |-
+        failed 상태의 view 값과 재시도 경로, provenance 표시를 확인한다.
+  - id: AC7
+    description: |-
+      표시 로직이 순수 모듈에 있고 단위 테스트가 존재하며, 컴포넌트는 그리기만 한다.
+    verification:
+      type: verifier
+      instruction: |-
+        transcriptView.ts / TranscriptTab의 기존 분리 형태와 대조한다.
+
+evidence: []
+
+failure_memo: []

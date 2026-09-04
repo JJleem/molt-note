@@ -1,7 +1,28 @@
 import { useEffect, useState } from 'react';
-import { getSettings, listInputDevices, updateSettings } from '../ipc/commands';
+import { aiProviderStatus, getSettings, listInputDevices, updateSettings } from '../ipc/commands';
 import { toFailure, type Failure } from '../ipc/failure';
 import type { InputDevice } from '../ipc/types';
+import {
+  AI_BASE_URL_NOTICE,
+  AI_BASE_URL_PLACEHOLDER,
+  AI_CHECK_USES_SAVED_SETTINGS,
+  AI_NOT_CHECKED_TEXT,
+  AI_SETTINGS_UNAFFECTED_NOTICE,
+  CHECKING_AI_PROVIDER_TEXT,
+  NOTHING_LEAVES_THIS_DEVICE,
+  aiModelNotice,
+  aiModelOptions,
+  aiProviderChoices,
+  aiProviderLocality,
+  aiSettingsChanged,
+  aiSettingsSnapshot,
+  aiTransferNotice,
+  checkedAiProvider,
+  confirmedAiModels,
+  failedAiCheck,
+  type AiConnection,
+  type AiSettingsSnapshot,
+} from './aiProviderSettings';
 import {
   chosenMicrophone,
   defaultMicrophoneNotice,
@@ -17,6 +38,7 @@ import {
   loadedSettings,
   savedSettings,
   savingSettings,
+  toForm,
   toSettings,
   transcriptionNotices,
   type SettingsForm,
@@ -39,8 +61,14 @@ import {
  * 지금 전사할 수 없다는 것은 여기서 보이는 **제품 상태**이며, 그 사실 때문에 자동 전사 토글이
  * 뒤집히지 않는다 — 사용자가 켠 값은 켜진 채로 남는다 (ADR-0007 §8.2.3).
  *
- * AI Provider / Notion은 섹션 자리만 둔다 — 그 안의 기능은 Phase 4·5의 일이고,
- * secret(API key · integration token) 입력은 INV-7에 따라 다루지 않는다.
+ * AI Provider 그룹은 **고르기 · 연결 확인 · 모델 선택 · 전송 경계 표시** 넷이다 (Phase 4).
+ * 연결 확인은 사용자가 눌러야 나가며, 화면을 열자마자 서버를 찾아 나서지 않는다. 확인이
+ * 어떻게 끝나든 — 응답이 없든 모델이 없든 확인 자체가 거절되든 — **그 결과는 나머지 설정의
+ * 저장 경로에 닿지 않는다** (INV-8). AI 상태를 `SettingsView`가 아니라 별도의 state로 들고
+ * 있는 이유가 이것이며, 장치 목록 실패를 설정 읽기 실패와 섞지 않는 것과 같은 규칙이다.
+ *
+ * Notion은 섹션 자리만 둔다 — 그 안의 기능은 Phase 5의 일이고, secret(API key ·
+ * integration token) 입력은 INV-7에 따라 다루지 않는다.
  *
  * **Save는 화면 전체에 하나다.** 설정은 한 벌이고 한 번에 저장되므로, 그룹마다 버튼을 두어
  * "이 그룹만 저장된다"처럼 보이게 하지 않는다.
@@ -56,6 +84,18 @@ export function SettingsScreen() {
   /** 목록 자체를 얻지 못했다면 그 실패. 설정 읽기 실패와 섞지 않는다. */
   const [deviceFailure, setDeviceFailure] = useState<Failure | null>(null);
   const [deviceAttempt, setDeviceAttempt] = useState(0);
+  /**
+   * 연결 확인이 지금까지 말해 준 것.
+   *
+   * **`view`와 따로 있다.** 이 값이 무엇이 되든 저장 경로는 그것을 보지 않으며, 그래서
+   * provider가 응답하지 않아도 다른 설정은 그대로 저장된다 (INV-8).
+   */
+  const [connection, setConnection] = useState<AiConnection>({
+    kind: 'notChecked',
+    text: AI_NOT_CHECKED_TEXT,
+  });
+  /** 확인이 실제로 물어본 대상 — 마지막으로 저장소에서 온 AI 세 값. */
+  const [savedAi, setSavedAi] = useState<AiSettingsSnapshot | null>(null);
 
   /** 다시 읽는다. 상태를 되돌리는 것은 effect가 아니라 이 사용자 동작의 일이다. */
   const retryLoad = () => {
@@ -74,7 +114,9 @@ export function SettingsScreen() {
 
     getSettings().then(
       (settings) => {
-        if (current) setView(loadedSettings(settings));
+        if (!current) return;
+        setView(loadedSettings(settings));
+        setSavedAi(aiSettingsSnapshot(toForm(settings)));
       },
       (error: unknown) => {
         // 실패를 console에만 남기지 않는다. 화면 상태가 된다 (§13).
@@ -133,8 +175,26 @@ export function SettingsScreen() {
   const save = (form: SettingsForm) => {
     setView((state) => savingSettings(state));
     updateSettings(toSettings(form)).then(
-      (settings) => setView(savedSettings(settings)),
+      (settings) => {
+        setView(savedSettings(settings));
+        // 확인이 물어보는 대상은 저장된 값이다. 방금 저장한 것이 그 대상이 됐다.
+        setSavedAi(aiSettingsSnapshot(toForm(settings)));
+      },
       (error: unknown) => setView((state) => failedSave(state, error)),
+    );
+  };
+
+  /**
+   * 지금 그 provider가 실제로 응답하는지, 어떤 모델이 설치돼 있는지 물어본다 (요구 8).
+   *
+   * **저장된 설정에게 물어본다** — `ai_provider_status`는 저장소의 값을 읽는다. 거절되면
+   * 그것도 화면 상태가 되며, 어느 쪽이든 `view`는 건드리지 않는다 (INV-8).
+   */
+  const checkProvider = () => {
+    setConnection({ kind: 'checking', text: CHECKING_AI_PROVIDER_TEXT });
+    aiProviderStatus().then(
+      (status) => setConnection(checkedAiProvider(status)),
+      (error: unknown) => setConnection(failedAiCheck(error)),
     );
   };
 
@@ -142,6 +202,12 @@ export function SettingsScreen() {
   // 저장된 값과 지금 있는 장치를 맞춰 본다. 판단은 순수 모듈이 하고 화면은 그리기만 한다.
   const chosen = chosenMicrophone(form.defaultMicrophone);
   const microphoneNotice = defaultMicrophoneNotice(resolveDefaultMicrophone(chosen, devices));
+
+  // AI 쪽도 같다 — 로컬/외부도, 확인 결과의 갈래도, 모델 목록도 전부 순수 모듈이 정한다.
+  const providerChosen = form.aiProvider !== '';
+  const transfer = aiTransferNotice(aiProviderLocality(form.aiProvider));
+  const modelNotice = aiModelNotice(form.aiModel, connection);
+  const staleCheck = aiSettingsChanged(form, savedAi);
 
   return (
     <div className="screen">
@@ -231,7 +297,107 @@ export function SettingsScreen() {
 
       <section className="group">
         <h2 className="group__title">AI Provider</h2>
-        <p className="hint">Not available yet.</p>
+
+        <label className="field" htmlFor="ai-provider">
+          <span className="field__label">Provider</span>
+          <select
+            id="ai-provider"
+            className="field__input"
+            value={form.aiProvider}
+            onChange={(event) => edit({ aiProvider: event.currentTarget.value })}
+          >
+            {/* 저장된 값을 이 앱이 모르면 그 항목이 목록에 함께 있다 — 그래서 고른 값이
+                말없이 다른 provider로 보이지 않는다 (`aiProviderChoices`). */}
+            {aiProviderChoices(form.aiProvider).map((choice) => (
+              <option key={choice.value} value={choice.value}>
+                {choice.label}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        {/* 전송 경계 (§12 · INV-5 · INV-6). 문구는 provider의 locality 값에서 나온다. */}
+        {transfer === null ? (
+          <p className="hint">{NOTHING_LEAVES_THIS_DEVICE}</p>
+        ) : (
+          <>
+            <p className="hint">{transfer.headline}</p>
+            <p className="hint">{transfer.transcriptText}</p>
+            <p className="hint">{transfer.audioText}</p>
+          </>
+        )}
+
+        {providerChosen && (
+          <>
+            <label className="field" htmlFor="ai-base-url">
+              <span className="field__label">Address (host and port)</span>
+              <input
+                id="ai-base-url"
+                type="text"
+                className="field__input"
+                placeholder={AI_BASE_URL_PLACEHOLDER}
+                value={form.aiBaseUrl}
+                onChange={(event) => edit({ aiBaseUrl: event.currentTarget.value })}
+              />
+            </label>
+            <p className="hint">{AI_BASE_URL_NOTICE}</p>
+
+            <button
+              type="button"
+              className="action"
+              disabled={connection.kind === 'checking'}
+              onClick={checkProvider}
+            >
+              {connection.kind === 'checking' ? 'Checking…' : 'Check the AI provider'}
+            </button>
+            <p className="hint">{AI_CHECK_USES_SAVED_SETTINGS}</p>
+            {staleCheck && (
+              <p className="hint">
+                The AI settings above have changed since the last save, so this result is about the
+                saved ones.
+              </p>
+            )}
+
+            {/* 실행 중 · 모델 없음 · 미실행 · 확인 거절이 서로 다른 값으로 온다. 화면은
+                그것을 다시 뭉치지 않는다 (`AiConnection`). */}
+            <p className="hint">{connection.text}</p>
+            {connection.kind === 'notConfigured' && <p className="hint">{connection.resolution}</p>}
+            {connection.kind === 'noModels' && <p className="hint">{connection.resolution}</p>}
+            {connection.kind === 'notRunning' && (
+              <>
+                <p className="hint">{connection.resolution}</p>
+                {connection.failure !== null && (
+                  <FailureNotice failure={connection.failure} onRetry={checkProvider} />
+                )}
+              </>
+            )}
+            {connection.kind === 'checkFailed' && (
+              <FailureNotice failure={connection.failure} onRetry={checkProvider} />
+            )}
+
+            <label className="field" htmlFor="ai-model">
+              <span className="field__label">Model</span>
+              <select
+                id="ai-model"
+                className="field__input"
+                value={form.aiModel}
+                onChange={(event) => edit({ aiModel: event.currentTarget.value })}
+              >
+                {/* 목록은 확인이 돌려준 것이다. 저장된 모델이 지금 없으면 그 항목도 함께
+                    남는다 — 고른 값이 말없이 다른 모델로 바뀌지 않는다. */}
+                {aiModelOptions(form.aiModel, confirmedAiModels(connection)).map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {modelNotice !== null && <p className="hint">{modelNotice}</p>}
+          </>
+        )}
+
+        {/* AI 쪽이 어떻게 끝나든 나머지 설정은 그대로 저장된다 (INV-8). */}
+        <p className="hint">{AI_SETTINGS_UNAFFECTED_NOTICE}</p>
       </section>
 
       <section className="group">

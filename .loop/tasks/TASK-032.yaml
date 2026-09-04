@@ -1,0 +1,57 @@
+# ADR-0008 — Note AI Provider 경계 결정
+# Runtime이 PLAN-20260903T053705Z 승인 시점에 생성했다 (proposal P1). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-032
+status: DONE
+
+request: |-
+  docs/ADR-0008-note-ai-provider.md를 새로 쓴다. 이 Task는 문서만 만든다 — 소스 · 설정 · 의존성 · 테스트를 건드리지 않는다. PRODUCT-SPEC §9 · §12 · §13 · §14.5와 phase-prompt/04-ai-provider-system.md를 근거로 다음을 전부 결정하고 각각의 근거를 적는다: (a) NoteAIProvider 계약의 최종 형태와 §9.2의 예시에서 벗어난 부분의 이유(바뀌면 안 되는 것은 계약의 형태가 아니라 INV-9다), (b) 호출 주체 — Rust backend인지 frontend인지, §14.5의 CORS 사실(기본 허용 origin에 Tauri webview origin이 없다)을 근거로 판단하고 Phase 5의 Notion 호출과의 일관성도 함께 적는다, (c) 구조화 출력 수단 — Ollama의 format 파라미터(JSON Schema)를 쓸지 응답을 파싱할지와 그 근거, 그리고 어느 쪽이든 응답이 기대 schema와 다를 때의 방어 경로, (d) §9.3 · §9.5의 세 mode(Meeting · Study · Summary) structured note의 **최종 schema** — 필드 이름 · 타입 · 필수 여부까지 확정하고 ai_notes.content에 어떻게 담기는지 적는다, (e) context window 전략 — §14.5의 기본 4096 토큰과 1시간 transcript의 크기를 근거로 num_ctx 명시 · 청킹 · 절단 중 무엇을 택하는지, (f) AINote 재생성 정책 — 기존 노트를 대체할지 이력으로 남길지, 현재 저장소에 ai_notes를 UPDATE·DELETE하는 경로가 없다는 사실을 함께 적는다, (g) promptVersion 정책 — 프롬프트가 바뀌면 값이 반드시 바뀌게 만드는 방법, (h) provider 설정값을 어디에 저장하는지와 INV-7(secret을 저장하지 않으며 담을 열도 만들지 않는다), (i) Rust backend 호출을 택했다면 HTTP 클라이언트 후보와 선택 근거(공식 Rust SDK가 없다는 §14.5 사실 포함), (j) §13의 AI Provider 실패(provider 미설정 · 연결 불가 · 모델 없음 · 요청 실패 · 응답 schema 불일치)를 domain 공통 실패 타입으로 옮기는 매핑 표와 각각의 retryable 여부. §14.5에 적힌 값(기본 주소 · 모델 목록 엔드포인트 · 생성 엔드포인트 · stream 파라미터 · format 파라미터 · 헬스 체크)은 **기억이나 추측으로 쓰지 않고 도입 시점에 재확인**하며, 확인한 것과 확인하지 못한 것을 VERIFIED / UNVERIFIED로 구분해 확인 시점과 함께 적는다. Cloud provider(Claude · Gemini · Groq) adapter와 Claude Agent SDK는 이 Phase의 범위가 아니므로 계획에 넣지 않는다. docs/SYSTEM-MAP.md는 고치지 않는다. commit하지 않는다.
+
+execution:
+  role: impl
+
+stop_condition:
+  gates: []
+  requires_verifier: true
+  max_consecutive_failures: 2
+
+acceptance_criteria:
+  - id: AC1
+    description: |-
+      docs/ADR-0008-note-ai-provider.md가 존재하고 (a)~(j) 열 개 결정 항목 각각에 대해 '무엇을 정했는가'와 '왜 그렇게 정했는가'가 모두 적혀 있다.
+    verification:
+      type: verifier
+      instruction: |-
+        열 개 항목을 하나씩 대조한다. 결정이 없이 선택지만 나열된 항목, 또는 근거 없이 결론만 있는 항목이 하나라도 있으면 FAIL이다.
+  - id: AC2
+    description: |-
+      Meeting · Study · Summary 세 mode의 structured note schema가 필드 이름 · 타입 · 필수 여부까지 확정되어 있고, PRODUCT-SPEC §9.5의 출력 섹션을 모두 표현한다.
+    verification:
+      type: verifier
+      instruction: |-
+        §9.3의 예시와 §9.5의 표를 대조한다. '나중에 정한다' · '구현하며 조정' 같은 유예 표현이 schema 항목에 있으면 FAIL이다.
+  - id: AC3
+    description: |-
+      §14.5의 외부 사실 재확인 결과가 VERIFIED / UNVERIFIED로 구분되어 있고, 확인하지 못한 것을 확인된 것처럼 적지 않았다.
+    verification:
+      type: verifier
+      instruction: |-
+        확인 시점과 근거(출처)가 적혀 있는지 본다. 근거 없이 VERIFIED로 표기된 항목이 있으면 FAIL이다.
+  - id: AC4
+    description: |-
+      이 Task는 문서 외의 파일을 바꾸지 않았다 — src/ · src-tauri/src/ · Cargo.toml · package.json · tauri.conf.json · docs/SYSTEM-MAP.md에 변경이 없고, commit도 만들지 않았다.
+    verification:
+      type: verifier
+      instruction: |-
+        작업 트리의 변경 목록을 확인한다. 새 ADR 문서 외의 파일 변경이나 새 commit이 있으면 FAIL이다.
+  - id: AC5
+    description: |-
+      Cloud provider adapter 구현 · Claude Agent SDK 사용 · Ollama 번들링 · 가격/무료 티어 의존이 계획에 들어 있지 않다.
+    verification:
+      type: verifier
+      instruction: |-
+        문서가 이 Phase의 구현 범위로 위 항목을 넣었는지 본다. '향후 후보'로 언급하는 것은 허용되지만 이 Phase의 작업으로 계획하면 FAIL이다.
+
+evidence: []
+
+failure_memo: []

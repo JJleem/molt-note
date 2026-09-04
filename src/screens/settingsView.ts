@@ -43,6 +43,32 @@ export interface SettingsForm {
    * 남으며, 그 사실을 말하는 것은 `defaultMicrophone.ts`다.
    */
   readonly defaultMicrophone: string;
+  /**
+   * 고른 AI provider의 식별자. 고르지 않았으면 `NO_AI_PROVIDER`(빈 문자열)이다
+   * (docs/ADR-0008-note-ai-provider.md §11.1).
+   *
+   * `defaultMicrophone`과 같은 이유로 `null`이 아니라 빈 문자열이다 — `<select>`의 값은
+   * `null`을 담을 수 없다. 두 표현 사이의 변환은 이 모듈에만 있다.
+   *
+   * **고르지 않은 것은 오류가 아니다** (INV-8). 그 상태에서도 나머지 설정은 그대로 저장되며,
+   * 그 사실을 말하는 것은 `aiProviderSettings.ts`다.
+   */
+  readonly aiProvider: string;
+  /**
+   * provider에 연결할 주소. 비어 있으면 고르지 않은 것이며, 그때 실제로 어디에 연결하는지는
+   * **backend가 안다** (`Settings::ai_base_url_or_default`).
+   *
+   * 기본 주소를 이 화면에 옮겨 적지 않는다 — 같은 주소가 두 곳에 있으면 한 곳을 고쳤을 때
+   * 나머지가 조용히 달라진다 (`src-tauri/src/domain/settings.rs`의 `DEFAULT_AI_BASE_URL`).
+   */
+  readonly aiBaseUrl: string;
+  /**
+   * 노트를 만들 때 쓸 모델. 고르지 않았으면 빈 문자열이다.
+   *
+   * `transcriptionModel`과 같은 성질을 갖는다 — 이 모델이 지금 그 서버에 설치돼 있는지는
+   * 이 값만으로 알 수 없고, 없다고 해서 앱이 값을 지우거나 다른 모델로 바꾸지 않는다.
+   */
+  readonly aiModel: string;
 }
 
 /**
@@ -136,7 +162,19 @@ export function toSettings(form: SettingsForm): Settings {
     transcriptionModel: model === '' ? null : model,
     // 고른 키는 그대로 보낸다. 지금 없는 장치라도 **사용자가 고른 값이므로 바꾸지 않는다.**
     defaultMicrophone: chosenMicrophone(form.defaultMicrophone),
+    // AI 설정 세 값도 같은 규칙이다 — 빈 입력은 "고르지 않음"(`null`)이며 **그것뿐이다.**
+    // provider가 응답하는지도, 그 모델이 설치돼 있는지도 여기서 묻지 않고, 아니라고 짐작해
+    // 다른 값으로 바꾸지도 않는다.
+    aiProvider: chosen(form.aiProvider),
+    aiBaseUrl: chosen(form.aiBaseUrl),
+    aiModel: chosen(form.aiModel),
   };
+}
+
+/** 텍스트 입력 하나를 저장할 값으로 옮긴다. 공백뿐인 입력은 "고르지 않음"(`null`)이다. */
+function chosen(value: string): string | null {
+  const trimmed = value.trim();
+  return trimmed === '' ? null : trimmed;
 }
 
 /** 설정을 폼 값으로 옮긴다. 고르지 않은 디렉터리(`null`)는 빈 입력이다. */
@@ -147,6 +185,10 @@ export function toForm(settings: Settings): SettingsForm {
     automaticTranscription: settings.automaticTranscription,
     transcriptionModel: settings.transcriptionModel ?? '',
     defaultMicrophone: settings.defaultMicrophone ?? NO_DEFAULT_MICROPHONE,
+    // 고르지 않은 상태(`null`)는 빈 입력이다 — `recordingsDirectory`와 같은 이유다.
+    aiProvider: settings.aiProvider ?? '',
+    aiBaseUrl: settings.aiBaseUrl ?? '',
+    aiModel: settings.aiModel ?? '',
   };
 }
 

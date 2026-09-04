@@ -29,6 +29,10 @@ const DEFAULT_SETTINGS: Settings = {
   automaticTranscription: false,
   transcriptionModel: null,
   defaultMicrophone: null,
+  // provider를 고르지 않은 것이 기본이자 정상 상태다 (ADR-0008 §11.1 · INV-8).
+  aiProvider: null,
+  aiBaseUrl: null,
+  aiModel: null,
 };
 
 /** 기본값에서 몇 가지만 다른 폼 값. 테스트가 관심 있는 값만 적는다. */
@@ -66,6 +70,9 @@ describe('설정 읽기', () => {
       automaticTranscription: false,
       transcriptionModel: '',
       defaultMicrophone: '',
+      aiProvider: '',
+      aiBaseUrl: '',
+      aiModel: '',
     });
     expect(view.saving).toBe(false);
     expect(view.saved).toBe(false);
@@ -74,6 +81,7 @@ describe('설정 읽기', () => {
 
   it('저장된 값이 폼에 그대로 들어온다', () => {
     const view = ready({
+      ...DEFAULT_SETTINGS,
       recordingsDirectory: '/Users/someone/Recordings',
       automaticProcessing: true,
       automaticTranscription: true,
@@ -87,7 +95,27 @@ describe('설정 읽기', () => {
       automaticTranscription: true,
       transcriptionModel: 'ggml-base.bin',
       defaultMicrophone: '0:Studio Mic',
+      aiProvider: '',
+      aiBaseUrl: '',
+      aiModel: '',
     });
+  });
+
+  it('고치지 않은 AI 설정은 읽은 그대로 다시 나간다', () => {
+    // AI 세 값에는 입력란이 있지만(`aiProviderSettings.ts`), 손대지 않은 값이 저장하는 순간
+    // 달라지면 다른 설정을 한 번 저장한 것만으로 사용자가 고른 provider가 바뀐다.
+    const stored: Settings = {
+      ...DEFAULT_SETTINGS,
+      aiProvider: 'some-provider',
+      aiBaseUrl: 'http://127.0.0.1:9999',
+      aiModel: 'some-model',
+    };
+
+    const view = editedSettings(ready(stored), { automaticProcessing: true });
+    expect(view.kind).toBe('ready');
+    if (view.kind !== 'ready') return;
+
+    expect(toSettings(view.form)).toEqual({ ...stored, automaticProcessing: true });
   });
 
   it('설정을 읽지 못하면 화면이 실패 상태가 된다', () => {
@@ -236,6 +264,9 @@ describe('저장', () => {
       automaticTranscription: true,
       transcriptionModel: 'ggml-base.bin',
       defaultMicrophone: '0:Studio Mic',
+      aiProvider: '',
+      aiBaseUrl: '',
+      aiModel: '',
     });
     expect(view.saving).toBe(false);
     expect(view.saved).toBe(true);
@@ -282,6 +313,15 @@ describe('폼과 설정의 변환', () => {
       { ...DEFAULT_SETTINGS, automaticProcessing: true, automaticTranscription: true },
       // 지금 그 자리에 없을 수 있는 모델 값도 마찬가지다.
       { ...DEFAULT_SETTINGS, automaticTranscription: true, transcriptionModel: '없는-모델.bin' },
+      // AI 설정 세 값도 왕복에서 사라지거나 달라지지 않는다 (ADR-0008 §11.1).
+      {
+        ...DEFAULT_SETTINGS,
+        aiProvider: 'some-provider',
+        aiBaseUrl: 'http://127.0.0.1:9999',
+        aiModel: 'some-model',
+      },
+      // 지금 응답하지 않는 서버나 지워진 모델을 가리키더라도 값은 그대로 돌아온다.
+      { ...DEFAULT_SETTINGS, aiProvider: 'some-provider', aiModel: '없는-모델' },
     ] satisfies Settings[]) {
       expect(toSettings(toForm(settings))).toEqual(settings);
     }

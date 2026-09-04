@@ -1,0 +1,65 @@
+# AI Note command 경계와 frontend IPC client
+# Runtime이 PLAN-20260903T053705Z 승인 시점에 생성했다 (proposal P7). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-038
+status: DONE
+
+request: |-
+  P6의 orchestration과 P5의 provider를 frontend가 쓸 수 있도록 Tauri command와 타입 있는 client를 연다. 여는 것: (1) AI provider 상태 — 설정되었는지 · 사용 가능한지 · 사용할 수 있는 모델 목록 · **로컬인지 외부인지**(§12 · INV-5), (2) 지정한 Recording과 mode로 노트 생성/재생성 시작, (3) 진행 상태 조회, (4) 저장된 AI Note 조회. 긴 생성이 도는 동안 다른 command와 화면이 계속 응답하도록 기존 전사(commands::Transcriber)와 같은 방식으로 실행하며, 그 방식을 새로 발명하지 않는다. **provider가 설정되지 않았거나 연결되지 않은 것은 command 오류가 아니라 정상 응답값**으로 표현한다(INV-8) — 실패로 돌려주는 것은 실제로 시도했다가 실패했을 때뿐이다. payload는 domain 타입을 벤더 중립으로 직렬화하고 벤더 이름을 타입 이름에 박지 않는다. src/ipc/types.ts · commands.ts · failure.ts를 함께 갱신해 frontend가 타입 있는 경로로만 호출하게 한다. 화면 구현은 이 Task의 범위가 아니다.
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-037
+
+stop_condition:
+  gates: [build, lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 3
+
+acceptance_criteria:
+  - id: AC1
+    description: |-
+      build Gate가 통과한다.
+    verification:
+      type: gate
+      ref: build
+  - id: AC2
+    description: |-
+      lint Gate가 통과한다.
+    verification:
+      type: gate
+      ref: lint
+  - id: AC3
+    description: |-
+      test Gate가 통과한다.
+    verification:
+      type: gate
+      ref: test
+  - id: AC4
+    description: |-
+      provider 미설정 · 연결 불가가 command 실패가 아니라 정상 상태값으로 표현된다 (INV-8 · §13).
+    verification:
+      type: verifier
+      instruction: |-
+        command 반환 타입과 테스트를 확인한다. provider가 없다는 이유로 Err를 돌려주는 경로가 있으면 FAIL이다.
+  - id: AC5
+    description: |-
+      긴 생성이 UI와 IPC를 막지 않으며, 실행 방식이 기존 전사 경로와 일관된다.
+    verification:
+      type: verifier
+      instruction: |-
+        commands::Transcriber의 실행 방식과 대조한다. 생성이 command 스레드를 붙잡는 구조면 FAIL이다.
+  - id: AC6
+    description: |-
+      payload 타입과 frontend 타입에 벤더 고유 이름 · 엔드포인트 · 에러 코드가 없고, provider의 로컬/외부 구분이 frontend까지 도달한다.
+    verification:
+      type: verifier
+      instruction: |-
+        commands/payload.rs와 src/ipc/types.ts를 읽는다. 로컬/외부 구분 값이 없으면 FAIL이다 (P9가 그것을 표시해야 한다).
+
+evidence: []
+
+failure_memo: []

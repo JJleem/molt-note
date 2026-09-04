@@ -1,0 +1,141 @@
+diff --git a/src-tauri/src/domain/failure.rs b/src-tauri/src/domain/failure.rs
+index 4d75a77..c27fb98 100644
+--- a/src-tauri/src/domain/failure.rs
++++ b/src-tauri/src/domain/failure.rs
+@@ -21,10 +21,13 @@ use serde::Serialize;
+ 
+ /// 실패가 어느 종류인지.
+ ///
+-/// **지금 실제로 만들어지는 것만 있다.** AI provider·Notion의 실패 종류는 §13에 이미 적혀
+-/// 있지만, 그 기능이 존재하는 Phase가 그때 함께 추가한다 — 만들지 않은 실패의 자리를 미리
+-/// 만들어 두지 않는다 (§20.6). 전사 실패 네 종류는 **전사가 실재하는 Phase 3에서** 그 규칙대로
+-/// 추가됐다 (`crate::transcription::engine`).
++/// **지금 실제로 만들어지는 것만 있다.** Notion의 실패 종류는 §13에 이미 적혀 있지만, 그
++/// 기능이 존재하는 Phase가 그때 함께 추가한다 — 만들지 않은 실패의 자리를 미리 만들어 두지
++/// 않는다 (§20.6). 전사 실패 네 종류는 **전사가 실재하는 Phase 3에서** 그 규칙대로 추가됐고
++/// (`crate::transcription::engine`), AI provider 실패 다섯 종류는 **provider 계약이 실재하는
++/// Phase 4에서** 같은 규칙으로 추가됐다 (`crate::ai::provider`). 여섯 번째인
++/// [`Self::AiInputTooLarge`]는 그보다 늦다 — **요청 전에 크기를 판정하는 실행 순서가 실재하는
++/// 자리에서** 추가됐다 (`crate::ai::run`).
+ #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+ #[serde(rename_all = "camelCase")]
+ pub enum FailureKind {
+@@ -59,6 +62,38 @@ pub enum FailureKind {
+     TranscriptionEngineFailed,
+     /// 엔진은 끝났지만 출력이 없거나 그 출력을 전사 결과로 해석할 수 없다.
+     TranscriptionOutputUnusable,
++    /// 쓸 AI provider가 아직 골라지지 않았다 (§13 `provider 미설정` ·
++    /// `docs/ADR-0008-note-ai-provider.md` §13.1).
++    ///
++    /// **아래 다섯 AI provider 실패도 서로 다른 종류로 남는다.** 전사 실패 넷과 같은 이유다 —
++    /// 사용자가 할 수 있는 일이 전부 다르다: provider를 고르는 것 · 로컬 AI 서버를 켜는 것 ·
++    /// 모델을 받아 오는 것 · 다시 시도하는 것 · 다른 요청을 만드는 것.
++    ///
++    /// **이것은 오류로 표시할 상태가 아니다.** provider가 없는 것은 정상 상태이며 (INV-8),
++    /// 화면은 경고가 아니라 "AI 기능이 비활성"이라는 담담한 상태를 보인다. 이 실패 값은
++    /// 그 상태에서 굳이 생성을 요청했을 때의 답이다.
++    AiProviderNotConfigured,
++    /// 고른 provider에 닿지 못했다 (§13 `provider 연결 불가` — 예: 로컬 AI 서버가 실행 중이 아니다).
++    AiProviderUnreachable,
++    /// provider는 응답했지만 쓸 수 있는 모델이 없다 (§13 `모델 없음`).
++    AiModelUnavailable,
++    /// provider에게 보낸 요청이 실패했다 (§13 `요청 실패` — 비정상 상태 코드 · 타임아웃 ·
++    /// 본문을 읽지 못함).
++    AiRequestFailed,
++    /// 응답은 받았지만 기대한 노트 schema로 읽을 수 없다 (§13 `응답 schema 불일치`).
++    AiResponseUnusable,
++    /// 보낼 입력이 한 번의 생성이 쓸 수 있는 context 예산을 넘는다
++    /// (`docs/ADR-0008-note-ai-provider.md` §8.2 · §13.1의 여섯 번째).
++    ///
++    /// **요청을 보내지 않았다는 뜻이다.** 잘라서 보내면 완전해 보이지만 완전하지 않은 노트가
++    /// 남고, 사용자는 뒷부분이 통째로 빠진 것을 알 수 없다 — 조용한 절단 대신 보이는 상태로
++    /// 둔다. 다른 다섯과 종류를 나누는 이유도 같다: 이 상황에서 사용자가 할 수 있는 일은
++    /// **설정에서 context 크기를 키우거나, 더 큰 context의 모델을 고르거나, 더 짧은 녹음을
++    /// 고르는 것**이며 다른 어느 실패와도 다르다.
++    ///
++    /// **provider가 만드는 실패가 아니다.** 만드는 쪽은 요청 전에 크기를 판정하는 실행 순서이며
++    /// (`crate::ai::run`), 그래서 `crate::ai::provider::AI_PROVIDER_FAILURE_KINDS`에 없다.
++    AiInputTooLarge,
+ }
+ 
+ impl FailureKind {
+@@ -75,6 +110,12 @@ impl FailureKind {
+             Self::TranscriptionModelUnusable => "transcriptionModelUnusable",
+             Self::TranscriptionEngineFailed => "transcriptionEngineFailed",
+             Self::TranscriptionOutputUnusable => "transcriptionOutputUnusable",
++            Self::AiProviderNotConfigured => "aiProviderNotConfigured",
++            Self::AiProviderUnreachable => "aiProviderUnreachable",
++            Self::AiModelUnavailable => "aiModelUnavailable",
++            Self::AiRequestFailed => "aiRequestFailed",
++            Self::AiResponseUnusable => "aiResponseUnusable",
++            Self::AiInputTooLarge => "aiInputTooLarge",
+         }
+     }
+ }
+@@ -230,6 +271,18 @@ mod tests {
+             FailureKind::TranscriptionOutputUnusable.as_str(),
+             "transcriptionOutputUnusable"
+         );
++        assert_eq!(
++            FailureKind::AiProviderNotConfigured.as_str(),
++            "aiProviderNotConfigured"
++        );
++        assert_eq!(
++            FailureKind::AiProviderUnreachable.as_str(),
++            "aiProviderUnreachable"
++        );
++        assert_eq!(FailureKind::AiModelUnavailable.as_str(), "aiModelUnavailable");
++        assert_eq!(FailureKind::AiRequestFailed.as_str(), "aiRequestFailed");
++        assert_eq!(FailureKind::AiResponseUnusable.as_str(), "aiResponseUnusable");
++        assert_eq!(FailureKind::AiInputTooLarge.as_str(), "aiInputTooLarge");
+ 
+         // 이 문자열들은 `src/ipc/failure.ts`의 union과 1:1이다. 겹치면 화면이 두 실패를
+         // 구분하지 못한다.
+@@ -242,6 +295,12 @@ mod tests {
+             FailureKind::TranscriptionModelUnusable,
+             FailureKind::TranscriptionEngineFailed,
+             FailureKind::TranscriptionOutputUnusable,
++            FailureKind::AiProviderNotConfigured,
++            FailureKind::AiProviderUnreachable,
++            FailureKind::AiModelUnavailable,
++            FailureKind::AiRequestFailed,
++            FailureKind::AiResponseUnusable,
++            FailureKind::AiInputTooLarge,
+         ];
+         let mut seen = Vec::new();
+         for kind in kinds {
+diff --git a/src/ipc/failure.ts b/src/ipc/failure.ts
+index 1c28154..2e50a69 100644
+--- a/src/ipc/failure.ts
++++ b/src/ipc/failure.ts
+@@ -23,6 +23,17 @@
+  * `transcription*` 넷도 같은 이유로 서로 따로 있다 (§13 · Rust의 `transcription::engine`).
+  * 모델을 구해 와야 하는 것 · 다른 모델을 골라야 하는 것 · 다시 시도해 볼 수 있는 것 ·
+  * 다시 시도해도 같은 것은 사용자에게 전부 다른 상황이다.
++ *
++ * `ai*` 여섯도 마찬가지다 (§13 · Rust의 `ai::provider` · `ai::run` ·
++ * `docs/ADR-0008-note-ai-provider.md` §13.1).
++ * provider를 고르는 것 · 로컬 AI 서버를 켜는 것 · 모델을 받아 오는 것 · 다시 시도하는 것 ·
++ * 다른 요청을 만드는 것은 전부 다른 상황이다. 그중 `aiProviderNotConfigured`는 **오류로 그리는
++ * 상태가 아니다** — provider를 고르지 않은 것은 정상 상태이며 (INV-8), 화면은 AI 기능이
++ * 비활성이라는 담담한 상태를 보인다.
++ *
++ * `aiInputTooLarge`는 **요청을 보내지 않았다**는 뜻이다. 전사를 잘라서 보내는 대신 그 사실을
++ * 상태로 보이며, 사용자가 할 수 있는 일은 context 크기를 키우거나 더 짧은 녹음을 고르는
++ * 것이다 (ADR-0008 §8.2).
+  */
+ export type FailureKind =
+   | 'storage'
+@@ -33,6 +44,12 @@ export type FailureKind =
+   | 'transcriptionModelUnusable'
+   | 'transcriptionEngineFailed'
+   | 'transcriptionOutputUnusable'
++  | 'aiProviderNotConfigured'
++  | 'aiProviderUnreachable'
++  | 'aiModelUnavailable'
++  | 'aiRequestFailed'
++  | 'aiResponseUnusable'
++  | 'aiInputTooLarge'
+   | 'unexpected';
+ 
+ export interface Failure {

@@ -1,0 +1,58 @@
+ M src-tauri/Cargo.lock
+ M src-tauri/Cargo.toml
+ M src-tauri/src/commands/mod.rs
+ M src-tauri/src/commands/payload.rs
+ M src-tauri/src/db/migrations.rs
+ M src-tauri/src/db/settings.rs
+ M src-tauri/src/domain/failure.rs
+ M src-tauri/src/domain/mod.rs
+ M src-tauri/src/domain/settings.rs
+ M src-tauri/src/lib.rs
+ M src-tauri/tests/command_boundary.rs
+ M src-tauri/tests/settings_repository.rs
+ M src/App.css
+ M src/ipc/commands.ts
+ M src/ipc/failure.ts
+ M src/ipc/types.ts
+ M src/screens/RecordingDetailScreen.tsx
+ M src/screens/SettingsScreen.tsx
+ M src/screens/settingsView.test.ts
+ M src/screens/settingsView.ts
+ M tests/ipc-boundary.test.ts
+?? .loop/evidence/TASK-032/
+?? .loop/evidence/TASK-033/
+?? .loop/evidence/TASK-034/
+?? .loop/evidence/TASK-035/
+?? .loop/evidence/TASK-036/
+?? .loop/evidence/TASK-037/
+?? .loop/evidence/TASK-038/
+?? .loop/evidence/TASK-039/
+?? .loop/evidence/TASK-040/
+?? .loop/evidence/TASK-041/
+?? .loop/evidence/TASK-042/
+?? .loop/tasks/TASK-032.yaml
+?? .loop/tasks/TASK-033.yaml
+?? .loop/tasks/TASK-034.yaml
+?? .loop/tasks/TASK-035.yaml
+?? .loop/tasks/TASK-036.yaml
+?? .loop/tasks/TASK-037.yaml
+?? .loop/tasks/TASK-038.yaml
+?? .loop/tasks/TASK-039.yaml
+?? .loop/tasks/TASK-040.yaml
+?? .loop/tasks/TASK-041.yaml
+?? .loop/tasks/TASK-042.yaml
+?? docs/ADR-0008-note-ai-provider.md
+?? docs/PHASE-4-AI-NOTE-REVIEW.md
+?? src-tauri/src/ai/
+?? src-tauri/src/commands/notes.rs
+?? src-tauri/tests/ai_failure_recovery.rs
+?? src-tauri/tests/ai_note_commands.rs
+?? src-tauri/tests/ai_note_run.rs
+?? src-tauri/tests/audio_never_reaches_ai.rs
+?? src-tauri/tests/core_pipeline_without_ai.rs
+?? src-tauri/tests/ollama_adapter.rs
+?? src/screens/aiNoteView.test.ts
+?? src/screens/aiNoteView.ts
+?? src/screens/aiProviderSettings.test.ts
+?? src/screens/aiProviderSettings.ts
+?? src/screens/coreWithoutAi.test.ts

@@ -1,0 +1,11 @@
+ src-tauri/src/commands/payload.rs      |  37 +++++
+ src-tauri/src/db/migrations.rs         |  50 ++++++
+ src-tauri/src/db/settings.rs           |  33 +++-
+ src-tauri/src/domain/mod.rs            |   2 +-
+ src-tauri/src/domain/settings.rs       |  60 ++++++-
+ src-tauri/tests/command_boundary.rs    |  44 ++++++
+ src-tauri/tests/settings_repository.rs | 275 ++++++++++++++++++++++++++++++++-
+ src/ipc/types.ts                       |  28 ++++
+ src/screens/settingsView.test.ts       |  40 +++++
+ src/screens/settingsView.ts            |  22 +++
+ 10 files changed, 582 insertions(+), 9 deletions(-)

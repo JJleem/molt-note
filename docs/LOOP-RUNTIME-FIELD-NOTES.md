@@ -1991,6 +1991,209 @@ Phase 1 TASK-006, Phase 2A TASK-012에서도 같은 양상이 있었으므로 �
 ---
 
 
+## OBS-022 — PAUSE로 종결된 execution은 사람의 transition 없이 재개된다 (OBS-020과 다른 경로)
+
+**Date:** 2026-09-03 중단 · 2026-09-04 재개
+
+**Project phase / Goal:** Molt Note Phase 4 — AI Provider System + Local AI
+
+**Plan / Task / Run / Execution:**
+- PLAN-20260903T053705Z · TASK-038
+- 중단: RUN-20260903T073115Z-TASK-038 · EXEC-20260903T073115Z-TASK-038
+- 재개: RUN-20260904T005636Z-TASK-038 · EXEC-20260904T005636Z-TASK-038
+
+**Runtime stage:** Execute loop / Diagnose / 재개
+
+### What happened
+
+OBS-020과 같은 상황(운영자가 퇴근으로 중단)이었지만 **재개 경로가 달랐다.**
+
+OBS-020의 TASK-022는 Run이 **막 시작된** 상태에서 프로세스가 죽어, 다음 날 stale
+execution 마커로 남았다. 이번 TASK-038은 Worker가 끝까지 돌다 timeout으로 SIGKILL됐고,
+Runtime이 **그 자리에서 진단까지 마친 뒤** PAUSE 때문에 정지했다.
+
+```text
+EXEC-20260903T073115Z-TASK-038
+  result:      NEEDS_HUMAN
+  stop_reason: PAUSE_ACTIVE
+  attempts[0]: worker=failed · gate=null · verifier=null
+               diagnosis=TIMEOUT · action=RETRY_WITH_HINT
+  final_task_status: IN_PROGRESS
+```
+
+즉 execution이 **종결된 채로** 남았고 stale 마커가 아니었다. `status`도 STALE을 말하지
+않고 `latest execution: NEEDS_HUMAN (PAUSE_ACTIVE)`를 말했다.
+
+그래서 재개는 두 단계로 끝났다.
+
+```text
+rm .loop-local/PAUSE
+./loopctl execute TASK-038      → Attempt 2 → Gate PASS → Verifier PASS → DONE
+```
+
+**`RECOVERY_AMBIGUOUS`가 나오지 않았고 `transition TASK-038 TODO`도 필요 없었다.**
+이미 기록된 `RETRY_WITH_HINT`를 Runtime이 그대로 이어받았다.
+
+### Expected
+
+이 동작이 옳다. 그리고 **OBS-020의 결론을 좁힌다.**
+
+OBS-020은 "계획된 중단조차 사람 없이는 Plan 루프로 돌아오지 못한다"고 적었다. 이번 증거는
+그것이 **중단 시점에 달렸다**는 것을 보여준다.
+
+```text
+Run이 시작만 된 채 죽었다   → 산출물도 진단도 없다 → stale 마커 → 사람의 transition 필요
+Worker가 죽고 진단이 남았다 → RETRY_WITH_HINT 기록됨 → PAUSE 해제만으로 자동 재개
+```
+
+Runtime은 **자기가 진단을 남길 수 있었던 중단**에서는 사람 없이 돌아온다. 돌아오지
+못하는 것은 진단조차 남기지 못한 중단이다. OBS-020의 개선 후보(회수 시 판단 근거 제시)는
+여전히 유효하며, 적용 범위가 후자로 좁혀진다.
+
+### Current workaround
+
+없다. 사람이 한 일은 PAUSE 파일 삭제 하나이며, 그것이 PAUSE의 정의된 해제 방법이다
+(README §운영 표). `.loop-local/`은 `.gitignore` 대상이라 PAUSE 삭제가 subject
+fingerprint를 건드리지 않는다는 점도 이번에 확인됐다.
+
+### Impact
+
+**Low (긍정적 관측).** 비용 0, 사람 개입 1회(파일 삭제).
+
+다만 **운영자가 어느 쪽 중단인지 미리 알 수 없다는 점**은 남는다. 이번에는 `status`와
+execution report를 읽고 나서야 "transition이 필요 없는 쪽"임을 알았다. `status`가
+`NEEDS_HUMAN (PAUSE_ACTIVE)` 옆에 다음 명령을 함께 말해 주면 그 판별이 필요 없다
+(OBS-019 · OBS-020과 같은 지적).
+
+### Possible Runtime improvement
+
+- `status`의 정지 표시가 **다음 명령**을 함께 말한다 — `PAUSE_ACTIVE`이고 진단이
+  기록돼 있으면 "PAUSE를 해제하고 `execute`하면 이어진다", 진단이 없으면 OBS-020의 경로.
+- `loopctl pause` / `loopctl resume`가 CLI에 없다. 지금은 파일을 직접 만들고 지운다.
+  README는 그렇게 안내하지만 `help`에는 나오지 않아 발견성이 낮다.
+
+### Evidence
+
+```text
+.loop-local/executions/EXEC-20260903T073115Z-TASK-038/execution-report.json
+   result=NEEDS_HUMAN · stop_reason=PAUSE_ACTIVE · attempts[0].action=RETRY_WITH_HINT
+.loop-local/runs/RUN-20260903T073115Z-TASK-038/recovery/diagnosis.json
+   failure_class=TIMEOUT · subject_check.matches=true
+.loop-local/executions/EXEC-20260904T005636Z-TASK-038/execution-report.json
+   result=DONE · attempts=2 · 3m42s · $4.5558
+```
+
+### Status
+
+`OBSERVED`
+
+---
+
+## OBS-023 — timeout 초과 집행이 재현됐고(1800s 설정 / 8619s 실행), 잘린 Worker의 산출물을 shared working tree가 살렸다
+
+**Date:** 2026-09-03 ~ 2026-09-04
+
+**Project phase / Goal:** Molt Note Phase 4 — AI Provider System + Local AI
+
+**Plan / Task / Run:** PLAN-20260903T053705Z · TASK-038 · RUN-20260903T073115Z-TASK-038
+
+**Runtime stage:** Worker
+
+### What happened — 두 가지가 함께 관측됐다
+
+**(1) OBS-021이 "재현되지 않았다"고 적은 timeout 초과 집행이 재현됐다.**
+
+```text
+process.timeout_seconds : 1800
+process.duration_ms     : 8619593   (2시간 23분 39초 · 설정의 4.8배)
+process.timed_out       : true
+process.signal          : SIGKILL
+started_at              : 2026-09-03T07:31:15Z
+finished_at             : 2026-09-03T09:54:55Z
+```
+
+OBS-021은 Phase 2B에서 네 번 모두 **정확히** 900초에 SIGKILL된 것을 근거로, OBS-016의
+초과분(900s 설정 / 1428s 실행)을 "provider 장애와 얽힌 현상일 가능성"으로 정리했다.
+이번 값은 그 설명으로 덮기에는 크다.
+
+**[관측된 사실]** timeout 집행이 설정값의 4.8배 뒤에 일어났다.
+**[가능한 설명 · 미검증]** 운영자가 같은 시각에 퇴근하며 Mac을 닫았다. 프로세스가 sleep
+동안 정지했다면 벽시계 기준 경과와 timeout 타이머의 기준이 어긋난다. adapter가 남긴
+`terminal_reason: api_error` — `Can't reach the API server (ENOTFOUND)` 도 그 시각의
+네트워크 단절과 일치한다. **다만 sleep 여부를 이 Run의 산출물로 확인하지는 못했다.**
+timeout 타이머가 monotonic clock을 쓰는지 wall clock을 쓰는지도 확인하지 않았다.
+
+**(2) 잘린 Worker의 산출물이 다음 시도에서 그대로 쓰였다.**
+
+Worker는 **작업을 사실상 끝낸 상태**에서 결과 파일만 못 쓰고 죽었다.
+
+```text
+observed_changes.count : 8   (제품 코드 · 테스트 · evidence 3종)
+.loop/evidence/TASK-038/{summary,acceptance-map,gate-results}.md   ← 전부 작성됨
+gate-results.md : self-check build/lint/test 세 개 모두 exit 0 기록
+worker-result.json : 없음   ← Runtime 계약상 "산출물 없음"
+provider_cost_usd : 16.01754
+```
+
+Runtime은 이것을 **실패한 시도**로 회계했다(`worker=failed` · `gate=null` · `verifier=null`).
+그러나 파일은 shared working tree에 남았고, 다음 날 Attempt 2가 그 위에서 시작해
+**3분 42초 · $4.56**에 DONE이 됐다. 처음부터 다시 만들었다면 다시 두 시간대였을 것이다.
+
+### Expected
+
+OBS-021의 개선 후보 — "Worker가 결과 파일을 점진적으로 쓰게 한다" — 에 대한 **직접적인
+추가 근거다.** 이번 경우 잃은 것은 작업이 아니라 **작업했다는 기록 한 개**였다.
+$16.02짜리 시도가 Runtime 회계에서 통째로 실패로 남은 이유가 그것뿐이다.
+
+동시에 이것은 **shared working tree에 대한 반대 방향의 증거**이기도 하다.
+OBS-003 이후 필드 노트는 per-Task worktree isolation을 후보로 적어 왔다. 이번에는
+공유 트리가 **의도치 않은 복구 수단**으로 작동했다 — 격리된 worktree였다면 Attempt 1의
+산출물은 폐기됐을 것이다. 두 성질은 맞바꿈 관계이며, isolation을 도입한다면
+**잘린 시도의 산출물을 어떻게 넘길지**를 함께 정해야 한다.
+
+### Current workaround
+
+없다. 사람이 한 일은 재시도를 Runtime에 맡긴 것뿐이다.
+**수동으로 `worker-result.json`을 만들지 않았다** — 그것은 Runtime 판정을 위조하는 것이다.
+
+### Impact
+
+**Medium.** 이번에는 공유 트리 덕분에 손실이 $16.02의 회계상 폐기에 그쳤다.
+그러나 (a) 그 절약은 설계된 것이 아니라 부수 효과이고, (b) timeout이 설정값의 4.8배
+뒤에 걸린다면 timeout은 폭주를 끊는 안전장치로 기능하지 못한다.
+
+### Possible Runtime improvement
+
+- **결과 파일을 점진적으로 쓴다** (OBS-016 · OBS-021과 같은 후보. 근거 1건 추가).
+  최소한 Worker가 self-check를 통과한 시점에 부분 결과를 남길 수 있으면, 이번 시도는
+  실패가 아니라 검증 대기로 남았을 것이다.
+- **timeout 집행이 monotonic clock 기준인지 확인한다.** wall clock 기준이면 sleep /
+  suspend에서 이번과 같은 초과가 구조적으로 발생한다. [확인 필요 · 미검증]
+- envelope에 **timeout 초과분**을 명시적으로 기록한다. 지금은 `timeout_seconds`와
+  `duration_ms`를 사람이 비교해야 초과를 알아챈다.
+- worktree isolation을 검토할 때 **잘린 시도의 산출물 인계**를 함께 설계한다 (OBS-003 관련).
+
+### Evidence
+
+```text
+.loop-local/runs/RUN-20260903T073115Z-TASK-038/runtime-envelope.json
+   process.{timeout_seconds=1800, duration_ms=8619593, signal=SIGKILL, timed_out=true}
+   adapter_meta.terminal_reason=api_error · worker_result_valid=false
+   observed_changes.count=8 · usage.provider_cost_usd=16.01754
+.loop-local/runs/RUN-20260903T073115Z-TASK-038/stdout.log
+   "API Error: Can't reach the API server — check your internet or DNS (ENOTFOUND)"
+.loop/evidence/TASK-038/gate-results.md   (Attempt 1이 남긴 self-check 기록)
+.loop-local/executions/EXEC-20260904T005636Z-TASK-038/execution-report.json
+   Attempt 2: 3m42s · $4.5558 · Gate PASS · Verifier PASS
+```
+
+### Status
+
+`OBSERVED`
+
+---
+
+
 # Candidate Improvements
 
 실제 사용 사례가 충분히 쌓인 항목만 이 표로 승격한다.
@@ -2007,6 +2210,10 @@ Phase 1 TASK-006, Phase 2A TASK-012에서도 같은 양상이 있었으므로 �
 | CI-008 | Run 시작 시 execution 레코드 선기록 + PID/heartbeat → `status`에 RUNNING/STALE 표시 | OBS-006 | Medium | **IMPLEMENTED** (V0.1 §4 — 기존 `executions/active/` 표식을 heartbeat 기반으로) |
 | CI-009 | Verifier Context에도 Worker capability를 전달 — "실행/측정/수동확인했다"는 주장을 의심할 근거 | OBS-009 | Medium | **IMPLEMENTED** (V0.1 §3 — WITNESSED EXECUTION + `evidence_basis` 계약) |
 | CI-010 | `yaml-lite`가 double-quoted scalar의 `\"` 이스케이프를 처리하지 않는다 | V0.1 부수 발견 (fail-closed, 근거 1건) | Low | **IMPLEMENTED** (CI-010 Minimal Fix 절 — 스캐너 + 디코더, 회귀 18건) |
+| CI-011 | Worker가 결과 파일을 **점진적으로** 쓴다 (또는 self-check 통과 시점에 부분 결과를 남긴다) | OBS-016, OBS-021, **OBS-023 ($16.02 시도가 결과 파일 하나 때문에 실패로 회계됨)** | High | CANDIDATE |
+| CI-012 | timeout 집행이 monotonic clock 기준인지 확인하고, envelope에 초과분을 명시 기록 | OBS-016, **OBS-023 (1800s 설정 / 8619s 실행 · 4.8배)** | Medium | CANDIDATE |
+| CI-013 | `status`의 정지 표시가 **다음 명령**을 함께 말한다 (`PAUSE_ACTIVE` + 진단 있음 → PAUSE 해제 후 `execute`) | OBS-019, OBS-020, **OBS-022** | Medium | CANDIDATE |
+| CI-014 | `loopctl pause` / `loopctl resume`를 CLI에 노출 (현재는 파일을 직접 만들고 지우며 `help`에 없다) | OBS-022 | Low | CANDIDATE |
 
 권장 Status:
 

@@ -1,0 +1,74 @@
+TASK-041 — 이 Task가 추가한 테스트가 실제로 실행되고 통과한 기록
+Run: RUN-20260904T013137Z-TASK-041
+출처: .loop-local/self-check/gates/test/stdout.log (npm run test = vitest run && cargo test)
+Date: 2026-09-04
+
+================================================================================
+frontend (vitest run)
+================================================================================
+
+ Test Files  18 passed (18)
+      Tests  306 passed (306)
+
+추가된 파일: src/screens/coreWithoutAi.test.ts
+  (파일 수가 17 -> 18로 늘었고 전체가 통과했다)
+
+================================================================================
+Rust (cargo test --manifest-path src-tauri/Cargo.toml)
+================================================================================
+
+--- 새 통합 테스트 1: tests/core_pipeline_without_ai.rs (AC4 · INV-8) ------------
+
+running 5 tests
+test having_no_provider_is_a_normal_state_rather_than_an_error ... ok
+test a_recording_that_never_touched_ai_keeps_the_untried_ai_status ... ok
+test recording_transcription_and_reading_all_run_with_no_ai_provider_configured ... ok
+test asking_for_a_note_without_a_provider_leaves_the_recording_and_its_transcript_untouched ... ok
+test an_ai_provider_that_does_not_work_blocks_none_of_the_three_paths ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.16s
+
+--- 새 통합 테스트 2: tests/audio_never_reaches_ai.rs (AC5 · INV-6) -------------
+
+running 6 tests
+test the_request_that_reaches_a_provider_has_nowhere_to_put_audio ... ok
+test the_orchestration_never_reads_the_column_that_points_at_the_audio ... ok
+test no_product_source_in_the_ai_boundary_can_open_or_read_a_file ... ok
+test the_provider_is_handed_the_transcript_text_and_nothing_else ... ok
+test a_note_is_generated_even_when_the_audio_file_is_not_there_at_all ... ok
+test everything_that_goes_out_is_built_from_the_mode_and_the_transcript_text_alone ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+--- 새 통합 테스트 3: tests/ai_failure_recovery.rs (AC6 · INV-3 · §13) ----------
+
+running 3 tests
+test a_failure_does_not_take_away_the_note_that_was_already_there ... ok
+test every_way_a_provider_can_fail_leaves_the_recording_and_the_transcript_exactly_as_they_were ... ok
+test a_note_can_still_be_generated_after_each_of_the_three_failures ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s
+
+--- 기존 테스트도 전부 그대로 통과한다 (회귀 없음) -------------------------------
+
+lib unit tests                       277 passed
+tests/ai_note_commands.rs             14 passed
+tests/ai_note_run.rs                  17 passed
+tests/ollama_adapter.rs               12 passed
+tests/automatic_transcription.rs       7 passed
+tests/stop_persistence.rs              6 passed
+tests/transcription_run.rs            13 passed
+tests/transcription_background.rs     10 passed
+tests/domain_invariants.rs             5 passed
+tests/domain_model.rs                 16 passed
+tests/recording_repository.rs         13 passed
+tests/recording_lifecycle.rs           4 passed
+tests/recording_session.rs             5 passed
+tests/settings_repository.rs          21 passed
+tests/command_boundary.rs             17 passed
+tests/capture.rs                       9 passed
+tests/input_devices.rs                 6 passed
+tests/microphone_permission.rs         7 passed
+tests/transcription_engine.rs         10 passed
+
+failed: 0 in every binary.

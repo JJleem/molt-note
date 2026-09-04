@@ -7,13 +7,20 @@
 //! 2. **domain은 직렬화 형식을 알지 않는다.** 저장소도 AI 벤더도 알지 않는 것과 같은 이유다
 //!    (`crate::domain` 모듈 주석). 예외는 [`crate::domain::Failure`] 하나뿐이며,
 //!    그것은 §13이 정의한 사용자 대면 계약 자체다.
+//!
+//! 노트 본문 세 타입([`crate::ai::note`])도 그 예외와 같은 성질을 갖는다 — 그 필드 이름은
+//! §9.5의 **출력 섹션 이름 13개** 자체이며 (ADR-0008 §7.1), 같은 이름을 여기 다시 적으면
+//! 저장된 노트와 화면이 조용히 어긋날 수 있는 자리가 하나 늘어난다. 그 타입들에 벤더는 없다
+//! (INV-9).
 
 use serde::{Deserialize, Serialize};
 
+use crate::ai::note::{decode_content, MeetingNote, StructuredNote, StudyNote, SummaryNote};
+use crate::ai::provider::{Availability, ProviderDescriptor};
 use crate::audio::{CaptureReport, InputDevice, SessionState, SessionSummary};
 use crate::domain::{
-    Failure, ProcessingStatus, Recording, RecordingId, RecordingView, Settings, Transcript,
-    TranscriptSegment,
+    AiNote, Failure, NoteType, ProcessingStatus, Recording, RecordingId, RecordingView, Settings,
+    Transcript, TranscriptSegment,
 };
 
 /// 조회된 녹음 하나. 목록 화면과 상세 화면이 그대로 쓴다 (§5 A · C).
@@ -440,6 +447,25 @@ pub struct SettingsPayload {
     /// (`src/screens/defaultMicrophone.ts`).
     #[serde(default)]
     pub default_microphone: Option<String>,
+    /// 노트를 만들 때 쓸 AI provider의 식별자 (docs/ADR-0008-note-ai-provider.md §11.1).
+    ///
+    /// **고르지 않은 상태(`null`)가 기본이고 그것도 정상이다** — 화면은 그것을 오류가 아니라
+    /// "AI 기능이 아직 켜지지 않았다"로 그린다 (INV-8). 벤더 중립 자유 식별자이므로 이 경계는
+    /// 알려진 목록과 대조하지 않는다 (INV-9).
+    #[serde(default)]
+    pub ai_provider: Option<String>,
+    /// AI provider에 연결할 주소. 고르지 않은 상태(`null`)도 정상이며, 그때 무엇을 쓰는지는
+    /// backend가 안다 (`Settings::ai_base_url_or_default`).
+    ///
+    /// **secret이 아니다** — 어디에 연결하는지일 뿐이며, 그래서 INV-7과 충돌하지 않는다.
+    #[serde(default)]
+    pub ai_base_url: Option<String>,
+    /// 노트를 만들 때 쓸 모델 식별자. 고르지 않은 상태(`null`)도 정상이다.
+    ///
+    /// 이 모델이 지금 그 서버에 있는지는 여기서 말하지 않는다 — 서버에게 물어본 쪽이 알며,
+    /// 없다고 해서 저장된 선택이 지워지지 않는다.
+    #[serde(default)]
+    pub ai_model: Option<String>,
 }
 
 impl From<Settings> for SettingsPayload {
@@ -450,6 +476,9 @@ impl From<Settings> for SettingsPayload {
             automatic_transcription: settings.automatic_transcription,
             transcription_model: settings.transcription_model,
             default_microphone: settings.default_microphone,
+            ai_provider: settings.ai_provider,
+            ai_base_url: settings.ai_base_url,
+            ai_model: settings.ai_model,
         }
     }
 }
@@ -480,6 +509,267 @@ impl From<SettingsPayload> for Settings {
                 .default_microphone
                 .map(|key| key.trim().to_string())
                 .filter(|key| !key.is_empty()),
+            // AI 설정 세 값도 같은 규칙이다 — 공백뿐인 입력은 '고르지 않음'이며, 그것뿐이다.
+            // provider가 실재하는지, 주소가 응답하는지, 모델이 설치돼 있는지를 이 자리에서
+            // 확인하지 않고, 아니라고 짐작해서 다른 값으로 바꾸지도 않는다.
+            ai_provider: payload
+                .ai_provider
+                .map(|provider| provider.trim().to_string())
+                .filter(|provider| !provider.is_empty()),
+            ai_base_url: payload
+                .ai_base_url
+                .map(|url| url.trim().to_string())
+                .filter(|url| !url.is_empty()),
+            ai_model: payload
+                .ai_model
+                .map(|model| model.trim().to_string())
+                .filter(|model| !model.is_empty()),
         }
+    }
+}
+
+/// 고른 AI provider가 지금 어떤 상태인지 (§9.2의 `isAvailable` 자리 · INV-5 · INV-8).
+///
+/// **이 값에는 실패 채널이 없다** — 만드는 함수가 [`Result`]를 돌려주지 않는다
+/// ([`crate::commands::NoteGenerator::provider_status`]). provider를 고르지 않은 것도, 서버가
+/// 응답하지 않는 것도 오류가 아니라 **여기 있는 네 상태 중 하나**다 (INV-8 · §13). 그래서
+/// 화면은 이 값을 경고가 아니라 담담한 상태로 그릴 수 있다.
+///
+/// ```text
+/// state           providerId/Name/locality   models   failure
+/// notConfigured   null                       []       null      고르지 않았다 (정상 상태)
+/// ready           있음                       있음     null      지금 노트를 만들 수 있다
+/// noModels        있음                       []       null      응답했지만 쓸 모델이 없다
+/// unavailable     있음                       []       있음      지금 닿지 못한다
+/// ```
+///
+/// 네 상태를 하나의 boolean으로 뭉개지 않는 이유는 §13이다 — provider를 고르는 것 · 서버를
+/// 켜는 것 · 모델을 받는 것은 사용자가 할 일이 서로 다르다 (ADR-0008 §4.2 표 2행).
+///
+/// **벤더 이름이 타입에도 상태 문자열에도 없다** (INV-9). `provider_id`에 담기는 것은 provider가
+/// 스스로 말한 자유 식별자이며, 이 경계는 그 값을 알려진 목록과 대조하지 않는다.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiProviderStatusPayload {
+    /// `notConfigured · ready · noModels · unavailable` 중 하나.
+    pub state: String,
+    /// provenance에 남는 식별자. 고른 provider가 없으면 없다.
+    pub provider_id: Option<String>,
+    /// 사람이 읽는 이름. 고른 provider가 없으면 없다.
+    pub provider_name: Option<String>,
+    /// **전사가 이 기기를 떠나는가** — `local` 또는 `external` (§12 · INV-5).
+    ///
+    /// 고른 provider가 없으면 없다. 나가는 곳이 없으므로 말할 것도 없다.
+    pub locality: Option<String>,
+    /// 지금 고를 수 있는 모델들. 쓸 수 없는 상태에서는 빈 목록이다.
+    pub models: Vec<String>,
+    /// 지금 닿지 못하는 이유. **`unavailable`에서만 있다** — 그 밖의 상태는 실패가 아니다.
+    pub failure: Option<Failure>,
+}
+
+impl AiProviderStatusPayload {
+    /// 쓸 provider를 고르지 않았다. **오류가 아니라 정상 상태다** (INV-8).
+    pub(super) fn not_configured() -> Self {
+        Self {
+            state: "notConfigured".to_string(),
+            provider_id: None,
+            provider_name: None,
+            locality: None,
+            models: Vec::new(),
+            failure: None,
+        }
+    }
+
+    /// 고른 provider가 자기 자신에 대해 말한 것과, 지금 쓸 수 있는지에 대한 답을 합친다.
+    pub(super) fn describing(descriptor: ProviderDescriptor, availability: Availability) -> Self {
+        let (state, models, failure) = match availability {
+            Availability::Ready { models } => ("ready", models, None),
+            Availability::NoModels => ("noModels", Vec::new(), None),
+            Availability::Unavailable(failure) => ("unavailable", Vec::new(), Some(failure)),
+        };
+
+        Self {
+            state: state.to_string(),
+            provider_id: Some(descriptor.id),
+            provider_name: Some(descriptor.name),
+            locality: Some(descriptor.locality.as_str().to_string()),
+            models,
+            failure,
+        }
+    }
+}
+
+/// 지금 AI 노트 생성이 어떤 상태인지.
+///
+/// [`TranscriptionStatusPayload`]와 같은 자리에 있는 값이다 — **진행 중인 생성을 들고 있는 것은
+/// backend이고 화면은 그것을 물어본다** ([`crate::commands::NoteGenerator`]). 그래서 화면이 다시
+/// 그려지거나 사용자가 다른 화면에 다녀와도 여기서 같은 답이 나온다.
+///
+/// 다섯 상태는 서로 배타적이며, 상태마다 값이 있는 필드가 다르다.
+///
+/// ```text
+/// state          recordingId   mode    aiNoteId   failure
+/// idle           null          null    null       null
+/// running        있음          있음    null       null
+/// done           있음          있음    있음       null
+/// noTranscript   있음          있음    null       null
+/// failed         있음          있음    null       있음
+/// ```
+///
+/// `noTranscript`가 `failed`와 따로 있는 이유는 §7.2다 — **재료가 아직 없는 것은 실패가
+/// 아니다.** 그 경로는 아무것도 저장하지 않았고 Recording의 AI 상태도 옮기지 않았으며, 사용자가
+/// 할 일은 다시 시도하는 것이 아니라 전사를 먼저 돌리는 것이다 ([`crate::ai::run::Outcome`]).
+///
+/// **실패는 [`Failure`] 그대로 실려 온다.** §13의 여섯 AI 실패는 사용자가 할 일이 전부 다르므로
+/// 여기서 문장을 새로 만들거나 종류를 뭉개지 않는다 — provider를 고르지 않은 것도 이 자리로
+/// 온다. 사용자가 그 상태에서 굳이 생성을 요청했을 때의 답이며, **command 실패가 아니라
+/// 상태값이다** (INV-8 · ADR-0008 §13.2).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiNoteStatusPayload {
+    /// `idle · running · done · noTranscript · failed` 중 하나.
+    ///
+    /// **[`RecordingPayload::ai_status`]와 다른 값이다.** 저쪽은 녹음 하나에 저장된 후처리
+    /// 상태(§7)이고, 이쪽은 지금 이 앱이 실제로 돌리고 있는 생성 한 건이다.
+    pub state: String,
+    /// 지금 노트를 만들고 있거나 마지막으로 만든 녹음. 아무것도 하지 않았으면 없다.
+    pub recording_id: Option<String>,
+    /// 어떤 종류의 노트인가 — `meeting · study · summary` (§9.5).
+    pub mode: Option<String>,
+    /// 성공했을 때 **새로 추가된** 노트 (ADR-0008 §9.2). 이전 노트는 그대로 남는다.
+    pub ai_note_id: Option<String>,
+    /// 실패했을 때 그 실패 그대로.
+    pub failure: Option<Failure>,
+}
+
+impl AiNoteStatusPayload {
+    /// 진행 중인 생성도, 방금 끝난 생성도 없다. **오류가 아니라 정상 상태다.**
+    pub(super) fn idle() -> Self {
+        Self {
+            state: "idle".to_string(),
+            recording_id: None,
+            mode: None,
+            ai_note_id: None,
+            failure: None,
+        }
+    }
+
+    /// 지금 이 녹음의 이 mode 노트를 만들고 있다.
+    pub(super) fn running(recording_id: &str, mode: NoteType) -> Self {
+        Self {
+            state: "running".to_string(),
+            recording_id: Some(recording_id.to_string()),
+            mode: Some(mode.as_str().to_string()),
+            ..Self::idle()
+        }
+    }
+
+    /// 노트 하나가 새로 저장됐다.
+    pub(super) fn done(recording_id: &str, mode: NoteType, ai_note_id: &str) -> Self {
+        Self {
+            state: "done".to_string(),
+            ai_note_id: Some(ai_note_id.to_string()),
+            ..Self::running(recording_id, mode)
+        }
+    }
+
+    /// 입력이 될 Transcript가 아직 없다 (§7.2). **아무것도 저장하지 않았고 실패도 아니다.**
+    pub(super) fn no_transcript(recording_id: &str, mode: NoteType) -> Self {
+        Self {
+            state: "noTranscript".to_string(),
+            ..Self::running(recording_id, mode)
+        }
+    }
+
+    /// 생성이 실패했다. 오디오 · Transcript · 이미 저장된 노트는 그대로다 (INV-2 · INV-3).
+    pub(super) fn failed(recording_id: &str, mode: NoteType, failure: Failure) -> Self {
+        Self {
+            state: "failed".to_string(),
+            failure: Some(failure),
+            ..Self::running(recording_id, mode)
+        }
+    }
+}
+
+/// 노트 본문 — mode에 따라 다른 필드를 갖는 **한 값**이다 (§9.5 · ADR-0008 §7.1 · §7.3).
+///
+/// `{"mode": "meeting", "overview": ..., ...}` 모양으로 나간다. 화면은 `mode`로 갈라 읽는다.
+///
+/// **세 mode를 옵셔널 필드 하나로 합치지 않는다** — 합치면 "Meeting인데 `thingsToStudy`가 있는"
+/// 값이 타입 수준에서 가능해진다 (ADR-0008 §7.3).
+///
+/// 본문 필드 이름을 여기서 다시 적지 않고 [`crate::ai::note`]의 타입을 그대로 싣는 이유는
+/// 하나다 — 그 이름들은 **§9.5의 출력 섹션 이름 13개**이며 그것을 정한 자리는 거기 하나다
+/// (ADR-0008 §7.1). 같은 13개를 두 곳에 적으면 한쪽만 고쳐졌을 때 저장된 노트와 화면이
+/// 조용히 어긋난다. 그 타입들에는 벤더가 없다 (INV-9).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "mode", rename_all = "camelCase")]
+pub enum StructuredNotePayload {
+    Meeting(MeetingNote),
+    Study(StudyNote),
+    Summary(SummaryNote),
+}
+
+impl From<StructuredNote> for StructuredNotePayload {
+    fn from(note: StructuredNote) -> Self {
+        match note {
+            StructuredNote::Meeting(note) => Self::Meeting(note),
+            StructuredNote::Study(note) => Self::Study(note),
+            StructuredNote::Summary(note) => Self::Summary(note),
+        }
+    }
+}
+
+/// 저장된 AI 노트 하나 (§7 · §7.3). Recording Detail의 AI Note 탭이 그대로 쓴다.
+///
+/// **읽기 전용 값이다.** 이 payload를 되돌려받는 command는 없다 — 저장소가 내놓는 `ai_notes`
+/// 쓰기 경로는 추가([`crate::db::store::insert_ai_note`]) 하나뿐이고 그것을 부르는 자리는
+/// [`crate::ai::run`]뿐이므로, 화면이 이미 만들어진 노트를 고치거나 지우는 경로는 만들어질 수
+/// 없다 (ADR-0008 §9.2).
+///
+/// **저장된 문자열을 그대로 내보내지 않는다.** `ai_notes.content`의 봉투를 푸는 자리는
+/// [`decode_content`] 하나이며 (ADR-0008 §7.5), 화면은 봉투도 schema 버전도 알지 않는다.
+///
+/// provenance 네 값은 §7.3이 요구하는 것 전부다 — 어느 Transcript version에서 · 어떤
+/// provider가 · 어떤 모델로 · 어떤 프롬프트 버전으로 만들었는가. `provider`는 **벤더 중립
+/// 자유 식별자**이며 (INV-9), 이 경계는 그 값을 알려진 목록과 대조하지 않는다.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiNotePayload {
+    pub id: String,
+    pub recording_id: String,
+    /// **어떤 Transcript version을 입력으로 썼는가** (§7.3). provenance의 일부다.
+    pub transcript_id: String,
+    /// `meeting · study · summary` 중 하나. 저장된 행의 종류 그대로다.
+    pub mode: String,
+    /// 노트 본문. 봉투 안의 `mode`와 [`Self::mode`]가 어긋난 행은 여기까지 오지 못한다 —
+    /// [`decode_content`]가 그것을 먼저 거절한다.
+    pub note: StructuredNotePayload,
+    pub provider: String,
+    pub model: String,
+    pub prompt_version: String,
+    pub generated_at: String,
+}
+
+impl AiNotePayload {
+    /// 저장된 노트 하나를 화면이 읽을 수 있는 모양으로 옮긴다.
+    ///
+    /// 봉투를 읽지 못하면 실패다 — **그 실패는 AI 실패가 아니라 저장소 실패이며**, 행은
+    /// 건드리지 않는다 (`decode_content`). 읽을 수 없는 노트를 빈 값으로 채워 정상인 척하지
+    /// 않는다.
+    pub(super) fn decoded(note: AiNote) -> Result<Self, Failure> {
+        let content = decode_content(&note.content, note.note_type)?;
+
+        Ok(Self {
+            id: note.id.as_str().to_string(),
+            recording_id: note.recording_id.as_str().to_string(),
+            transcript_id: note.transcript_id.as_str().to_string(),
+            mode: note.note_type.as_str().to_string(),
+            note: content.into(),
+            provider: note.provider,
+            model: note.model,
+            prompt_version: note.prompt_version,
+            generated_at: note.generated_at,
+        })
     }
 }

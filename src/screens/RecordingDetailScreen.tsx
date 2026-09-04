@@ -1,13 +1,33 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  aiNoteStatus,
+  aiProviderStatus,
   getRecording,
   getTranscript,
+  listAiNotes,
   listMissingAudio,
   recordingAudioSource,
+  startAiNote,
   startTranscription,
   transcriptionStatus,
 } from '../ipc/commands';
-import type { Recording, Transcript, TranscriptionStatus } from '../ipc/types';
+import type {
+  AiNote,
+  AiNoteStatus,
+  AiProviderStatus,
+  NoteMode,
+  Recording,
+  Transcript,
+  TranscriptionStatus,
+} from '../ipc/types';
+import {
+  aiNoteTab,
+  aiNoteTrouble,
+  type AiNoteTabView,
+  type AiNoteTrouble,
+  type NoteSection,
+  type NoteView,
+} from './aiNoteView';
 import { FailureNotice } from './FailureNotice';
 import {
   LOADING_RECORDING_DETAIL,
@@ -30,11 +50,8 @@ import type { ScreenProps } from './types';
 const TABS = ['AI Note', 'Transcript', 'Recording'] as const;
 type Tab = (typeof TABS)[number];
 
-const TAB_EMPTY_STATE: Record<Tab, string> = {
-  'AI Note': 'No AI note yet.',
-  Transcript: 'No transcript yet.',
-  Recording: 'No audio file yet.',
-};
+/** 레코드는 있는데 파일이 없을 때 Recording 탭이 말하는 것. */
+const NO_AUDIO_TEXT = 'No audio file yet.';
 
 /**
  * 전사가 도는 동안 상태를 다시 물어보는 간격(밀리초).
@@ -44,6 +61,14 @@ const TAB_EMPTY_STATE: Record<Tab, string> = {
  * 때문이다 — 바뀌는 것은 상태 하나뿐이다.
  */
 const TRANSCRIPTION_REFRESH_MS = 1_000;
+
+/**
+ * 노트를 만드는 동안 상태를 다시 물어보는 간격(밀리초).
+ *
+ * 전사보다 느리게 물어본다 — 로컬 모델이 노트 하나를 쓰는 데 걸리는 시간은 초 단위가 아니고
+ * (ADR-0008 §16.2), 바뀌는 것은 상태 하나뿐이기 때문이다.
+ */
+const AI_NOTE_REFRESH_MS = 2_000;
 
 /**
  * Recording Detail 화면 (§5.C).
@@ -84,10 +109,25 @@ export function RecordingDetailScreen({ route, goBack }: ScreenProps) {
   /** 다시 읽은 횟수. 늘어나면 다시 읽는다. */
   const [attempt, setAttempt] = useState(0);
 
+  /** 고른 AI provider의 지금 상태. 아직 물어보지 못했으면 `null`이다 (INV-8). */
+  const [aiProvider, setAiProvider] = useState<AiProviderStatus | null>(null);
+  /** current Transcript에서 만들어진 노트 전부. 아직 읽지 못했으면 `null`이다. */
+  const [aiNotes, setAiNotes] = useState<readonly AiNote[] | null>(null);
+  /** backend가 마지막으로 알려준 노트 생성 상태. 아직 물어보지 못했으면 `null`이다. */
+  const [aiLive, setAiLive] = useState<AiNoteStatus | null>(null);
+  /** 사용자가 고른 mode (§9.5). 고르는 것은 화면의 일이고 만드는 것은 backend의 일이다. */
+  const [noteMode, setNoteMode] = useState<NoteMode>('meeting');
+  /** 거절된 AI 관련 요청 하나. 노트 생성 자체의 실패와 다른 자리에 놓인다 (§13). */
+  const [aiTrouble, setAiTrouble] = useState<AiNoteTrouble | null>(null);
+  /** provider 상태를 다시 물어본 횟수. 늘어나면 다시 물어본다. */
+  const [providerAttempt, setProviderAttempt] = useState(0);
+
   const recordingId = route.screen === 'recording-detail' ? route.recordingId : null;
 
   /** 마지막으로 본 전사 상태. 전사가 **끝나는 순간**을 알아보는 데 쓴다. */
   const lastLiveState = useRef<TranscriptionStatus['state'] | null>(null);
+  /** 마지막으로 본 노트 생성 상태. 생성이 **끝나는 순간**을 알아보는 데 쓴다. */
+  const lastAiState = useRef<AiNoteStatus['state'] | null>(null);
 
   /** 저장된 값을 다시 읽는다. 화면을 로딩으로 되돌리지 않는다 — 보고 있던 것이 사라지지 않게. */
   const reload = useCallback(() => setAttempt((count) => count + 1), []);
@@ -164,6 +204,80 @@ export function RecordingDetailScreen({ route, goBack }: ScreenProps) {
     refreshTranscription();
   }, [refreshTranscription]);
 
+  /**
+   * 고른 AI provider가 지금 어떤 상태인지 물어본다 (INV-8).
+   *
+   * **이 조회의 실패도 화면의 다른 부분을 막지 않는다.** 실패는 AI Note 탭 안의 알림 하나가
+   * 되고, 녹음 · 재생 · Transcript 탭은 그대로 동작한다 — 그것이 이 Phase의 성공 기준 2다.
+   */
+  useEffect(() => {
+    let current = true;
+    aiProviderStatus().then(
+      (next) => {
+        if (current) setAiProvider(next);
+      },
+      (error: unknown) => {
+        if (current) setAiTrouble(aiNoteTrouble('provider', error));
+      },
+    );
+    return () => {
+      current = false;
+    };
+  }, [providerAttempt]);
+
+  /**
+   * current Transcript에서 만들어진 노트를 읽는다 (§7.2 · ADR-0008 §9.2).
+   *
+   * **레코드를 읽는 경로와 갈라 두었다.** 노트를 읽지 못하는 것이 녹음 상세를 못 읽는 것으로
+   * 번지면 AI 하나 때문에 재생과 Transcript가 함께 막힌다 (INV-8).
+   */
+  const noteTranscriptId = record?.currentTranscriptId ?? null;
+  useEffect(() => {
+    // 가리키는 Transcript가 없으면 읽을 것도 없다. 그 사실은 상태로 만들지 않고 아래에서
+    // 그대로 읽는다 — 없는 것을 "빈 목록을 읽어 왔다"로 저장하면 두 사실이 섞인다.
+    if (noteTranscriptId === null) {
+      return;
+    }
+    let current = true;
+    listAiNotes(noteTranscriptId).then(
+      (next) => {
+        if (current) setAiNotes(next);
+      },
+      (error: unknown) => {
+        if (current) setAiTrouble(aiNoteTrouble('notes', error));
+      },
+    );
+    return () => {
+      current = false;
+    };
+  }, [noteTranscriptId, attempt]);
+
+  /**
+   * 지금 노트 생성이 어떤 상태인지 backend에 물어본다.
+   *
+   * 전사와 같은 규약이다 — 화면이 상태를 만들어 내지 않는다. 생성이 끝난 것을 본 순간에는
+   * 저장된 값을 다시 읽는다: 그때 비로소 새 노트와 `aiStatus`가 저장돼 있기 때문이다.
+   */
+  const refreshAiNote = useCallback(() => {
+    aiNoteStatus().then(
+      (next) => {
+        setAiLive(next);
+        const finished =
+          next.state === 'done' || next.state === 'failed' || next.state === 'noTranscript';
+        if (finished && lastAiState.current === 'running' && next.recordingId === recordingId) {
+          reload();
+        }
+        lastAiState.current = next.state;
+      },
+      (error: unknown) => setAiTrouble(aiNoteTrouble('status', error)),
+    );
+  }, [recordingId, reload]);
+
+  // 화면을 열 때 한 번 물어본다 — 이 화면에 오기 전에 걸어 둔 생성이 돌고 있을 수 있다.
+  useEffect(() => {
+    refreshAiNote();
+  }, [refreshAiNote]);
+
   // 레코드를 아직 읽지 못한 것은 "전사가 없다"가 아니다 — 그 둘을 접지 않는다.
   const transcriptView =
     record === null ? LOADING_TRANSCRIPT_TAB : transcriptTab(record, currentTranscript, live);
@@ -178,6 +292,29 @@ export function RecordingDetailScreen({ route, goBack }: ScreenProps) {
     const timer = setInterval(refreshTranscription, TRANSCRIPTION_REFRESH_MS);
     return () => clearInterval(timer);
   }, [transcribing, refreshTranscription]);
+
+  // 어느 상태가 되든 이 탭은 재생과 Transcript 탭을 막지 않는다 (INV-8). 판단은 전부
+  // aiNoteTab에 있고 여기에는 없다.
+  const aiView = aiNoteTab({
+    recording: record,
+    transcript: currentTranscript,
+    // 가리키는 Transcript가 없으면 노트도 없다 (§7.2) — 읽지 못한 것과 다른 사실이다.
+    notes: noteTranscriptId === null ? [] : aiNotes,
+    provider: aiProvider,
+    live: aiLive,
+    mode: noteMode,
+  });
+  const generatingNote = aiView.body.kind === 'generating';
+
+  useEffect(() => {
+    // 노트를 만드는 동안에만 되풀이해 물어본다. 상태 조회는 생성을 기다리지 않으므로
+    // (`NoteGenerator::status`) 이 되풀이가 화면을 멎게 하지 않는다.
+    if (!generatingNote) {
+      return;
+    }
+    const timer = setInterval(refreshAiNote, AI_NOTE_REFRESH_MS);
+    return () => clearInterval(timer);
+  }, [generatingNote, refreshAiNote]);
 
   /**
    * 이 화면에서 전사를 시작한다 — 처음이든 실패한 뒤든 같은 동작이다 (요구 2 · 7).
@@ -194,6 +331,30 @@ export function RecordingDetailScreen({ route, goBack }: ScreenProps) {
       },
       (error: unknown) => setTrouble(transcriptTrouble('start', error)),
     );
+  };
+
+  /**
+   * 이 화면에서 노트를 만든다 — 처음이든, 다시 만드는 것이든, 실패한 뒤든 같은 동작이다
+   * (요구 12 · ADR-0008 §9.2). 다시 만들어도 이전 노트는 지워지지 않고 하나 더 생긴다.
+   *
+   * 돌아오는 것은 접수 사실이지 노트가 아니다. 거절되면 그 사실이 화면에 남는다 —
+   * 조용히 사라지지 않는다.
+   */
+  const beginAiNote = (id: string, mode: NoteMode) => {
+    setAiTrouble(null);
+    startAiNote(id, mode).then(
+      (next) => {
+        setAiLive(next);
+        lastAiState.current = next.state;
+      },
+      (error: unknown) => setAiTrouble(aiNoteTrouble('start', error)),
+    );
+  };
+
+  /** provider 상태를 다시 물어본다. **실패의 재시도가 아니라 확인이다** (INV-8). */
+  const recheckProvider = () => {
+    setAiTrouble(null);
+    setProviderAttempt((count) => count + 1);
   };
 
   // 대상 recording 없이 이 화면에 도달하는 것도 정상 상태다.
@@ -289,11 +450,19 @@ export function RecordingDetailScreen({ route, goBack }: ScreenProps) {
         <p className="hint">
           {view.kind === 'playable'
             ? `${view.audioFormat} · ${recording.durationLabel}`
-            : TAB_EMPTY_STATE.Recording}
+            : NO_AUDIO_TEXT}
         </p>
       )}
 
-      {tab === 'AI Note' && <p className="empty">{TAB_EMPTY_STATE['AI Note']}</p>}
+      {tab === 'AI Note' && (
+        <AiNoteTab
+          tab={aiView}
+          trouble={aiTrouble}
+          onMode={setNoteMode}
+          onGenerate={beginAiNote}
+          onRecheck={recheckProvider}
+        />
+      )}
     </div>
   );
 }
@@ -374,6 +543,187 @@ function TranscriptTab({
           <TranscriptLines lines={tab.kept} />
         </>
       )}
+    </section>
+  );
+}
+
+/**
+ * AI Note 탭 (§5 C · §9 · `phase-prompt/04` 요구 4 · 12 · 14 · 15).
+ *
+ * 일곱 상태가 서로 다른 모습을 갖는다. 어느 상태인지 정하는 규칙은 여기 없고
+ * {@link aiNoteTab}에 있다 — 이 컴포넌트는 그리기만 한다.
+ *
+ * **AI가 꺼져 있는 상태를 {@link FailureNotice}로 그리지 않는다** (INV-8 · §13). 그 자리에는
+ * `role="alert"`도 없고 `Failure`도 없다 — 담담한 사실 몇 줄과, 다시 확인해 볼 수단뿐이다.
+ */
+function AiNoteTab({
+  tab,
+  trouble,
+  onMode,
+  onGenerate,
+  onRecheck,
+}: {
+  tab: AiNoteTabView;
+  trouble: AiNoteTrouble | null;
+  onMode: (mode: NoteMode) => void;
+  onGenerate: (recordingId: string, mode: NoteMode) => void;
+  onRecheck: () => void;
+}) {
+  const { body } = tab;
+
+  return (
+    <section className="note">
+      {/* 요청이 거절된 사실은 노트 상태를 덮지 않고 그 옆에 남는다 (§13). */}
+      {trouble !== null && <FailureNotice failure={trouble.failure} headline={trouble.headline} />}
+
+      {/* 무엇을 만들 것인가 (§9.5). 지금 바꿀 수 있는지는 화면이 아니라 값이 말한다. */}
+      <div className="note__modes" role="group" aria-label="Note mode">
+        {tab.modes.map((choice) => (
+          <button
+            key={choice.mode}
+            type="button"
+            className={choice.selected ? 'note__mode note__mode--active' : 'note__mode'}
+            aria-pressed={choice.selected}
+            disabled={!tab.modeSelectable}
+            title={choice.sections}
+            onClick={() => onMode(choice.mode)}
+          >
+            {choice.label}
+          </button>
+        ))}
+      </div>
+
+      {/* 전사 텍스트가 이 기기를 떠나는가 (§12 · INV-5). audio는 어느 쪽이든 나가지 않는다. */}
+      {tab.provider !== null && <p className="hint">{tab.provider.label}</p>}
+
+      {body.kind === 'loading' && <p className="hint">Loading AI note…</p>}
+
+      {body.kind === 'disabled' && (
+        // 경고가 아니다. AI 기능이 비활성이라는 사실을 담담히 알린다 (INV-8 · §13).
+        <div className="note__off" role="status">
+          <p className="empty">{body.notice.headline}</p>
+          <p className="hint">{body.notice.text}</p>
+          <p className="hint">{body.notice.resolution}</p>
+          {/* 이 상태가 막지 않는 것 — 재생도 Transcript도 그대로다. */}
+          <p className="hint">{body.notice.unaffectedNotice}</p>
+          {body.notice.recheck !== null && (
+            <button type="button" className="action" onClick={onRecheck}>
+              {body.notice.recheck.label}
+            </button>
+          )}
+        </div>
+      )}
+
+      {body.kind === 'noTranscript' && (
+        // 재료가 아직 없는 것도 실패가 아니다 (§7.2).
+        <div role="status">
+          <p className="empty">{body.text}</p>
+          <p className="hint">{body.hint}</p>
+        </div>
+      )}
+
+      {body.kind === 'none' && (
+        <>
+          <p className="empty">{body.text}</p>
+          <button
+            type="button"
+            className="action"
+            onClick={() => onGenerate(body.generate.recordingId, body.generate.mode)}
+          >
+            {body.generate.label}
+          </button>
+        </>
+      )}
+
+      {body.kind === 'generating' && (
+        <>
+          <p className="hint" aria-live="polite">
+            {body.text}
+          </p>
+          {/* 새 생성이 도는 동안에도 이미 있던 노트는 그대로 보인다 (ADR-0008 §9.2 · INV-2). */}
+          {body.kept !== null && <NoteDocument note={body.kept} />}
+        </>
+      )}
+
+      {body.kind === 'ready' && (
+        <>
+          <NoteDocument note={body.note} />
+          {/* 다시 만들어도 지금 보고 있는 노트는 지워지지 않는다 (요구 12). */}
+          <button
+            type="button"
+            className="action"
+            onClick={() => onGenerate(body.regenerate.recordingId, body.regenerate.mode)}
+          >
+            {body.regenerate.label}
+          </button>
+        </>
+      )}
+
+      {body.kind === 'failed' && (
+        <>
+          {/* 무엇이 실패했는지 · 원본은 안전한지 · 다시 시도할 수 있는지 (§13). */}
+          {body.failure !== null && (
+            <FailureNotice failure={body.failure} headline={body.headline} />
+          )}
+          {body.failure === null && <p className="failure__headline">{body.headline}</p>}
+          {/* 녹음도 Transcript도 기존 노트도 그대로다 (INV-1 · INV-2 · INV-3). */}
+          <p className="hint">{body.preservedNotice}</p>
+          {/* 모델이 없어서 실패한 경우처럼 먼저 할 일이 다른 갈래가 있다. */}
+          {body.resolution !== null && <p className="hint">{body.resolution}</p>}
+          <button
+            type="button"
+            className="action"
+            onClick={() => onGenerate(body.retry.recordingId, body.retry.mode)}
+          >
+            {body.retry.label}
+          </button>
+          {body.kept !== null && <NoteDocument note={body.kept} />}
+        </>
+      )}
+    </section>
+  );
+}
+
+/**
+ * 노트 하나를 **구조 그대로** 그린다 (§9.3 · INV-9).
+ *
+ * 여기에 Markdown도, provider가 준 문자열도 없다. 그리는 것은 {@link NoteSection}의 목록이며
+ * 그 목록을 만드는 규칙은 `aiNoteView.ts`에 있다 — 이 컴포넌트는 문단과 항목을 놓기만 한다.
+ * 같은 구조를 Phase 5의 Markdown · Notion renderer가 다시 소비한다.
+ */
+function NoteDocument({ note }: { note: NoteView }) {
+  return (
+    <article className="note__document">
+      {note.sections.map((section) => (
+        <NoteSectionBlock key={section.title} section={section} />
+      ))}
+      {/* 어떤 provider · 모델 · promptVersion으로, 언제, 어떤 Transcript version에서 (§7.3). */}
+      <p className="note__provenance">
+        {note.modeLabel} · {note.provenance.label}
+      </p>
+    </article>
+  );
+}
+
+/** 섹션 하나. 문단과 항목은 다른 모양으로 놓인다 (§9.5). */
+function NoteSectionBlock({ section }: { section: NoteSection }) {
+  return (
+    <section className="note__section">
+      <h3 className="note__section-title">{section.title}</h3>
+      {section.kind === 'text' && section.text !== null && (
+        <p className="note__text">{section.text}</p>
+      )}
+      {section.kind === 'list' && section.items.length > 0 && (
+        <ul className="note__items">
+          {section.items.map((item, index) => (
+            <li key={`${section.title}-${index}`} className="note__item">
+              {item}
+            </li>
+          ))}
+        </ul>
+      )}
+      {/* 비어 있는 것은 실제 결과다. 오류로 그리지 않는다 (ADR-0008 §7.3). */}
+      {section.emptyText !== null && <p className="hint">{section.emptyText}</p>}
     </section>
   );
 }

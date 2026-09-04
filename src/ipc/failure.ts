@@ -23,6 +23,17 @@
  * `transcription*` 넷도 같은 이유로 서로 따로 있다 (§13 · Rust의 `transcription::engine`).
  * 모델을 구해 와야 하는 것 · 다른 모델을 골라야 하는 것 · 다시 시도해 볼 수 있는 것 ·
  * 다시 시도해도 같은 것은 사용자에게 전부 다른 상황이다.
+ *
+ * `ai*` 여섯도 마찬가지다 (§13 · Rust의 `ai::provider` · `ai::run` ·
+ * `docs/ADR-0008-note-ai-provider.md` §13.1).
+ * provider를 고르는 것 · 로컬 AI 서버를 켜는 것 · 모델을 받아 오는 것 · 다시 시도하는 것 ·
+ * 다른 요청을 만드는 것은 전부 다른 상황이다. 그중 `aiProviderNotConfigured`는 **오류로 그리는
+ * 상태가 아니다** — provider를 고르지 않은 것은 정상 상태이며 (INV-8), 화면은 AI 기능이
+ * 비활성이라는 담담한 상태를 보인다.
+ *
+ * `aiInputTooLarge`는 **요청을 보내지 않았다**는 뜻이다. 전사를 잘라서 보내는 대신 그 사실을
+ * 상태로 보이며, 사용자가 할 수 있는 일은 context 크기를 키우거나 더 짧은 녹음을 고르는
+ * 것이다 (ADR-0008 §8.2).
  */
 export type FailureKind =
   | 'storage'
@@ -33,6 +44,12 @@ export type FailureKind =
   | 'transcriptionModelUnusable'
   | 'transcriptionEngineFailed'
   | 'transcriptionOutputUnusable'
+  | 'aiProviderNotConfigured'
+  | 'aiProviderUnreachable'
+  | 'aiModelUnavailable'
+  | 'aiRequestFailed'
+  | 'aiResponseUnusable'
+  | 'aiInputTooLarge'
   | 'unexpected';
 
 export interface Failure {

@@ -1,0 +1,80 @@
+# AI Note 생성 orchestration — provenance와 원본 불변
+# Runtime이 PLAN-20260903T053705Z 승인 시점에 생성했다 (proposal P6). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-037
+status: DONE
+
+request: |-
+  Recording 하나에 대해 AI 노트를 만드는 실행 순서를 만든다(예: src-tauri/src/ai/run.rs — transcription::run이 전사에 대해 하는 역할과 같은 자리다). 흐름: Recording 레코드 → §7.2의 currentTranscriptId가 가리키는 Transcript를 기본 입력으로 읽기 → P2의 프롬프트와 schema 준비 → provider 호출 → structured note를 content로 직렬화 → store::insert_ai_note. provenance를 §7 · §7.3대로 전부 채운다: recordingId · **transcriptId(실제로 입력에 쓴 Transcript)** · type · provider · model · promptVersion · generatedAt. Recording의 ai_status를 pending → running → done / failed로 옮기되 **AI 상태 필드 외의 recording metadata는 바꾸지 않는다**(updated_at 갱신 여부는 기존 전사 경로의 규약을 따른다). 재생성은 ADR-0008이 정한 정책대로 구현한다. 실패 경로는 transcripts · transcript_segments · 오디오 파일 · recordings의 AI 상태 외 필드를 어떤 경우에도 건드리지 않는다(INV-2 · INV-3). currentTranscriptId가 없는 Recording은 오류가 아니라 '아직 입력이 없다'는 상태로 다룬다. provider를 만들어 넘기는 것은 부르는 쪽의 일이며, 이 모듈은 provider 계약만 알고 어떤 벤더인지 알지 않는다. 테스트는 fake provider와 fixture Transcript로만 돈다 — 실제 Whisper 추론 결과도 실제 Ollama 응답도 쓰지 않는다.
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-034
+  - TASK-036
+
+stop_condition:
+  gates: [build, lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 3
+
+acceptance_criteria:
+  - id: AC1
+    description: |-
+      build Gate가 통과한다.
+    verification:
+      type: gate
+      ref: build
+  - id: AC2
+    description: |-
+      lint Gate가 통과한다.
+    verification:
+      type: gate
+      ref: lint
+  - id: AC3
+    description: |-
+      test Gate가 통과한다.
+    verification:
+      type: gate
+      ref: test
+  - id: AC4
+    description: |-
+      AI Note 생성 전후로 Transcript가 바이트 단위로 동일하다는 것이 테스트로 확인되고, Transcript가 여럿인 Recording에서도 어느 Transcript도 변경되지 않는다 (§7.1 · INV-2).
+    verification:
+      type: verifier
+      instruction: |-
+        생성 전후의 transcripts와 transcript_segments 전체를 비교하는 테스트가 있는지, Transcript가 둘 이상인 경우를 포함하는지 확인한다.
+  - id: AC5
+    description: |-
+      서로 다른 Transcript에서 생성된 AI Note가 transcriptId로 구분되고, 기본 입력이 currentTranscriptId가 가리키는 Transcript임이 테스트로 확인된다 (§7.2 · §7.3).
+    verification:
+      type: verifier
+      instruction: |-
+        두 Transcript에서 각각 노트를 만들어 transcriptId가 다르게 저장되는 테스트를 확인한다.
+  - id: AC6
+    description: |-
+      provider 실패(연결 불가 · 모델 없음 · schema 불일치) 시 Transcript · 오디오 파일 · Recording의 AI 상태 외 필드가 온전하고, 실패가 사용자에게 보이는 상태로 남으며 재시도 가능하다 (INV-3 · §13).
+    verification:
+      type: verifier
+      instruction: |-
+        각 실패 종류별 테스트를 확인한다. 실패가 console 로그로만 처리되고 상태로 남지 않으면 FAIL이다.
+  - id: AC7
+    description: |-
+      provenance 네 값과 transcriptId가 실제로 저장되고, promptVersion이 P2의 프롬프트 버전과 일치한다.
+    verification:
+      type: verifier
+      instruction: |-
+        저장된 행을 읽어 확인하는 테스트가 있는지 본다. 상수를 그대로 단언하기만 하고 프롬프트와의 연결이 없으면 지적한다.
+  - id: AC8
+    description: |-
+      재생성이 ADR-0008의 정책대로 동작하고, 재생성이 Transcript와 오디오를 훼손하지 않는다.
+    verification:
+      type: verifier
+      instruction: |-
+        ADR-0008 §(f)의 정책과 구현·테스트를 대조한다. 문서와 구현이 다르면 FAIL이다.
+
+evidence: []
+
+failure_memo: []

@@ -1,0 +1,23 @@
+TASK-041 — Gate self-check (advisory; Runtime reruns gates independently)
+Run: RUN-20260904T013137Z-TASK-041
+Command: node tools/loop-runtime/loopctl.mjs self-check build lint test
+Date: 2026-09-04
+
+Self-check (advisory — the runtime reruns gates independently after the worker finishes)
+Gates: build, lint, test
+
+[build] npm run build          -> PASS  exit=0
+[lint]  npm run lint           -> PASS  exit=0
+[test]  npm run test           -> PASS  exit=0
+
+Self-check: all gates passed
+
+Gate commands (from .loop/project.yaml):
+  build = npm run build   (tsc && vite build)
+  lint  = npm run lint    (eslint . && cargo clippy --all-targets -- -D warnings)
+  test  = npm run test    (vitest run && cargo test)
+
+Raw artifacts produced by the self-check entrypoint (advisory, Runtime-owned):
+  .loop-local/self-check/gates/build/{stdout,stderr}.log
+  .loop-local/self-check/gates/lint/{stdout,stderr}.log
+  .loop-local/self-check/gates/test/{stdout,stderr}.log

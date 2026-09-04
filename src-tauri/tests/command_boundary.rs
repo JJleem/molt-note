@@ -107,6 +107,9 @@ fn every_command_returns_the_initialization_failure_rather_than_pretending_to_wo
             automatic_transcription: false,
             transcription_model: None,
             default_microphone: None,
+            ai_provider: None,
+            ai_base_url: None,
+            ai_model: None,
         })
         .expect_err("설정 갱신이 실패해야 한다");
 
@@ -364,6 +367,10 @@ fn an_empty_store_answers_with_an_empty_list_and_the_default_settings() {
             automatic_transcription: false,
             transcription_model: None,
             default_microphone: None,
+            // AI provider를 고르지 않은 것도 기본값이자 정상 상태다 (ADR-0008 §11.1 · INV-8).
+            ai_provider: None,
+            ai_base_url: None,
+            ai_model: None,
         },
         "저장된 적이 없으면 기본값이다"
     );
@@ -381,6 +388,9 @@ fn updated_settings_are_stored_and_read_back() {
             automatic_transcription: true,
             transcription_model: Some("ggml-base.bin".to_string()),
             default_microphone: Some("0:Studio Mic".to_string()),
+            ai_provider: Some("some-provider".to_string()),
+            ai_base_url: Some("http://127.0.0.1:9999".to_string()),
+            ai_model: Some("some-model".to_string()),
         })
         .expect("설정을 저장할 수 있어야 한다");
 
@@ -408,6 +418,19 @@ fn updated_settings_are_stored_and_read_back() {
         Some("0:Studio Mic"),
         "고른 장치 키가 그대로 저장되고 그대로 돌아와야 한다"
     );
+    assert_eq!(
+        (
+            saved.ai_provider.as_deref(),
+            saved.ai_base_url.as_deref(),
+            saved.ai_model.as_deref()
+        ),
+        (
+            Some("some-provider"),
+            Some("http://127.0.0.1:9999"),
+            Some("some-model")
+        ),
+        "고른 AI 설정 셋도 그대로 저장되고 그대로 돌아와야 한다 (ADR-0008 §11.1)"
+    );
 }
 
 #[test]
@@ -424,6 +447,9 @@ fn the_two_automatic_toggles_do_not_share_one_value() {
             automatic_transcription: false,
             transcription_model: None,
             default_microphone: None,
+            ai_provider: None,
+            ai_base_url: None,
+            ai_model: None,
         })
         .expect("설정을 저장할 수 있어야 한다");
     assert!(processing_only.automatic_processing);
@@ -439,6 +465,9 @@ fn the_two_automatic_toggles_do_not_share_one_value() {
             automatic_transcription: true,
             transcription_model: None,
             default_microphone: None,
+            ai_provider: None,
+            ai_base_url: None,
+            ai_model: None,
         })
         .expect("설정을 저장할 수 있어야 한다");
     assert!(
@@ -464,6 +493,10 @@ fn a_blank_directory_is_stored_as_not_chosen_rather_than_as_an_empty_path() {
             automatic_transcription: false,
             transcription_model: Some("  \n ".to_string()),
             default_microphone: Some("  ".to_string()),
+            // 공백뿐인 AI 설정도 같은 규칙으로 '고르지 않음'이 된다.
+            ai_provider: Some(" ".to_string()),
+            ai_base_url: Some("   ".to_string()),
+            ai_model: Some("\t".to_string()),
         })
         .expect("설정을 저장할 수 있어야 한다");
 
@@ -478,6 +511,11 @@ fn a_blank_directory_is_stored_as_not_chosen_rather_than_as_an_empty_path() {
     assert_eq!(
         saved.transcription_model, None,
         "공백뿐인 모델 값도 '아직 고르지 않음'이다 — 어떤 파일도 가리키지 않는 값을 저장하지 않는다"
+    );
+    assert_eq!(
+        (saved.ai_provider, saved.ai_base_url, saved.ai_model),
+        (None, None, None),
+        "공백뿐인 AI 설정도 '아직 고르지 않음'이다"
     );
 }
 
@@ -495,6 +533,9 @@ fn a_model_that_is_not_there_is_stored_as_chosen_not_replaced() {
             automatic_transcription: true,
             transcription_model: Some("  없는-모델.bin  ".to_string()),
             default_microphone: None,
+            ai_provider: None,
+            ai_base_url: None,
+            ai_model: None,
         })
         .expect("설정을 저장할 수 있어야 한다");
 
@@ -524,6 +565,9 @@ fn a_default_microphone_that_no_longer_exists_is_stored_as_chosen_not_replaced()
             automatic_transcription: false,
             transcription_model: None,
             default_microphone: Some("7:장치가 빠진 마이크".to_string()),
+            ai_provider: None,
+            ai_base_url: None,
+            ai_model: None,
         })
         .expect("설정을 저장할 수 있어야 한다");
 

@@ -10,7 +10,15 @@
 //! Phase 3은 **전사**(시작 · 상태 조회) 둘과 **저장된 Transcript 읽기**([`get_transcript`])를
 //! 더한다 ([`Transcriber`]). 마지막 것은 읽기뿐이다 — Transcript는 immutable이므로
 //! 고치거나 지우는 이름은 이 표면에 없다 (§7.1 · INV-2).
-//! AI · Notion을 위한 command도 그 기능이 존재하는 Phase가 함께 추가한다.
+//! Phase 4가 **AI 노트** 다섯을 더한다 — provider 상태 조회 · 생성 시작 · 진행 상태 조회 ·
+//! 저장된 노트 읽기 둘 ([`NoteGenerator`]). 여기서도 쓰기 이름은 늘지 않는다: 노트는 생성으로만
+//! 늘고, 재생성은 대체가 아니라 추가다 (ADR-0008 §9.2). Notion을 위한 command는 Phase 5다.
+//!
+//! ## AI provider가 없는 것은 이 표면의 실패가 아니다 (INV-8)
+//!
+//! [`ai_provider_status`]는 "고르지 않았다"를 **상태값**으로 답하고, [`start_ai_note`]는 그것을
+//! 이유로 거절하지 않는다. 그래서 provider를 하나도 설정하지 않은 사용자에게도 녹음 · 전사 ·
+//! 열람이 그대로 동작하며, AI는 켜지지 않은 기능으로 보인다 (`crate::commands::notes`).
 //!
 //! ## 정지의 성공은 "파일이 확정됐다"는 뜻이다 (R-002)
 //!
@@ -44,6 +52,7 @@
 //! 모든 command 응답으로 돌려준다. 초기화 경로에 `unwrap` · `expect` · `panic!`이 없는 이유가
 //! 이것이다 — 여기서 죽으면 사용자는 아무 설명도 받지 못하고, 실패는 콘솔에만 남는다 (§13).
 
+pub mod notes;
 pub mod payload;
 pub mod transcriber;
 
@@ -60,16 +69,18 @@ use crate::audio::{
     SystemSampleSource,
 };
 use crate::db::{self, settings, store};
-use crate::domain::{Failure, FailureKind, RecordingId, RecordingView, TranscriptId};
+use crate::domain::{AiNoteId, Failure, FailureKind, RecordingId, RecordingView, TranscriptId};
 use crate::platform::app_data_dir::AppDataDirectory;
 use crate::platform::clock::{Clock, MonotonicClock};
 use crate::platform::microphone::{
     self, MicrophoneAccess, MicrophonePermission, SystemMicrophonePermission,
 };
 
+pub use notes::NoteGenerator;
 pub use payload::{
-    CaptureReportPayload, InputDevicePayload, MissingAudioPayload, NewRecording, RecordingPayload,
-    SessionStatusPayload, SettingsPayload, StoppedRecordingPayload, TranscriptPayload,
+    AiNotePayload, AiNoteStatusPayload, AiProviderStatusPayload, CaptureReportPayload,
+    InputDevicePayload, MissingAudioPayload, NewRecording, RecordingPayload, SessionStatusPayload,
+    SettingsPayload, StoppedRecordingPayload, StructuredNotePayload, TranscriptPayload,
     TranscriptSegmentPayload, TranscriptionStatusPayload,
 };
 pub use transcriber::Transcriber;
@@ -149,6 +160,36 @@ impl Storage {
         let connection = self.connection()?;
         let transcript = store::load_transcript(&connection, &TranscriptId::new(id))?;
         Ok(transcript.map(TranscriptPayload::from))
+    }
+
+    /// 그 Transcript에서 만들어진 **AI 노트 전부**를 만들어진 순서대로 돌려준다 (§7.3).
+    ///
+    /// 하나도 없으면 빈 목록이다 — **오류가 아니다.** 아직 노트를 만들지 않은 것은 정상
+    /// 상태이며, provider를 고르지 않은 사용자에게는 언제나 이 답이 온다 (INV-8).
+    ///
+    /// **이력이 그대로 온다.** 재생성은 기존 노트를 대체하지 않고 행을 하나 더 남기므로
+    /// (ADR-0008 §9.2), 같은 mode의 노트가 여럿일 수 있다. 그중 무엇을 보여줄지는 화면이
+    /// 정한다 — 이 경계가 골라서 감추지 않는다.
+    ///
+    /// **읽기뿐이다** — 저장소가 내놓는 `ai_notes` 쓰기 경로는 추가 하나이고 그것을 부르는
+    /// 자리는 [`crate::ai::run`]뿐이므로, 이 command가 열려도 화면이 노트를 고치거나 지울 수
+    /// 있게 되지는 않는다.
+    pub fn ai_notes(&self, transcript_id: &str) -> Result<Vec<AiNotePayload>, Failure> {
+        let connection = self.connection()?;
+        let notes =
+            store::list_ai_notes_for_transcript(&connection, &TranscriptId::new(transcript_id))?;
+
+        notes.into_iter().map(AiNotePayload::decoded).collect()
+    }
+
+    /// AI 노트 하나를 돌려준다. 그런 id가 없으면 `None`이다 (오류가 아니다).
+    ///
+    /// 화면은 방금 끝난 생성이 남긴 식별자([`AiNoteStatusPayload::ai_note_id`])를 이것으로 읽는다.
+    pub fn ai_note(&self, id: &str) -> Result<Option<AiNotePayload>, Failure> {
+        let connection = self.connection()?;
+        let note = store::load_ai_note(&connection, &AiNoteId::new(id))?;
+
+        note.map(AiNotePayload::decoded).transpose()
     }
 
     /// 녹음 하나를 새로 저장하고, 저장된 모습을 그대로 돌려준다.
@@ -714,9 +755,9 @@ fn validated(recording: NewRecording) -> Result<NewRecording, Failure> {
 
 // --- Tauri command 표면 -------------------------------------------------------------
 //
-// 아래 열다섯 개가 frontend가 부를 수 있는 전부다. 각 함수는 [`Storage`] · [`AudioDevices`] ·
-// [`Recorder`] · [`Transcriber`]의 같은 이름 동작이나 [`finish_recording`]을 그대로 부른다 —
-// 로직을 여기에 두지 않으므로, 실제 동작은 Tauri 없이 테스트할 수 있다.
+// 아래 스물한 개가 frontend가 부를 수 있는 전부다. 각 함수는 [`Storage`] · [`AudioDevices`] ·
+// [`Recorder`] · [`Transcriber`] · [`NoteGenerator`]의 같은 이름 동작이나 [`finish_recording`]을
+// 그대로 부른다 — 로직을 여기에 두지 않으므로, 실제 동작은 Tauri 없이 테스트할 수 있다.
 
 #[tauri::command]
 pub fn list_recordings(storage: State<'_, Storage>) -> Result<Vec<RecordingPayload>, Failure> {
@@ -839,4 +880,78 @@ pub fn transcription_status(
     transcriber: State<'_, Transcriber>,
 ) -> Result<TranscriptionStatusPayload, Failure> {
     transcriber.status()
+}
+
+/// 고른 AI provider가 지금 어떤 상태인지 묻는다 — 무엇을 골랐는지 · 쓸 수 있는지 · 어떤 모델이
+/// 있는지 · **로컬인지 외부인지** (`phase-prompt/04` 요구 8 · 9 · 15 · INV-5).
+///
+/// **provider를 고르지 않았거나 서버가 응답하지 않는 것은 이 command의 실패가 아니다** —
+/// [`AiProviderStatusPayload`]의 상태값으로 온다 (INV-8 · §13). 이 command가 `Err`를 내는 경우는
+/// 하나뿐이다: **저장소에서 설정을 읽지 못했을 때.** 그것은 실제로 시도했다가 실패한 일이며
+/// provider와 무관하다.
+///
+/// 설정을 먼저 읽고 그 값을 넘기는 이유는 provider에게 묻는 동안 앱의 저장소 연결이 잡혀
+/// 있지 않게 하기 위해서다 ([`NoteGenerator::provider_status`]).
+///
+/// `async`인 이유는 이 호출이 **응답하지 않을 수 있는 서버를 기다릴 수 있기 때문이다.**
+/// Tauri는 `async`가 아닌 command를 main thread에서 실행하므로, 그대로 두면 서버를 기다리는
+/// 동안 창 전체가 멈춘다. 생성처럼 배경 스레드를 만들지 않는 것은 이것이 시작이 아니라 **한 번의
+/// 질의**이기 때문이다 — 시작·상태 조회 규약은 오래 도는 일에만 쓴다.
+#[tauri::command(async)]
+pub fn ai_provider_status(
+    generator: State<'_, NoteGenerator>,
+    storage: State<'_, Storage>,
+) -> Result<AiProviderStatusPayload, Failure> {
+    let settings = storage.settings()?;
+
+    Ok(generator.provider_status(&settings.into()))
+}
+
+/// Recording 하나의 AI 노트 생성을 시작한다. **돌아오는 것은 접수 사실이지 노트가 아니다.**
+///
+/// 실제 생성은 배경 스레드에서 돌므로 이 호출은 바로 끝난다 — 로컬 모델이 몇 분을 써도 이
+/// command가 IPC를 붙잡지 않는다. 결과는 [`ai_note_status`]로 물어본다.
+///
+/// **재생성도 같은 이름으로 한다.** 이미 노트가 있는 녹음에 다시 걸면 노트가 하나 더 생기고
+/// 이전 노트는 그대로 남는다 (ADR-0008 §9.2) — 그래서 "다시 만들기"를 위한 별도의 이름이 없다.
+///
+/// 이미 생성 중이면 거절한다 — 조용히 무시하지 않는다 ([`NoteGenerator::start`]).
+/// **provider를 고르지 않았다는 이유로는 거절하지 않는다** (INV-8): 그 상태에서 시작하면 §13의
+/// `provider 미설정`이 `failed` 상태에 실려 온다.
+#[tauri::command]
+pub fn start_ai_note(
+    generator: State<'_, NoteGenerator>,
+    recording_id: String,
+    mode: String,
+) -> Result<AiNoteStatusPayload, Failure> {
+    generator.start(&recording_id, notes::parse_mode(&mode)?)
+}
+
+/// 지금 노트 생성이 어떤 상태인지 묻는다. **생성이 도는 동안에도 즉시 답한다.**
+#[tauri::command]
+pub fn ai_note_status(
+    generator: State<'_, NoteGenerator>,
+) -> Result<AiNoteStatusPayload, Failure> {
+    generator.status()
+}
+
+/// 그 Transcript에서 만들어진 AI 노트를 만들어진 순서대로 읽는다. 없으면 빈 배열이다.
+///
+/// **읽기뿐이다.** 노트를 고치거나 지우는 command는 없고, 만들 수도 없다 — 저장소의 `ai_notes`
+/// 쓰기 경로가 추가 하나뿐이기 때문이다 (ADR-0008 §9.2).
+#[tauri::command]
+pub fn list_ai_notes(
+    storage: State<'_, Storage>,
+    transcript_id: String,
+) -> Result<Vec<AiNotePayload>, Failure> {
+    storage.ai_notes(&transcript_id)
+}
+
+/// AI 노트 하나를 읽는다. 그런 id가 없으면 `null`이다.
+#[tauri::command]
+pub fn get_ai_note(
+    storage: State<'_, Storage>,
+    ai_note_id: String,
+) -> Result<Option<AiNotePayload>, Failure> {
+    storage.ai_note(&ai_note_id)
 }

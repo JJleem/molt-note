@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use molt_note_lib::db::{self, settings};
-use molt_note_lib::domain::Settings;
+use molt_note_lib::domain::{Settings, DEFAULT_AI_BASE_URL};
 use rusqlite::Connection;
 
 /// secret을 담는 자리가 생기지 않았는지 소스에서도 확인하기 위한 대상 (INV-7).
@@ -99,6 +99,69 @@ fn defaults_are_returned_when_nothing_has_been_saved() {
         loaded.default_microphone, None,
         "default microphone의 기본값은 '아직 고르지 않음'이다 — 첫 장치를 대신 골라 두지 않는다"
     );
+    assert_eq!(
+        loaded.ai_provider, None,
+        "provider의 기본값은 '아직 고르지 않음'이다 — 앱이 임의의 provider를 골라 두지 않는다"
+    );
+    assert_eq!(
+        loaded.ai_base_url, None,
+        "주소도 고른 적 없는 상태로 시작한다 — 기본 주소를 저장된 값처럼 써 넣지 않는다"
+    );
+    assert_eq!(
+        loaded.ai_model, None,
+        "모델의 기본값도 '아직 고르지 않음'이다"
+    );
+    close(connection);
+}
+
+#[test]
+fn not_having_chosen_a_provider_is_the_normal_starting_state() {
+    // ADR-0008 §11.1 · INV-8: provider를 고르지 않은 것은 오류가 아니라 앱의 출발점이다.
+    // 설정을 읽는 것이 실패하지도 않고, 앱이 대신 아무 provider나 골라 두지도 않는다.
+    let dir = TempDir::new("provider-unset");
+    let connection = open(&dir);
+
+    let loaded = settings::load(&connection).expect("provider가 없어도 설정은 읽힌다");
+
+    assert_eq!(loaded.ai_provider, None);
+    assert_eq!(Settings::DEFAULT.ai_provider, None);
+    close(connection);
+}
+
+#[test]
+fn the_default_connection_target_is_declared_in_exactly_one_place() {
+    // 고른 주소가 없을 때 실제로 쓰는 값은 하나뿐이고, 그것을 아는 자리도 하나뿐이다.
+    assert_eq!(
+        DEFAULT_AI_BASE_URL, "http://localhost:11434",
+        "기본 주소는 PRODUCT-SPEC §14.5가 primary source에서 확인해 기록하고 \
+         ADR-0008 §14가 그대로 옮긴 값이다 (VERIFIED · 2026-09-01) — 기억으로 고치지 않는다"
+    );
+    assert_eq!(
+        Settings::DEFAULT.ai_base_url_or_default(),
+        DEFAULT_AI_BASE_URL,
+        "고르지 않았을 때는 선언된 기본 주소를 쓴다"
+    );
+
+    // 고른 값이 있으면 그 값이다. 기본값이 사용자의 선택을 덮지 않는다.
+    let chosen = Settings {
+        ai_base_url: Some("http://127.0.0.1:9999".to_string()),
+        ..Settings::DEFAULT
+    };
+    assert_eq!(chosen.ai_base_url_or_default(), "http://127.0.0.1:9999");
+
+    // 그리고 그 기본값이 저장소에 복사되지 않는다 — 저장된 적 없음은 계속 저장된 적 없음이다.
+    let dir = TempDir::new("default-base-url");
+    let connection = open(&dir);
+    settings::save(&connection, &Settings::DEFAULT).expect("기본값을 저장할 수 있어야 한다");
+    let stored: Option<String> = connection
+        .query_row("SELECT ai_base_url FROM settings WHERE id = 1", [], |row| {
+            row.get(0)
+        })
+        .expect("저장된 열을 읽을 수 있어야 한다");
+    assert_eq!(
+        stored, None,
+        "고르지 않은 주소가 기본값으로 채워져 저장되면 안 된다"
+    );
     close(connection);
 }
 
@@ -145,6 +208,9 @@ fn turning_automatic_transcription_on_does_not_touch_the_other_settings() {
         automatic_transcription: false,
         transcription_model: Some("ggml-base.bin".to_string()),
         default_microphone: Some("0:Studio Mic".to_string()),
+        ai_provider: Some("some-provider".to_string()),
+        ai_base_url: Some("http://127.0.0.1:9999".to_string()),
+        ai_model: Some("some-model".to_string()),
     };
 
     let connection = open(&dir);
@@ -257,6 +323,10 @@ fn saved_values_survive_closing_and_reopening_the_database() {
         automatic_transcription: true,
         transcription_model: Some("ggml-base.bin".to_string()),
         default_microphone: Some("0:Studio Mic".to_string()),
+        // ADR-0008 §11.1의 세 값. 재시작 후에도 그대로여야 한다.
+        ai_provider: Some("some-provider".to_string()),
+        ai_base_url: Some("http://127.0.0.1:9999".to_string()),
+        ai_model: Some("some-model".to_string()),
     };
 
     let first = open(&dir);
@@ -290,8 +360,201 @@ fn saved_values_survive_closing_and_reopening_the_database() {
         Some("0:Studio Mic".to_string()),
         "고른 default microphone이 재시작 후에도 그대로여야 한다"
     );
+    assert_eq!(
+        loaded.ai_provider,
+        Some("some-provider".to_string()),
+        "고른 AI provider가 재시작 후에도 그대로여야 한다"
+    );
+    assert_eq!(
+        loaded.ai_base_url,
+        Some("http://127.0.0.1:9999".to_string()),
+        "고른 주소가 재시작 후에도 그대로여야 한다 — 기본 주소로 되돌아가지 않는다"
+    );
+    assert_eq!(
+        loaded.ai_model,
+        Some("some-model".to_string()),
+        "고른 모델이 재시작 후에도 그대로여야 한다"
+    );
     assert_eq!(loaded, saved, "저장한 설정과 읽은 설정이 같아야 한다");
     close(second);
+}
+
+#[test]
+fn a_chosen_provider_survives_closing_and_reopening_the_database() {
+    // 세 값이 각자 저장되고 각자 돌아오는지 본다 — 하나를 고르는 것이 나머지를 정하지 않는다.
+    let dir = TempDir::new("ai-provider");
+
+    let first = open(&dir);
+    settings::save(
+        &first,
+        &Settings {
+            ai_provider: Some("some-provider".to_string()),
+            ..Settings::DEFAULT
+        },
+    )
+    .expect("provider만 골라 저장할 수 있어야 한다");
+    close(first);
+
+    let second = open(&dir);
+    let loaded = settings::load(&second).expect("다시 열어도 설정을 읽을 수 있어야 한다");
+
+    assert_eq!(loaded.ai_provider, Some("some-provider".to_string()));
+    assert_eq!(
+        loaded.ai_base_url, None,
+        "provider를 골랐다고 주소가 함께 정해지지 않는다"
+    );
+    assert_eq!(
+        loaded.ai_model, None,
+        "provider를 골랐다고 모델이 함께 정해지지 않는다"
+    );
+    assert_eq!(rows(&second), 1, "설정은 여전히 한 행이다");
+    close(second);
+}
+
+#[test]
+fn a_model_that_the_server_no_longer_has_is_still_the_saved_choice() {
+    // 저장소는 그 서버에 그 모델이 있는지 묻지 않는다. 모델은 지워질 수 있고, 그것은
+    // 저장된 선택이 틀렸다는 뜻이 아니다 — `transcription_model`과 같은 규칙이다.
+    let dir = TempDir::new("missing-ai-model");
+
+    let first = open(&dir);
+    settings::save(
+        &first,
+        &Settings {
+            ai_provider: Some("some-provider".to_string()),
+            ai_model: Some("없는-모델".to_string()),
+            ..Settings::DEFAULT
+        },
+    )
+    .expect("설정을 저장할 수 있어야 한다");
+    close(first);
+
+    let second = open(&dir);
+    let loaded = settings::load(&second).expect("다시 열어도 설정을 읽을 수 있어야 한다");
+
+    assert_eq!(
+        loaded.ai_model,
+        Some("없는-모델".to_string()),
+        "모델이 없다는 이유로 저장된 선택이 사라지거나 바뀌면 안 된다"
+    );
+    assert_eq!(
+        loaded.ai_provider,
+        Some("some-provider".to_string()),
+        "그 이유로 provider가 지워지지도 않는다"
+    );
+    close(second);
+}
+
+#[test]
+fn clearing_the_chosen_provider_is_remembered_as_not_chosen() {
+    // '고르지 않음'으로 되돌리는 것도 사용자의 선택이다. 이전 값이 남아 부활하면 안 된다.
+    let dir = TempDir::new("clear-provider");
+
+    let first = open(&dir);
+    settings::save(
+        &first,
+        &Settings {
+            ai_provider: Some("some-provider".to_string()),
+            ai_base_url: Some("http://127.0.0.1:9999".to_string()),
+            ai_model: Some("some-model".to_string()),
+            ..Settings::DEFAULT
+        },
+    )
+    .expect("먼저 고른 값을 저장할 수 있어야 한다");
+    settings::save(&first, &Settings::DEFAULT).expect("다시 비운 값을 저장할 수 있어야 한다");
+    close(first);
+
+    let second = open(&dir);
+    let loaded = settings::load(&second).expect("다시 열어도 설정을 읽을 수 있어야 한다");
+
+    assert_eq!(loaded, Settings::DEFAULT, "고르지 않은 상태로 돌아가야 한다");
+    assert_eq!(rows(&second), 1, "설정은 여전히 한 행이다");
+    close(second);
+}
+
+#[test]
+fn a_database_written_before_the_ai_settings_existed_keeps_its_values() {
+    // version 5까지만 적용된 DB에 값이 이미 있는 상황이다 — AI 설정이 생기기 전이다.
+    // 새 migration은 그 행을 지우거나 다시 만들지 않고 **열만 더한다.**
+    let dir = TempDir::new("before-ai");
+
+    let older = Connection::open(dir.database_path()).expect("빈 DB를 만들 수 있어야 한다");
+    older
+        .execute_batch(
+            "CREATE TABLE schema_migrations (
+                 version    INTEGER PRIMARY KEY,
+                 name       TEXT NOT NULL,
+                 applied_at TEXT NOT NULL
+             );
+             INSERT INTO schema_migrations (version, name, applied_at)
+             VALUES (3, 'create_settings', datetime('now')),
+                    (4, 'add_default_microphone_to_settings', datetime('now')),
+                    (5, 'add_transcription_settings', datetime('now'));
+             CREATE TABLE settings (
+                 id                      INTEGER PRIMARY KEY CHECK (id = 1),
+                 recordings_directory    TEXT,
+                 automatic_processing    INTEGER NOT NULL
+                     CHECK (automatic_processing IN (0, 1)),
+                 default_microphone      TEXT,
+                 automatic_transcription INTEGER CHECK (automatic_transcription IN (0, 1)),
+                 transcription_model     TEXT
+             );
+             INSERT INTO settings (id, recordings_directory, automatic_processing,
+                                   default_microphone, automatic_transcription,
+                                   transcription_model)
+             VALUES (1, '/tmp/before-ai', 1, '0:Studio Mic', 1, 'ggml-base.bin');
+             PRAGMA user_version = 5;",
+        )
+        .expect("사전 조건: AI 설정이 없던 스키마를 만든다");
+    close(older);
+
+    // 여기서 새 migration이 적용된다.
+    let upgraded = open(&dir);
+    let loaded = settings::load(&upgraded).expect("올린 뒤에도 설정을 읽을 수 있어야 한다");
+
+    assert_eq!(
+        loaded.recordings_directory,
+        Some("/tmp/before-ai".to_string()),
+        "이미 저장돼 있던 값이 그대로여야 한다"
+    );
+    assert!(loaded.automatic_processing, "후처리 토글이 그대로여야 한다");
+    assert!(loaded.automatic_transcription, "전사 토글도 그대로여야 한다");
+    assert_eq!(
+        loaded.transcription_model,
+        Some("ggml-base.bin".to_string()),
+        "고른 전사 모델도 그대로여야 한다"
+    );
+    assert_eq!(
+        loaded.default_microphone,
+        Some("0:Studio Mic".to_string()),
+        "고른 장치도 그대로여야 한다"
+    );
+    assert_eq!(
+        (loaded.ai_provider.clone(), loaded.ai_base_url.clone(), loaded.ai_model.clone()),
+        (None, None, None),
+        "새로 생긴 열은 '아직 고르지 않음'으로 시작한다 — 다른 값에서 채워지지 않는다"
+    );
+    assert_eq!(rows(&upgraded), 1, "행이 늘거나 다시 만들어지지 않았다");
+
+    // 그리고 그 행은 이제 새 값도 담을 수 있다 — 올린 스키마가 반쪽이 아니다.
+    settings::save(
+        &upgraded,
+        &Settings {
+            ai_provider: Some("some-provider".to_string()),
+            ai_model: Some("some-model".to_string()),
+            ..loaded
+        },
+    )
+    .expect("올린 뒤에는 새 값도 저장할 수 있어야 한다");
+    let again = settings::load(&upgraded).expect("다시 읽을 수 있어야 한다");
+    assert_eq!(again.ai_provider, Some("some-provider".to_string()));
+    assert_eq!(again.ai_model, Some("some-model".to_string()));
+    assert_eq!(
+        again.transcription_model,
+        Some("ggml-base.bin".to_string()),
+        "새 값을 저장하는 것이 예전 값을 지우지 않는다"
+    );
+    close(upgraded);
 }
 
 #[test]
@@ -539,6 +802,9 @@ fn saving_settings_does_not_disturb_other_stored_data() {
             automatic_transcription: true,
             transcription_model: Some("ggml-base.bin".to_string()),
             default_microphone: Some("0:Desk Mic".to_string()),
+            ai_provider: Some("some-provider".to_string()),
+            ai_base_url: Some("http://127.0.0.1:9999".to_string()),
+            ai_model: Some("some-model".to_string()),
         },
     )
     .expect("설정을 저장할 수 있어야 한다");
@@ -583,7 +849,12 @@ fn the_settings_schema_has_no_secret_columns() {
             "default_microphone".to_string(),
             // Phase 3이 더한 두 값이다. 모델의 자리는 secret이 아니라 경로다 (ADR-0007 §8.2).
             "automatic_transcription".to_string(),
-            "transcription_model".to_string()
+            "transcription_model".to_string(),
+            // Phase 4가 더한 세 값이다 (ADR-0008 §11.1). **여기서 멈춘다** — API key를 담을
+            // 자리도, 언젠가 쓸지 모르는 빈 열도 없다 (INV-7 · ADR-0008 §11.3).
+            "ai_provider".to_string(),
+            "ai_base_url".to_string(),
+            "ai_model".to_string()
         ],
         "설정 테이블에는 지금까지의 Phase가 다루는 값만 있어야 한다"
     );
