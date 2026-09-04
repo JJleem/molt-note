@@ -33,6 +33,8 @@ const DEFAULT_SETTINGS: Settings = {
   aiProvider: null,
   aiBaseUrl: null,
   aiModel: null,
+  // 어느 페이지 아래에 만들지 아직 고르지 않은 것도 정상 상태다 (ADR-0009 §8.4 · INV-8).
+  notionParentPageId: null,
 };
 
 /** 기본값에서 몇 가지만 다른 폼 값. 테스트가 관심 있는 값만 적는다. */
@@ -73,6 +75,7 @@ describe('설정 읽기', () => {
       aiProvider: '',
       aiBaseUrl: '',
       aiModel: '',
+      notionParentPageId: '',
     });
     expect(view.saving).toBe(false);
     expect(view.saved).toBe(false);
@@ -98,6 +101,7 @@ describe('설정 읽기', () => {
       aiProvider: '',
       aiBaseUrl: '',
       aiModel: '',
+      notionParentPageId: '',
     });
   });
 
@@ -267,6 +271,7 @@ describe('저장', () => {
       aiProvider: '',
       aiBaseUrl: '',
       aiModel: '',
+      notionParentPageId: '',
     });
     expect(view.saving).toBe(false);
     expect(view.saved).toBe(true);
@@ -322,9 +327,29 @@ describe('폼과 설정의 변환', () => {
       },
       // 지금 응답하지 않는 서버나 지워진 모델을 가리키더라도 값은 그대로 돌아온다.
       { ...DEFAULT_SETTINGS, aiProvider: 'some-provider', aiModel: '없는-모델' },
+      // Notion destination도 마찬가지다 (ADR-0009 §8.4). 왕복에서 사라지면 다른 설정을
+      // 저장할 때마다 사용자가 고른 값이 조용히 지워진다.
+      { ...DEFAULT_SETTINGS, notionParentPageId: 'some-parent-page' },
     ] satisfies Settings[]) {
       expect(toSettings(toForm(settings))).toEqual(settings);
     }
+  });
+
+  it('화면이 편집하지 않는 Notion destination이 다른 값을 저장할 때 지워지지 않는다', () => {
+    // 폼이 이 값을 들고 있지 않으면 여기서 `null`이 되어, 사용자가 고른 값이 아무 저장에서나
+    // 조용히 사라진다 (INV-3의 태도 · ADR-0009 §8.4).
+    const saved: Settings = { ...DEFAULT_SETTINGS, notionParentPageId: 'some-parent-page' };
+
+    const edited = editedSettings(loadedSettings(saved), { automaticProcessing: true });
+    expect(edited.kind).toBe('ready');
+    if (edited.kind !== 'ready') {
+      return;
+    }
+
+    expect(toSettings(edited.form)).toEqual({
+      ...saved,
+      automaticProcessing: true,
+    });
   });
 });
 

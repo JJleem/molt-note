@@ -1,6 +1,21 @@
 //! command 경계의 계약: **초기화 실패가 앱을 죽이지 않고 사용자에게 도달한다** (§13),
 //! 그리고 Phase 1이 노출하는 동작(recording CRUD · settings)이 실제로 동작한다.
 //!
+//! 여기에 Phase 5의 **Notion 표면 여섯**이 더해진다 (§5-D · §10 ·
+//! `docs/ADR-0009-notion-and-export.md` §8 · §10). 이 파일이 판정하는 것은 전송의 순서가 아니라
+//! **경계가 무엇을 답하는가**다 — 순서는 `tests/notion_sync.rs`가 본다.
+//!
+//! ```text
+//! 1. 아직 설정하지 않은 것은 실패가 아니라 상태다             (INV-8)
+//! 2. 연결 확인이 성공 · 인증 실패 · 권한 없는 destination을 구분한다 (§5-D · §13)
+//! 3. token은 저장 command의 입력으로만 지나가고, 답은 '있다/없다'뿐이다 (INV-7)
+//! 4. 이미 보내는 중일 때의 두 번째 요청은 조용히 사라지지 않는다
+//! 5. 저장된 전송 기록은 부분 전송까지 그대로 읽힌다            (ADR-0009 §8.4)
+//! ```
+//!
+//! **어떤 테스트도 실제 Notion에 요청하지 않고, 실제 자격증명 저장소도 열지 않는다** —
+//! HTTP 왕복은 `notion::testing::StubServer` 뒤에 있고 token은 메모리 안에만 있다 (§18).
+//!
 //! 이 테스트는 임시 디렉터리 하나만 있으면 돌아간다. Tauri 런타임도, 창도, 하드웨어도
 //! 필요하지 않다 (§18) — [`Storage`]가 Tauri 없이 열리도록 만들어졌기 때문이다.
 //!
@@ -8,13 +23,25 @@
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Condvar, Mutex};
+use std::time::{Duration, Instant};
 
-use molt_note_lib::commands::{NewRecording, SettingsPayload, Storage};
+use molt_note_lib::commands::{
+    NewRecording, NotionSendStatusPayload, NotionSender, SettingsPayload, Storage,
+};
 use molt_note_lib::db::{self, store};
 use molt_note_lib::domain::{
-    FailureKind, RecordingId, Transcript, TranscriptId, TranscriptSegment,
+    Failure, FailureKind, NotionSync, ProcessingStatus, RecordingId, Transcript, TranscriptId,
+    TranscriptSegment,
 };
+use molt_note_lib::notion::testing::{StubReply, StubServer};
+use molt_note_lib::notion::wire::ApiErrorCode;
+use molt_note_lib::notion::TransportError;
 use molt_note_lib::platform::app_data_dir::AppDataDirectory;
+use molt_note_lib::platform::secret_store::testing::InMemorySecretStore;
+use molt_note_lib::platform::secret_store::{Secret, SecretKey, SecretStore};
+use molt_note_lib::sync::pace::testing::RecordedWaits;
+use molt_note_lib::sync::run::Confirmation;
 
 static COUNTER: AtomicUsize = AtomicUsize::new(0);
 
@@ -110,6 +137,7 @@ fn every_command_returns_the_initialization_failure_rather_than_pretending_to_wo
             ai_provider: None,
             ai_base_url: None,
             ai_model: None,
+            notion_parent_page_id: None,
         })
         .expect_err("설정 갱신이 실패해야 한다");
 
@@ -371,6 +399,9 @@ fn an_empty_store_answers_with_an_empty_list_and_the_default_settings() {
             ai_provider: None,
             ai_base_url: None,
             ai_model: None,
+            // 어느 페이지 아래에 만들지 고르지 않은 것도 기본값이자 정상 상태다
+            // (ADR-0009 §8.4 · INV-8).
+            notion_parent_page_id: None,
         },
         "저장된 적이 없으면 기본값이다"
     );
@@ -391,6 +422,7 @@ fn updated_settings_are_stored_and_read_back() {
             ai_provider: Some("some-provider".to_string()),
             ai_base_url: Some("http://127.0.0.1:9999".to_string()),
             ai_model: Some("some-model".to_string()),
+            notion_parent_page_id: Some("some-parent-page".to_string()),
         })
         .expect("설정을 저장할 수 있어야 한다");
 
@@ -450,6 +482,7 @@ fn the_two_automatic_toggles_do_not_share_one_value() {
             ai_provider: None,
             ai_base_url: None,
             ai_model: None,
+            notion_parent_page_id: None,
         })
         .expect("설정을 저장할 수 있어야 한다");
     assert!(processing_only.automatic_processing);
@@ -468,6 +501,7 @@ fn the_two_automatic_toggles_do_not_share_one_value() {
             ai_provider: None,
             ai_base_url: None,
             ai_model: None,
+            notion_parent_page_id: None,
         })
         .expect("설정을 저장할 수 있어야 한다");
     assert!(
@@ -497,6 +531,8 @@ fn a_blank_directory_is_stored_as_not_chosen_rather_than_as_an_empty_path() {
             ai_provider: Some(" ".to_string()),
             ai_base_url: Some("   ".to_string()),
             ai_model: Some("\t".to_string()),
+            // 공백뿐인 Notion destination도 같은 규칙으로 '고르지 않음'이 된다.
+            notion_parent_page_id: Some("  ".to_string()),
         })
         .expect("설정을 저장할 수 있어야 한다");
 
@@ -517,6 +553,10 @@ fn a_blank_directory_is_stored_as_not_chosen_rather_than_as_an_empty_path() {
         (None, None, None),
         "공백뿐인 AI 설정도 '아직 고르지 않음'이다"
     );
+    assert_eq!(
+        saved.notion_parent_page_id, None,
+        "공백뿐인 Notion destination도 '아직 고르지 않음'이다"
+    );
 }
 
 #[test]
@@ -536,6 +576,7 @@ fn a_model_that_is_not_there_is_stored_as_chosen_not_replaced() {
             ai_provider: None,
             ai_base_url: None,
             ai_model: None,
+            notion_parent_page_id: None,
         })
         .expect("설정을 저장할 수 있어야 한다");
 
@@ -548,6 +589,424 @@ fn a_model_that_is_not_there_is_stored_as_chosen_not_replaced() {
         saved.automatic_transcription,
         "모델을 찾지 못했다고 해서 토글이 뒤집히지 않는다"
     );
+}
+
+// --- Notion 표면 (§5-D · §10 · ADR-0009 §8 · §10) --------------------------------------
+
+/// 이 파일이 쓰는 token. **실재하지 않는다** (ADR-0009 §10.5).
+const NOT_A_REAL_TOKEN: &str = "ntn-command-boundary-double-value-not-a-real-credential";
+
+/// 실제 Notion에도 실제 자격증명 저장소에도 닿지 않는 전송자 하나.
+fn notion_sender(
+    temp: &TempRoot,
+    server: Arc<StubServer>,
+    secrets: Arc<InMemorySecretStore>,
+) -> NotionSender {
+    NotionSender::with_transport(
+        AppDataDirectory::new(temp.path().join("app-data")),
+        server,
+        secrets,
+        // 이 파일의 어떤 테스트도 자지 않는다 — 대기는 기록만 된다.
+        Arc::new(RecordedWaits::new()),
+    )
+}
+
+/// token 하나가 이미 저장돼 있는 자격증명 저장소.
+fn secrets_with_token() -> Arc<InMemorySecretStore> {
+    let secrets = Arc::new(InMemorySecretStore::new());
+    secrets
+        .set(
+            SecretKey::NotionIntegrationToken,
+            &Secret::new(NOT_A_REAL_TOKEN),
+        )
+        .expect("사전 조건: token을 저장한다");
+    secrets
+}
+
+#[test]
+fn a_connection_test_without_a_stored_token_is_a_state_not_a_failure() {
+    // INV-8 — 아직 설정하지 않은 것은 오류가 아니다. provider 상태 조회와 같은 규칙이며,
+    // 화면은 이 값을 경고가 아니라 담담한 상태로 그린다.
+    let temp = TempRoot::new("notion-not-configured");
+    let server = Arc::new(StubServer::ready());
+    let sender = notion_sender(
+        &temp,
+        server.clone(),
+        Arc::new(InMemorySecretStore::new()),
+    );
+
+    let connection = sender
+        .check_connection(None)
+        .expect("연결 확인 자체는 성공한다");
+
+    assert_eq!(connection.state, "notConfigured");
+    assert!(!connection.token_stored);
+    assert!(!connection.destination_configured, "부모 페이지도 고르지 않았다");
+    assert_eq!(connection.failure, None, "설정하지 않은 것은 실패가 아니다");
+    assert!(
+        server.requests().is_empty(),
+        "보낼 token이 없는데 요청이 나갔다"
+    );
+}
+
+#[test]
+fn a_connection_test_separates_a_rejected_token_from_a_destination_it_cannot_reach() {
+    // §5-D · §13 — 사용자가 할 수 있는 일이 전부 다르다: token을 다시 넣는 것 · 부모 페이지를
+    // integration에 공유하는 것 · 네트워크를 확인하는 것. 그 구분이 화면까지 도달해야 한다.
+    let temp = TempRoot::new("notion-connection");
+
+    let check = |reply: Option<StubReply>| {
+        let server = Arc::new(match reply {
+            Some(reply) => StubServer::ready().with_users_me(reply),
+            None => StubServer::ready(),
+        });
+        let connection = notion_sender(&temp, server.clone(), secrets_with_token())
+            .check_connection(Some("  parent-page-identifier  "))
+            .expect("연결 확인 자체는 성공한다");
+
+        assert_eq!(server.requests().len(), 1, "확인은 왕복 한 번이다");
+        connection
+    };
+
+    let connected = check(None);
+    assert_eq!(connected.state, "connected");
+    assert!(connected.token_stored);
+    assert!(connected.destination_configured);
+    assert_eq!(connected.failure, None);
+
+    let cases = [
+        (
+            StubReply::error(401, ApiErrorCode::Unauthorized),
+            FailureKind::NotionAuthFailed,
+            false,
+        ),
+        (
+            StubReply::error(403, ApiErrorCode::RestrictedResource),
+            FailureKind::NotionDestinationUnavailable,
+            false,
+        ),
+        (
+            StubReply::error(404, ApiErrorCode::ObjectNotFound),
+            FailureKind::NotionDestinationUnavailable,
+            false,
+        ),
+        (
+            StubReply::Fail(TransportError::NotConnected),
+            FailureKind::NotionRequestFailed,
+            true,
+        ),
+    ];
+
+    for (reply, expected, retryable) in cases {
+        let connection = check(Some(reply));
+
+        assert_eq!(connection.state, "failed");
+        assert!(connection.token_stored, "저장돼 있다는 사실은 그대로다");
+        let failure = connection.failure.expect("무엇이 달랐는지가 실려 온다");
+        assert_eq!(failure.kind, expected);
+        assert_eq!(failure.retryable, retryable);
+        assert!(
+            failure.source_data_safe,
+            "확인 한 번이 저장된 것을 건드리지 않는다 (INV-3)"
+        );
+        assert!(
+            !format!("{failure:?}").contains(NOT_A_REAL_TOKEN),
+            "token이 실패 문장에 실렸다 (INV-7): {failure:?}"
+        );
+    }
+}
+
+#[test]
+fn a_successful_connection_test_says_which_workspace_answered() {
+    // §5-D — 성공이 "됐다" 한마디로 끝나면 사용자는 **어느 워크스페이스의 token을 넣었는지**
+    // 알 수 없다. 그 이름은 확인이 말해 준 값이며, 이 경계는 해석하지 않고 옮긴다.
+    let temp = TempRoot::new("notion-connected-workspace");
+    let named = Arc::new(StubServer::ready().with_users_me(StubReply::Body(
+        r#"{"object":"user","id":"bot-user","type":"bot","bot":{"workspace_name":"Ada의 워크스페이스"}}"#
+            .to_owned(),
+    )));
+
+    let connection = notion_sender(&temp, named, secrets_with_token())
+        .check_connection(Some("parent-page-identifier"))
+        .expect("연결 확인 자체는 성공한다");
+
+    assert_eq!(connection.state, "connected");
+    assert_eq!(
+        connection.workspace_name.as_deref(),
+        Some("Ada의 워크스페이스")
+    );
+
+    // 말해 주지 않으면 **지어내지 않는다** — stub의 기본 응답에는 워크스페이스 이름이 없다.
+    let unnamed = notion_sender(&temp, Arc::new(StubServer::ready()), secrets_with_token())
+        .check_connection(Some("parent-page-identifier"))
+        .expect("연결 확인 자체는 성공한다");
+
+    assert_eq!(unnamed.state, "connected");
+    assert_eq!(unnamed.workspace_name, None, "없는 이름을 만들어 냈다");
+}
+
+#[test]
+fn a_stored_token_is_answered_as_a_fact_and_never_as_a_value() {
+    // INV-7 · ADR-0009 §10.4 — 값이 이 경계를 지나는 방향은 하나다: 화면에서 자격증명
+    // 저장소로. 돌아오는 길에는 '있다/없다'뿐이며, 그것은 wire 형식에서도 그렇다.
+    let temp = TempRoot::new("notion-token");
+    let secrets = Arc::new(InMemorySecretStore::new());
+    let sender = notion_sender(&temp, Arc::new(StubServer::ready()), Arc::clone(&secrets));
+
+    let saved = sender
+        .save_token(&format!("  {NOT_A_REAL_TOKEN}\n"))
+        .expect("저장할 수 있어야 한다");
+    assert!(saved.stored);
+    assert_eq!(
+        serde_json::to_string(&saved).expect("직렬화된다"),
+        r#"{"stored":true}"#,
+        "저장 결과가 말하는 것은 '있다'뿐이다"
+    );
+    assert_eq!(
+        secrets
+            .stored(SecretKey::NotionIntegrationToken)
+            .expect("값이 있어야 한다")
+            .expose(),
+        NOT_A_REAL_TOKEN,
+        "붙여 넣은 값의 앞뒤 공백만 벗기고 그대로 저장한다"
+    );
+
+    // 저장된 뒤의 연결 확인도 값을 돌려주지 않는다 — 직렬화된 응답 어디에도 token이 없다.
+    let connection = sender
+        .check_connection(Some("parent-page-identifier"))
+        .expect("연결 확인 자체는 성공한다");
+    let wire = serde_json::to_string(&connection).expect("직렬화된다");
+    assert!(!wire.contains(NOT_A_REAL_TOKEN), "{wire}");
+    assert!(wire.contains(r#""tokenStored":true"#), "{wire}");
+
+    let deleted = sender.delete_token().expect("지울 수 있어야 한다");
+    assert!(!deleted.stored);
+    assert!(secrets.is_empty(), "지운 뒤에는 담고 있는 것이 없다");
+    assert!(
+        !sender
+            .delete_token()
+            .expect("없던 것을 지우는 것은 실패가 아니다")
+            .stored
+    );
+}
+
+#[test]
+fn a_blank_token_is_refused_without_echoing_what_was_sent() {
+    let temp = TempRoot::new("notion-blank-token");
+    let secrets = Arc::new(InMemorySecretStore::new());
+    let sender = notion_sender(&temp, Arc::new(StubServer::ready()), Arc::clone(&secrets));
+
+    let failure = sender.save_token("   ").expect_err("빈 값은 저장하지 않는다");
+
+    assert_eq!(failure.kind, FailureKind::InvalidInput);
+    assert!(!failure.retryable, "같은 값을 다시 보내도 같다");
+    assert_eq!(failure.detail, None, "입력값이 실패에 실리지 않는다 (INV-7)");
+    assert!(secrets.is_empty(), "거절된 입력은 저장소에 남지 않는다");
+}
+
+/// token을 읽는 자리에서 **붙잡혀 있는** 자격증명 저장소.
+///
+/// 전송이 도는 한가운데를 만들어 내기 위한 것이다 — 그 상태에서 두 번째 시작 요청이 어떻게
+/// 되는지가 판정 대상이다. 실제 저장소도 파일도 열지 않는다.
+struct PausedSecretStore {
+    released: Mutex<bool>,
+    ready: Condvar,
+    entered: Mutex<usize>,
+}
+
+impl PausedSecretStore {
+    fn new() -> Self {
+        Self {
+            released: Mutex::new(false),
+            ready: Condvar::new(),
+            entered: Mutex::new(0),
+        }
+    }
+
+    fn is_reading(&self) -> bool {
+        *self.entered.lock().expect("잠금") > 0
+    }
+
+    fn release(&self) {
+        *self.released.lock().expect("잠금") = true;
+        self.ready.notify_all();
+    }
+}
+
+impl SecretStore for PausedSecretStore {
+    fn get(&self, _key: SecretKey) -> Result<Option<Secret>, Failure> {
+        *self.entered.lock().expect("잠금") += 1;
+
+        let mut released = self.released.lock().expect("잠금");
+        while !*released {
+            released = self.ready.wait(released).expect("잠금");
+        }
+
+        // 붙잡혀 있던 전송은 '아직 token을 저장하지 않았다'로 끝난다 — 그것도 상태값이다.
+        Ok(None)
+    }
+
+    fn set(&self, _key: SecretKey, _secret: &Secret) -> Result<(), Failure> {
+        Ok(())
+    }
+
+    fn delete(&self, _key: SecretKey) -> Result<(), Failure> {
+        Ok(())
+    }
+}
+
+#[test]
+fn a_second_send_while_one_is_running_is_refused_instead_of_disappearing() {
+    let temp = TempRoot::new("notion-second-send");
+    let storage = open_storage(&temp);
+    storage
+        .update_settings(SettingsPayload {
+            recordings_directory: None,
+            automatic_processing: false,
+            automatic_transcription: false,
+            transcription_model: None,
+            default_microphone: None,
+            ai_provider: None,
+            ai_base_url: None,
+            ai_model: None,
+            notion_parent_page_id: Some("parent-page-identifier".to_string()),
+        })
+        .expect("사전 조건: 보낼 자리를 고른다");
+    let recording = storage
+        .create_recording(a_recording("보낼 녹음"))
+        .expect("사전 조건: 녹음을 저장한다");
+
+    let secrets = Arc::new(PausedSecretStore::new());
+    let sender = NotionSender::with_transport(
+        AppDataDirectory::new(temp.path().join("app-data")),
+        Arc::new(StubServer::ready()),
+        Arc::clone(&secrets) as Arc<dyn SecretStore>,
+        Arc::new(RecordedWaits::new()),
+    );
+
+    let accepted = NotionSendStatusPayload::from(
+        sender
+            .start(&recording.id, Confirmation::NotAsked)
+            .expect("접수된다"),
+    );
+    assert_eq!(accepted.state, "running", "돌아오는 것은 접수 사실이다");
+    assert_eq!(accepted.recording_id.as_deref(), Some(recording.id.as_str()));
+    assert_eq!(accepted.page_id, None);
+    assert!(!accepted.created_page);
+    assert_eq!(accepted.failure, None);
+
+    // 배경 스레드가 실제로 돌기 시작할 때까지 기다린다 — 그 순간이 '전송 한가운데'다.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !secrets.is_reading() {
+        assert!(Instant::now() < deadline, "배경 스레드가 시작되지 않았다");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+
+    let refused = sender
+        .start(&recording.id, Confirmation::NotAsked)
+        .expect_err("한 번에 한 건이다 — 두 번째 요청이 조용히 사라지지 않는다");
+    assert_eq!(refused.kind, FailureKind::InvalidInput);
+    assert!(refused.source_data_safe, "거절은 아무것도 건드리지 않았다");
+    assert!(
+        refused.detail.as_deref().is_some_and(|detail| detail.contains(&recording.id)),
+        "무엇이 돌고 있는지 알려 준다: {:?}",
+        refused.detail
+    );
+
+    // 상태 조회는 전송이 멈춰 있는 동안에도 즉시 답한다.
+    let asked_at = Instant::now();
+    let status = NotionSendStatusPayload::from(sender.status().expect("상태를 읽을 수 있다"));
+    assert_eq!(status.state, "running");
+    assert!(
+        asked_at.elapsed() < Duration::from_secs(1),
+        "상태 조회가 전송을 기다렸다"
+    );
+
+    secrets.release();
+
+    // 끝나면 그 사실이 상태에 남는다. **token을 저장하지 않은 것은 command의 실패가 아니라
+    // 상태값이다** (INV-8) — 시작은 접수됐고, 무엇이 남았는지는 여기에 실려 온다.
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let finished = loop {
+        let status = NotionSendStatusPayload::from(sender.status().expect("상태를 읽을 수 있다"));
+        if status.state != "running" {
+            break status;
+        }
+        assert!(Instant::now() < deadline, "전송이 끝나지 않았다");
+        std::thread::sleep(Duration::from_millis(10));
+    };
+
+    assert_eq!(finished.state, "failed");
+    let failure = finished.failure.expect("무엇이 남았는지 말한다");
+    assert_eq!(failure.kind, FailureKind::InvalidInput);
+    assert!(failure.retryable, "설정을 채우면 진행할 수 있다");
+    assert!(failure.source_data_safe, "녹음도 전사도 그대로다 (INV-3)");
+}
+
+#[test]
+fn a_recording_that_was_never_sent_has_no_stored_sync_and_that_is_not_a_failure() {
+    let temp = TempRoot::new("notion-sync-unknown");
+    let storage = open_storage(&temp);
+    let recording = storage
+        .create_recording(a_recording("보낸 적 없는 녹음"))
+        .expect("사전 조건: 녹음을 저장한다");
+
+    assert_eq!(
+        storage.notion_sync(&recording.id).expect("조회 자체는 성공한다"),
+        None
+    );
+    assert_eq!(storage.notion_sync("없는-id").expect("조회 자체는 성공한다"), None);
+}
+
+#[test]
+fn a_partly_sent_recording_says_so_through_the_command_surface() {
+    // ADR-0009 §8.4 — 실패한 요청은 세지 않으므로, 둘이 다르면 문서의 일부만 들어가 있다.
+    // 화면이 그것을 말할 수 있으려면 두 수가 이 경계를 지나야 한다.
+    let temp = TempRoot::new("notion-sync-partial");
+    let app_data_dir = AppDataDirectory::new(temp.path().join("app-data"));
+    let storage = Storage::open(&app_data_dir);
+    assert!(storage.failure().is_none(), "사전 조건: 저장소가 열려야 한다");
+
+    let recording = storage
+        .create_recording(a_recording("중간에 멈춘 전송"))
+        .expect("사전 조건: 녹음을 저장한다");
+
+    // 전송 경로가 하는 일을 저장소 API로 그대로 재현한다 — 이 테스트가 보는 것은 읽기 쪽이다.
+    let connection = db::open_in(&app_data_dir).expect("사전 조건: 같은 DB를 연다");
+    store::save_notion_sync(
+        &connection,
+        &NotionSync {
+            recording_id: RecordingId::new(&recording.id),
+            page_id: Some("created-page-identifier".to_string()),
+            synced_at: None,
+            status: ProcessingStatus::Failed,
+            error: Some("두 번째 조각에서 멈췄다".to_string()),
+            sent_chunks: Some(1),
+            total_chunks: Some(3),
+            content_fingerprint: Some("a-content-fingerprint".to_string()),
+        },
+    )
+    .expect("사전 조건: 전송 상태를 남긴다");
+
+    let found = storage
+        .notion_sync(&recording.id)
+        .expect("조회가 성공해야 한다")
+        .expect("저장한 전송 상태가 있어야 한다");
+
+    assert_eq!(found.recording_id, recording.id);
+    assert_eq!(found.status, "failed");
+    assert_eq!(found.page_id.as_deref(), Some("created-page-identifier"));
+    assert_eq!(found.synced_at, None, "성공한 적이 없다");
+    assert_eq!(found.error.as_deref(), Some("두 번째 조각에서 멈췄다"));
+    assert_eq!(
+        (found.sent_chunks, found.total_chunks),
+        (Some(1), Some(3)),
+        "부분 전송이 상태에서 드러난다"
+    );
+
+    // 지문은 화면으로 나가지 않는다 — 이어 붙여도 되는지 판정하는 자리는 backend 하나다.
+    let wire = serde_json::to_string(&found).expect("직렬화된다");
+    assert!(!wire.contains("a-content-fingerprint"), "{wire}");
 }
 
 #[test]
@@ -568,6 +1027,7 @@ fn a_default_microphone_that_no_longer_exists_is_stored_as_chosen_not_replaced()
             ai_provider: None,
             ai_base_url: None,
             ai_model: None,
+            notion_parent_page_id: None,
         })
         .expect("설정을 저장할 수 있어야 한다");
 

@@ -1,0 +1,59 @@
+# Notion 설정이 사는 자리 — SecretStore 경계와 비-secret 설정
+# Runtime이 PLAN-20260904T025945Z 승인 시점에 생성했다 (proposal P4). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-046
+status: DONE
+
+request: |-
+  Notion 설정을 **secret과 비-secret으로 갈라** 각각의 자리를 만든다. 첫째, `src-tauri/src/platform/` 아래에 SecretStore 경계 하나를 만든다: 저장 · 조회 · 삭제를 나타내는 trait, ADR-0009가 고른 crate를 쓰는 macOS 보안 저장소 구현, Windows 구현 경계(플랫폼 분기는 `platform/` 안에만 존재한다 — INV-10 · §3.1), 그리고 **자동 테스트가 쓰는 메모리 test double**. 자동 테스트는 실제 OS 자격증명 저장소를 절대 건드리지 않는다. token은 실패 `message` · `detail` · 로그 · evidence에 남지 않으며, 그것을 타입 수준에서 지키는 방식(`ai::ollama::http::TransportError`처럼 값을 담지 않는 오류 표현)을 따른다. **미래 Cloud AI 자격증명을 위한 일반화된 인프라를 만들지 않는다** — 지금 필요한 경계 하나만 만든다. 둘째, secret이 아닌 Notion 설정(destination 부모 page identifier 등 ADR-0009가 정한 값)을 `src-tauri/src/db/migrations.rs`의 `MIGRATIONS` **끝에 version 7을 추가해** settings 테이블에 열로 더한다 — 이미 적용된 migration을 고치지 않고, `NULL`은 '아직 고르지 않음'이라는 정상 상태로 읽으며, **secret 열은 만들지 않는다.** 기존 테스트 `no_migration_creates_a_place_to_put_a_secret`와 `released_migrations_keep_their_version_and_name`이 계속 통과해야 한다. `domain::Settings` · settings 저장/복원 · `commands::payload::SettingsPayload` · `src/ipc/types.ts`의 `Settings`까지 왕복을 맞춘다.
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-043
+
+stop_condition:
+  gates: [build, lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 3
+
+acceptance_criteria:
+  - id: P4-AC1
+    description: |-
+      build Gate가 통과한다.
+    verification:
+      type: gate
+      ref: build
+  - id: P4-AC2
+    description: |-
+      lint Gate가 통과한다.
+    verification:
+      type: gate
+      ref: lint
+  - id: P4-AC3
+    description: |-
+      test Gate가 통과한다 — 기존 migration 불변 테스트(secret 열 없음 · 목록 끝 추가)를 포함한다.
+    verification:
+      type: gate
+      ref: test
+  - id: P4-AC4
+    description: |-
+      SecretStore가 `platform/` 안의 경계 하나이고, macOS 구현 · Windows 구현 경계 · 메모리 test double이 존재하며, 플랫폼 분기가 그 경계 밖으로 새지 않는다 (INV-10).
+    verification:
+      type: verifier
+  - id: P4-AC5
+    description: |-
+      자동 테스트가 실제 OS 자격증명 저장소에 접근하지 않는다 — 테스트 경로가 메모리 double만 쓴다.
+    verification:
+      type: verifier
+  - id: P4-AC6
+    description: |-
+      SQLite 스키마 · `domain::Settings` · frontend `Settings` 어디에도 token/secret을 담는 자리가 없고, version 7 migration은 목록 끝에 추가되어 이전 migration을 고치지 않았다 (INV-7).
+    verification:
+      type: verifier
+
+evidence: []
+
+failure_memo: []

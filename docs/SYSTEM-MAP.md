@@ -3,7 +3,7 @@
 이 문서는 프로젝트의 **최상위 지도**다. 상세 구현 문서가 아니라 진입점이다.
 상세는 §8의 문서로 넘긴다.
 
-> **현재 상태: Phase 4 완료 (2026-09-04).** 앱 셸 · 로컬 영속성 · §7 데이터 모델 ·
+> **현재 상태: Phase 5 완료 (2026-09-04).** 앱 셸 · 로컬 영속성 · §7 데이터 모델 ·
 > 네 화면 navigation에 더해, **녹음 lifecycle(Record/Pause/Resume/Stop) · 파일 확정 ·
 > Recording 영속화 · 재생**이 구현되고 자동 검증을 통과했다.
 >
@@ -12,10 +12,14 @@
 > 세 mode의 structured note · 로컬 Ollama adapter · AI Note 탭 · Settings provider 구역)가
 > 더해졌다.
 >
-> ⚠️ **그러나 실제 하드웨어/추론/추론서버에서 확인된 적이 없다.** 미확정 전제가 **셋**이다 —
-> `A-REC-001`(실제 마이크 미검증) · `A-TRANS-001`(실제 Whisper 추론 미실행) ·
-> `A-AI-001`(**실제 Ollama를 한 번도 호출한 적이 없다**).
-> 셋 다 Final Integration의 hard human gate로 연기됐다.
+> 여기에 **나가는 문**이 더해졌다 — `export::Document` 하나에서 갈라지는 **Markdown 파일
+> export**와 **Notion sync**(Markdown Content API · 무손실 분할 · SecretStore).
+>
+> ⚠️ **그러나 실제 하드웨어/추론/추론서버/워크스페이스에서 확인된 적이 없다.**
+> 미확정 전제가 **넷**이다 — `A-REC-001`(실제 마이크 미검증) ·
+> `A-TRANS-001`(실제 Whisper 추론 미실행) · `A-AI-001`(실제 Ollama 미호출) ·
+> `A-NOTION-001`(**실제 Notion 워크스페이스로 요청이 나간 적이 없다**).
+> 넷 다 Final Integration의 hard human gate로 연기됐다.
 >
 > 갱신 이력:
 > - 2026-09-01 Bootstrap — 개발 baseline과 Gate 확보
@@ -23,6 +27,7 @@
 > - 2026-09-01 Product Spec rev 3 — Transcript cardinality를 `Recording 1:N Transcript`로 확정
 > - **2026-09-02 Phase 1 DONE** — §1 ~ §9를 실제 구현 기준으로 갱신
 > - **2026-09-04 Phase 4 DONE** — §1 · §3 · §4 · §5 · §6 · §7 · §8 · §9에 AI Provider 경계 반영
+> - **2026-09-04 Phase 5 DONE** — Markdown export · Notion sync · SecretStore 경계 반영
 
 ---
 
@@ -63,7 +68,8 @@ Linux와 모바일은 범위 밖이다 (`PRODUCT-SPEC.md` §3).
 | **⚠️ 자동 검증됐으나 장치 미확인** | 위 녹음 경로 전체. 실제 마이크·권한 프롬프트·음질로 확인된 적이 **없다** (`ASSUMPTION A-REC-001`) |
 | **⚠️ 구현됐으나 실제 추론 미실행** | 전사 경로 전체. `whisper-rs`가 링크돼 있고 자동 검증을 지나지만 **실제 모델로 추론한 적이 없다** (`A-TRANS-001`) |
 | **⚠️ 구현됐으나 실제 호출 미실행** | AI Note 경로 전체. 계약 · adapter · 화면이 자동 검증을 지나지만 **실제 Ollama에 요청을 보낸 적이 한 번도 없다** (`A-AI-001` · `docs/PHASE-4-AI-NOTE-REVIEW.md` §10.2) |
-| **다음 단계 (PLANNED)** | Phase 5 — Notion & Markdown Export |
+| **⚠️ 구현됐으나 실제 전송 미실행** | Notion sync 경로 전체. adapter · 분할 · SecretStore · 화면이 자동 검증을 지나지만 **실제 Notion 워크스페이스로 요청을 보낸 적이 없다** (`A-NOTION-001` · `docs/PHASE-5-NOTION-SMOKE-TEST.md` §10.1) |
+| **다음 단계 (PLANNED)** | Phase 6 — Cross-platform Validation & Hardening (Windows) |
 | **미룬 것 (DEFERRED)** | **Cloud AI Providers (Claude · Gemini · Groq)** · search · tags · processing queue · menu bar (`PRODUCT-SPEC.md` §16) |
 | **후보 (CANDIDATE)** | recording engine (§4) · whisper 통합 방식 (§4) · persistence crate (§4) |
 
@@ -103,12 +109,23 @@ ai::run → provider 선택 → Transcript **텍스트만** 전달 → structure
 AINote를 **새 레코드로 append** (provider · model · promptVersion · transcriptId · generatedAt)
   ↓
 AI Note 탭이 이력을 보여준다. 재생성은 대체가 아니라 추가다
+  ↓
+Export Markdown ──→ export::Document ──→ Markdown renderer ──┬─→ 로컬 .md 파일
+                                                              └─→ Notion Markdown Content API
+  ↓  AI Note가 없어도 Transcript와 메타데이터만으로 유효한 문서가 나온다 (INV-8)
+Send to Notion (명시적 opt-in · INV-5)
+  ↓  긴 문서는 안전한 경계에서 나뉘어 순서대로 전송되고, 조용히 잘리지 않는다
+  ↓  429/529는 Retry-After를 존중한다. 부분 실패 뒤 재시도는 같은 페이지에서 이어간다
+NotionSync (recordingId · pageId · syncedAt · status · error) — Recording 1개 ↔ 페이지 1개
 ```
 
-**아직 없는 것(PLANNED):** Notion · Markdown export (Phase 5).
+**아직 없는 것(PLANNED):** Windows 실동작 검증 (Phase 6).
 
-⚠️ 위 흐름 중 **전사와 AI 생성은 실제로 실행된 적이 없다** — `whisper` 추론(`A-TRANS-001`)도
-Ollama 호출(`A-AI-001`)도 자동 검증에서는 fixture와 stub으로만 지나간다.
+⚠️ 위 흐름 중 **전사 · AI 생성 · Notion 전송은 실제로 실행된 적이 없다** —
+`whisper` 추론(`A-TRANS-001`) · Ollama 호출(`A-AI-001`) · Notion 요청(`A-NOTION-001`)
+모두 자동 검증에서는 fixture와 stub으로만 지나간다.
+**Markdown 파일 export는 실제 파일 쓰기까지 자동 검증이 지나간다** — 임시 디렉터리에서
+실물 파일을 만들고 내용을 확인한다. 이 경로에는 외부 의존이 없다.
 
 전체 목표 흐름은 `docs/PRODUCT-SPEC.md` §4에 있다.
 
@@ -139,7 +156,12 @@ Ollama 호출(`A-AI-001`)도 자동 검증에서는 fixture와 stub으로만 지
 | **`ai/testing.rs` (fake provider)** | **테스트 전용 test double.** adapter와 **같은** 계약 묶음을 통과해 추상화를 검증한다. 제품 UI 선택지가 아니다 | **DONE** |
 | **`commands/notes.rs`** | AI Note command 경계 — provider 상태 · 생성 시작 · 진행 조회 · 노트 열람. 전사와 같은 배경 스레드 방식 | **DONE** |
 | **Detail의 AI Note 탭 · Settings의 provider 구역** | mode 선택 · 생성 · 재생성 · 이력 · 연결 확인 · 모델 선택 · **로컬/외부 표시** (INV-5) | **DONE** (⚠️ 실행 화면 미확인) |
-| Notion / Markdown renderer | Structured Note를 외부 형식으로 내보낸다 | **PLANNED** (Phase 5) |
+| **`export/` (markdown · filename · file · run)** | `export::Document` → Markdown 문자열(순수) → 실제 파일. 파일명 정규화는 슬래시 · 콜론 · 이모지 · 개행 · 경로 탈출을 막고, 기존 파일을 조용히 덮어쓰지 않는다 | **DONE** |
+| **`notion/` (wire · client · http · network · chunk)** | Notion을 아는 유일한 자리. `markdown` body param · `insert_content`/`position:end` · `GET /v1/users/me` · `Notion-Version: 2026-03-11`. 무손실 분할이 순수 모듈로 분리돼 있다 | **DONE** (⚠️ 실제 전송 미실행 · `A-NOTION-001`) |
+| **`sync/` (run · pace)** | Notion 전송 실행 순서와 `NotionSync` 영속화. `429`/`529`의 `Retry-After`를 정수 초로 존중하고 요청 간 최소 간격을 둔다 | **DONE** |
+| **`platform/secret_store.rs`** | **SecretStore 경계 하나** — 닫힌 `SecretKey` · 재현되지 않는 `Secret` 타입. macOS 구현 · Windows 구현 자리 · 메모리 test double. token은 SQLite에도 frontend에도 없다 (INV-7 · INV-10) | **DONE** (⚠️ Windows 검증은 Phase 6) |
+| **`commands/notion.rs`** | `start` · `status` · `check_connection` · `save_token` · `delete_token`. **저장된 token을 돌려주는 command가 없다** | **DONE** |
+| **Detail의 Export/Send · 목록의 sync 상태 · Settings의 Notion 구역** | Markdown export · Send to Notion · sync 상태 표시 · connection test · destination 설정 | **DONE** (⚠️ 실행 화면 미확인) |
 | Windows 지원 검증 | §3.1 핵심 기능의 Windows 실동작 | **PLANNED** (Phase 6) |
 
 ---
@@ -150,7 +172,9 @@ Ollama 호출(`A-AI-001`)도 자동 검증에서는 fixture와 stub으로만 지
 | --- | --- | --- |
 | **선택됨 · 현재 사용 중** | Tauri v2 (2.11.5) · React 19 · Vite 7 · TypeScript 5.8 · ESLint · Vitest<br>**`rusqlite` 0.40.2 (`bundled`, SQLite 3.53.2)** — 제품 경로에서 실제로 쓰인다 | persistence 선택 근거는 `docs/ADR-0001-local-persistence.md` |
 | **선택됨 · 추론 미실행** | **`whisper-rs` 0.16 + `rubato` 5** — 제품 전사 경로에서 쓰인다 | ⚠️ 실제 모델로 추론한 적이 없다 (`A-TRANS-001`) |
-| **선택됨 · 실제 호출 미실행** | **`ureq` 3.4 (`default-features = false`)** — 로컬 Ollama REST를 부르는 유일한 자리(`ai/ollama/network.rs`)에서 쓰인다 | ⚠️ 실제 서버에 요청을 보낸 적이 없다 (`A-AI-001`). TLS feature를 끈 것은 이 Phase가 사용자의 로컬 주소로만 나가기 때문이며, HTTPS가 필요한 Phase 5에서 켠다 (`ADR-0008` §12.2) |
+| **선택됨 · 실제 호출 미실행** | **`ureq` 3.4.0 (`default-features = false, features = ["rustls"]`)** — 로컬 Ollama REST(`ai/ollama/network.rs`)와 Notion HTTPS(`notion/network.rs`)를 부르는 자리에서 쓰인다 | ⚠️ 실제 서버에 요청을 보낸 적이 없다 (`A-AI-001` · `A-NOTION-001`). **Phase 5가 `rustls`를 명시적으로 켰다** — ADR-0008 §12.2가 예고한 대로 HTTPS가 실제로 필요해진 시점이다 |
+| **선택됨 · 실제 저장소 미접근** | **`keyring` 3.6.3 (`apple-native` + `windows-native`)** — Notion integration token을 담는 유일한 자리(`platform/secret_store.rs`) | ⚠️ 자동 테스트는 메모리 double만 쓰며 실제 OS 자격증명 저장소를 건드리지 않는다. feature 전체 목록은 **UNVERIFIED** — 확인된 것은 두 feature 이름이 실재하고 플랫폼 API가 들어왔다는 것까지다 (`ADR-0009` §15.2.4) |
+| **선택됨 · 사용 중** | **`sha2` 0.10** — export 경로에서 쓰인다 | `Cargo.lock`이 고정한다 |
 | **잠정 선택 · 장치 미검증** | **`cpal` 0.18.2 + `hound` 3.5.1** — **제품 녹음 경로에서 쓰인다** | ⚠️ `ADR-0003`은 **PROVISIONAL**이다. 실제 마이크에서 확인된 적이 없다 (`ASSUMPTION A-REC-001`) |
 | **설치됨 · 미통합** | (없음) | scaffold의 `tauri-plugin-opener`는 Phase 1에서 **제거**했다 |
 | **후보 · 미선택** | recording: `cpal`+`hound` / webview MediaRecorder / 커뮤니티 플러그인<br>transcription: whisper.cpp sidecar / `whisper-rs`<br>Notion: `@notionhq/client` | **설치되지 않았다.** 각각 이를 필요로 하는 Phase에서 검증과 함께 선택한다. 확인된 사실은 `PRODUCT-SPEC.md` §14 |
@@ -158,18 +182,28 @@ Ollama 호출(`A-AI-001`)도 자동 검증에서는 fixture와 stub으로만 지
 | **미룸** | Cloud AI Providers (Claude · Gemini · Groq) | V1 성공 조건(§17.1)이 AI 없이 성립하도록 정의됐다. 추상화는 Phase 4에 있고 구현은 필요해질 때 (`PRODUCT-SPEC.md` §16) |
 | **미룸** | Claude Agent SDK | 단일 요청/응답 변환에 agentic loop가 필요한 이유가 없다 (`PRODUCT-SPEC.md` §9.4) |
 | **미룸** | Ollama 자체의 번들링 | 사용자가 실행 중인 인스턴스에 연결만 한다 (`PRODUCT-SPEC.md` §9.4 · §15) |
+| **탈락** | `@notionhq/client` (공식 JS SDK) | 호출 주체가 Rust backend다 (ADR-0008 §5와 일관). frontend가 token을 만지지 않는 것이 INV-7의 실현 방법이다 |
+| **탈락** | Notion 블록 JSON 직접 조립 | Markdown Content API가 VERIFIED가 되어 §11의 export 산출물을 그대로 보낸다 (`PRODUCT-SPEC` §14.9.1) |
 
 외부 전송 경계는 `docs/PRODUCT-SPEC.md` §12가 정본이다.
-**인터넷으로 나가는 경로는 여전히 없다.** Phase 4가 만든 유일한 네트워크 경로는
-사용자의 로컬 주소(기본 `http://localhost:11434`)를 향하며, 그 주소는 설정에서 바꿀 수 있다.
+**Phase 5에서 처음으로 인터넷으로 나가는 경로가 생겼다** — Notion sync다.
+그것은 **명시적 opt-in**이며 (사용자가 token을 저장하고 destination을 고르고 Send를 눌러야
+한다), 나가는 것이 무엇인지 화면에 드러난다 (INV-5). Phase 4가 만든 Ollama 경로는 여전히
+사용자의 로컬 주소(기본 `http://localhost:11434`)를 향한다.
 
 경계는 세 단계로 나뉜다 — **완전 로컬**(녹음·전사) · **로컬 AI**(Ollama) ·
 **외부**(Cloud provider · Notion). 로컬 AI는 인터넷으로 나가지 않으므로 외부가 아니다.
 사용자가 그 주소를 원격 호스트로 바꾸면 로컬이 아니게 되며, 그래서 provider의
 **로컬/외부 구분이 화면까지 도달한다** (INV-5 · §12).
 
-**오디오는 이 경로로 나가지 않는다** — provider 요청 타입에 오디오를 담을 자리가 아예
-없다는 것이 소스 수준에서 강제된다 (INV-6 · `src-tauri/tests/audio_never_reaches_ai.rs`).
+**오디오는 어느 경로로도 나가지 않는다** — AI provider 요청 타입에도 Notion 요청 타입에도
+오디오를 담을 자리가 아예 없다는 것이 소스 수준에서 강제된다 (INV-6 ·
+`audio_never_reaches_ai.rs` · `notion_and_export_invariants.rs`의
+`an_audio_file_that_really_exists_reaches_neither_the_file_nor_the_request` ·
+`nothing_in_the_notion_boundary_can_open_or_read_a_file`).
+
+**Notion integration token은 저장소에 없다** — `platform/secret_store.rs`의 경계를 통해 OS
+자격증명 저장소에만 담기고, SQLite에는 secret이 아닌 `notion_parent_page_id`만 있다 (INV-7).
 
 ---
 
@@ -416,17 +450,70 @@ Gate가 **컴파일**할 뿐 실행하지 않는다. 절차와 기록표는
 
 Runtime 관찰은 `LOOP-RUNTIME-FIELD-NOTES.md` OBS-022 · OBS-023.
 
-### Phase 5 — Notion & Markdown Export · **PLANNED**
-### Phase 6 — Cross-platform Validation & Hardening · **PLANNED**
+### Phase 5 — Notion & Markdown Export · 2026-09-04 · **engineering DONE · 실제 전송 DEFERRED**
 
+Task 12개(TASK-043 ~ TASK-054), 전부 Gate PASS + 독립 Verifier PASS. **12개 모두 첫 시도 통과.**
+
+| Task | 결과물 |
+| --- | --- |
+| TASK-043 | `ADR-0009` — export 구조 · 파일명/충돌 정책 · Notion 경로 · 분할 정책 · 중복 sync · SecretStore · 실패 변환 · TLS |
+| TASK-044 | Markdown renderer와 안전한 파일명 (순수 모듈) |
+| TASK-045 | Markdown 파일 쓰기 경계와 export command |
+| TASK-046 | SecretStore 경계와 비-secret Notion 설정 (migration 7) |
+| TASK-047 | Notion adapter — 요청 조립 · 응답 해석 · 실패 변환 |
+| TASK-048 | 긴 markdown 문서의 무손실 분할 (순수 모듈) |
+| TASK-049 | Notion sync 실행 순서와 `NotionSync` 영속화 |
+| TASK-050 | Notion command와 IPC 표면 |
+| TASK-051 | Recording Detail · Recordings 목록 — Export와 Send to Notion |
+| TASK-052 | Settings — Notion 구역과 connection test |
+| TASK-053 | Phase 5 불변 규칙 전용 자동 테스트 |
+| TASK-054 | ADR-0009 확정과 운영자 smoke test 절차 |
+
+**채택된 경로: Notion Markdown Content API** (`ADR-0009`). §14.9가 UNVERIFIED로 남겨 둔
+항목을 Phase 5 계획 시점에 확인해 **VERIFIED**가 됐고 (`PRODUCT-SPEC` §14.9.1),
+그래서 블록 JSON을 조립하지 않는다 — §11의 export 산출물을 그대로 보낸다.
+렌더링은 한 방향이다: `export::Document → Markdown → (파일 | Notion)`.
+**Markdown을 되파싱하는 경로는 없다.**
+
+**중복 sync 정책: Recording 하나 ↔ Notion 페이지 하나.** `notion_syncs.recording_id`가
+PRIMARY KEY라 스키마가 이미 그것을 강제하며, 부분 전송 뒤 재시도는 같은 페이지에서
+이어간다 (`a_retry_after_a_failed_second_chunk_continues_on_the_same_page_and_makes_no_duplicate`).
+
+**분할 예산은 이 앱이 고른 값이다** — 확인된 Notion 한도가 아니다. VERIFIED된 일반 요청
+한도(1000 blocks · 500KB) 아래에서 보수적으로 잡았고, markdown 엔드포인트 전용 상한은
+**UNVERIFIED**로 남아 있다 (`PRODUCT-SPEC` §14.9.1).
+
+⚠️ **다음은 이 Phase에서 한 번도 일어나지 않았다** (`A-NOTION-001`):
+
+```text
+실제 Notion 워크스페이스로 요청이 나간 적          ← NOT RUN
+만들어진 페이지가 읽을 만한 구조인가                ← NOT RUN
+1시간 transcript가 실물에서 온전한가                ← NOT RUN
+export Markdown이 Obsidian/NotebookLM에서 쓸 만한가 ← NOT RUN
+실제 OS 자격증명 저장소에 token이 담기는가          ← NOT RUN
+markdown 엔드포인트 전용 본문 크기 상한             ← UNVERIFIED
+```
+
+자동 검증은 전부 stub transport와 메모리 SecretStore double로 돌며, 소켓을 여는 파일과
+자격증명 저장소를 여는 파일은 Gate가 **컴파일**할 뿐 실행하지 않는다.
+절차와 기록표는 `docs/PHASE-5-NOTION-SMOKE-TEST.md`, 가정은 그 문서 §10.1이다.
+
+**Markdown 파일 export는 예외다** — 외부 의존이 없어 임시 디렉터리에 실물 파일을 쓰는
+자동 검증이 실제로 지나간다.
+
+이 Phase의 입력도 전부 fixture였다 — `A-TRANS-001` · `A-AI-001`이 여전히 유효하기 때문이다.
+
+Runtime 관찰은 `LOOP-RUNTIME-FIELD-NOTES.md` OBS-022 · OBS-023 · OBS-024.
+
+### Phase 6 — Cross-platform Validation & Hardening · **PLANNED**
 ---
 
 ## 6. Validation Model
 
 | | 무엇을 보장하는가 | 수단 |
 | --- | --- | --- |
-| **Automated validation** | 위의 전부 + **전사 경계 · Transcript 버전 규칙** + **structured note schema · 방어적 파싱 · provider 계약 준수(adapter와 fake가 같은 묶음을 통과) · 실패 매핑 · provenance · append-only 재생성 · INV-6 오디오 미전송 · INV-8 provider 없는 core pipeline** — **자동 테스트 789개** (web `vitest` 306 · Rust `cargo test` 483) | `build` · `lint` · `test` Gate + 독립 Verifier |
-| **Human validation / witness** | 실제 마이크 음질 · 재생 음질 · **실제 Whisper 추론(`A-TRANS-001`)** · **실제 Ollama 호출과 AI Note의 유용성(`A-AI-001`)** · Notion 페이지 품질 · **화면의 시각적 완성도** · **Windows 실동작** · **연기된 recording 장치 검증(ADR-0003 §12)** | 사람이 직접 확인 |
+| **Automated validation** | 위의 전부 + **Markdown 렌더링 결정성 · 파일명 정규화 · 무손실 분할과 재조립 · Notion 요청 조립과 실패 변환 · `Retry-After` 준수 · 중복 페이지 없는 재시도 · SecretStore 경계** — **자동 테스트 1,081개** (web `vitest` 384 · Rust `cargo test` 697) | `build` · `lint` · `test` Gate + 독립 Verifier<br>Task별 Gate는 최소·관련 범위로 좁힐 수 있으나 **Phase 종료 시에는 저장소 전체에 세 Gate를 모두 돌린다** (2026-09-04 운영자 결정) |
+| **Human validation / witness** | 실제 마이크 음질 · 재생 음질 · **실제 Whisper 추론(`A-TRANS-001`)** · **실제 Ollama 호출과 AI Note의 유용성(`A-AI-001`)** · **실제 Notion 전송과 페이지 품질 · 1시간 transcript 온전성(`A-NOTION-001`)** · export Markdown의 외부 도구 호환성 · **화면의 시각적 완성도** · **Windows 실동작** · **연기된 recording 장치 검증(ADR-0003 §12)** | 사람이 직접 확인 |
 
 > Phase 1에서 사람이 확인한 것: 번들 `.app`의 Info.plist 병합(확인됨) ·
 > 권한 문구(확인됨) · 화면 레이아웃(**소스 수준 검토만 — 실행 화면 확인은 사용자 몫**).
@@ -442,11 +529,13 @@ Runtime 관찰은 `LOOP-RUNTIME-FIELD-NOTES.md` OBS-022 · OBS-023.
 - ~~**`currentTranscriptId`를 갱신하는 파이프라인이 없다**~~ — Phase 3에서 해소됐다.
   전사 성공이 Transcript를 덧붙이고 current를 옮기며, 실패는 이전 current를 유지한다.
   남은 미확정은 실제 추론뿐이다 (`A-TRANS-001`).
-- **secret 저장소가 여전히 없다** — Phase 4는 secret을 만들지 않았다. 로컬 Ollama는 API key도
-  token도 요구하지 않아서, 더해진 설정은 `ai_provider` · `ai_base_url` · `ai_model` 셋뿐이다
-  (migration 6). 주소는 secret이 아니다. secret이 실제로 필요한 것은 Notion token을 다루는
-  Phase 5이며, 그때까지 **secret을 담을 열 자체를 만들지 않는다** (INV-7 ·
-  `no_migration_creates_a_place_to_put_a_secret`).
+- ~~**secret 저장소가 없다**~~ — Phase 5에서 해소됐다. Notion integration token이 이 제품의
+  **첫 진짜 secret**이며, `platform/secret_store.rs`의 경계 하나(닫힌 `SecretKey` ·
+  재현되지 않는 `Secret`)를 통해 OS 자격증명 저장소에만 담긴다.
+  **SQLite에는 여전히 secret 열이 없다** — migration 7이 더한 것은 비-secret인
+  `notion_parent_page_id` 하나이고, `no_migration_creates_a_place_to_put_a_secret`이
+  그대로 통과한다 (INV-7). 이 경계를 미래 Cloud provider 자격증명 체계로 일반화하지 않았다.
+  **Windows 구현은 같은 trait 뒤의 자리로만 있고 검증은 Phase 6이다.**
 - **⚠️ recording engine이 실제 장치에서 검증되지 않았다** — `cpal`/`hound` 경로는 컴파일되고
   순수 로직은 테스트되지만, 실제 마이크·권한·음질은 확인된 적이 없다.
   V1은 이 미확정 전제 위에 쌓인다 (`ASSUMPTION A-REC-001`).
@@ -466,6 +555,12 @@ Runtime 관찰은 `LOOP-RUNTIME-FIELD-NOTES.md` OBS-022 · OBS-023.
   Phase 4는 `num_ctx`를 명시하고(기본 16384) **들어가지 않는 입력은 보내지도 자르지도 않는
   것**으로 결정했다. 청킹은 하지 않는다 (`ADR-0008` §8). 그 문턱을 사용자가 조정하는
   `ai_context_tokens` 설정은 **결정만 있고 구현되지 않았다** (`ADR-0008` §17.3.2).
+- **⚠️ Notion 경로가 실제 워크스페이스에서 검증되지 않았다** — adapter · 분할 · SecretStore ·
+  화면이 컴파일되고 자동 검증을 지나지만, **실제 Notion으로 요청이 나간 적이 한 번도 없다**
+  (`ASSUMPTION A-NOTION-001`). markdown 엔드포인트 전용 본문 크기 상한도 **UNVERIFIED**이며,
+  분할 예산은 그래서 **이 앱이 고른 보수적 값**이지 확인된 API 한도가 아니다.
+  절차는 `docs/PHASE-5-NOTION-SMOKE-TEST.md`, 확정은 `phase-prompt/Goal.md`의 hard human
+  gate에서만 일어난다.
 - **⚠️ AI Note 경로가 실제 추론 서버에서 검증되지 않았다** — 계약 · adapter · 화면이
   컴파일되고 자동 검증을 지나지만, **실제 Ollama에 요청이 나간 적이 한 번도 없다**
   (`ASSUMPTION A-AI-001`). §14.5의 엔드포인트·파라미터 이름은 2026-09-01 기록이며 이 Phase가
@@ -489,6 +584,8 @@ Runtime 관찰은 `LOOP-RUNTIME-FIELD-NOTES.md` OBS-022 · OBS-023.
 | `docs/ADR-0005-microphone-permission.md` | 권한 판정의 VERIFIED / UNVERIFIED 경계 |
 | `docs/ADR-0008-note-ai-provider.md` | AI provider 경계 · 호출 주체(Rust backend) · 구조화 출력과 방어 경로 · structured note schema · context 전략 · **재생성 append-only 정책** · 설정값 노출 금지(§11.3) |
 | `docs/PHASE-4-AI-NOTE-REVIEW.md` | **실제 Ollama Human Review 절차와 빈 기록표.** §10.2가 이 Phase가 확인하지 **않은** 것의 정본이다 (`A-AI-001`) |
+| `docs/ADR-0009-notion-and-export.md` | Markdown 구조 · 파일명/충돌 정책 · Notion Markdown Content API 경로 · 분할 예산의 성격 · **중복 sync 정책** · SecretStore 경계 · 실패 변환 · `ureq` TLS |
+| `docs/PHASE-5-NOTION-SMOKE-TEST.md` | **실제 Notion smoke test 절차와 빈 기록표.** §10.1이 `A-NOTION-001`의 정본이고 §12가 확인되지 **않은** 것의 목록이다 |
 | `docs/GIT-WORKFLOW.md` | Git/GitHub 운영 정책 — Phase 단위 commit · public 저장소 안전 규칙 |
 | `docs/LOOP-RUNTIME-FIELD-NOTES.md` | Runtime 운용 관찰 기록 |
 | `CLAUDE.local.md` | 대화형 세션 운영 지침 |
@@ -522,6 +619,13 @@ Runtime 관찰은 `LOOP-RUNTIME-FIELD-NOTES.md` OBS-022 · OBS-023.
 | 2026-09-04 (Phase 4) | **구조화 출력에 Ollama `format`을 쓰되 거기에 기대지 않는다** | 응답이 기대 schema와 어긋나는 것은 로컬 소형 모델에서 예외가 아니라 기본 경로다. 파싱 실패를 별도의 **재시도 가능** 실패로 두고 앱이 깨지지 않게 한다 | 채택 (`ADR-0008` §6) |
 | 2026-09-04 (Phase 4) | **재생성은 append-only 이력.** 기존 AINote를 대체하지 않는다 | 대체는 되돌릴 수 없고, 어떤 프롬프트·모델이 어떤 노트를 만들었는지 provenance가 남지 않는다. Transcript는 어느 경로로도 쓰이지 않는다 (INV-2) | 채택 (`ADR-0008` §9) |
 | 2026-09-04 (Phase 4) | **긴 입력은 보내지도 자르지도 않는다.** 청킹하지 않는다 | 잘린 transcript로 만든 노트는 조용히 틀린 노트다. `num_ctx`를 명시하고 들어가지 않으면 그 사실을 실패로 말한다. 사용자 조정 설정(`ai_context_tokens`)은 미구현 | 채택 (`ADR-0008` §8) |
+| 2026-09-04 (Phase 5) | **Notion 전송에 Markdown Content API를 쓴다. 블록 JSON을 조립하지 않는다** | §14.9가 UNVERIFIED로 남긴 항목을 계획 시점에 primary source에서 확인해 VERIFIED가 됐다. §11의 export 산출물을 그대로 보내므로 렌더러가 하나로 유지된다 | 채택 (`ADR-0009` · `PRODUCT-SPEC` §14.9.1) |
+| 2026-09-04 (Phase 5) | **옛 "2000자 rich text · 100블록 배치"를 제품 요구사항에서 내린다** | 그것은 블록 JSON 경로의 규칙이었다. 지켜야 하는 불변은 수단이 아니라 **"긴 transcript가 잘리거나 조용히 유실되지 않는다"** 이며, 분할 예산은 이 앱이 고른 값이지 확인된 API 한도가 아니다 | 채택 (운영자 Human Review 승인) |
+| 2026-09-04 (Phase 5) | **SecretStore 경계를 도입한다** — 제품의 첫 진짜 secret | Phase 4는 Ollama가 token을 요구하지 않아 secret 보관 수단을 만들지 않았다. Notion token은 진짜 secret이므로 SQLite도 frontend도 아닌 OS 자격증명 저장소가 필요하다. Cloud provider 자격증명 체계로 일반화하지 않는다 (선입금 금지) | 채택 (`ADR-0009` §10 · INV-7 · INV-10) |
+| 2026-09-04 (Phase 5) | **중복 sync는 기존 페이지를 이어 쓴다.** 새 페이지를 만들지 않는다 | `notion_syncs.recording_id`가 PRIMARY KEY라 스키마가 이미 1:1을 강제한다. 부분 전송 실패 뒤 재시도가 중복 페이지를 만들면 사용자가 치우게 된다 | 채택 (`ADR-0009` §15.4) |
+| 2026-09-04 (Phase 5) | **`ureq`의 `rustls`를 켠다** | ADR-0008 §12.2가 "HTTPS가 실제로 필요해질 때 켠다"로 미뤄 둔 시점이 왔다. Notion은 HTTPS다 | 채택 (`Cargo.toml` · `ADR-0009` §15.2) |
+| 2026-09-04 (운영자) | **Task별 Gate는 최소·관련 범위로. Phase 종료 시에는 저장소 전체에 세 Gate** | Rust 전용 Task에 frontend 전용 `npm run build`를 거는 것은 Task-local 근거를 더하지 못한다. 다만 Phase 완료 판정은 좁힌 Gate 집합에 기대지 않는다 | 채택 (Phase 5 Human Review) |
+| 2026-09-04 (운영자) | **실제 Notion smoke test를 Final Integration으로 연기** | `A-REC-001` · `A-TRANS-001` · `A-AI-001`과 같은 판단이다. 위험을 명시적으로 수용한다 — 가정이 틀리면 adapter와 분할 정책에 rework | 채택 · 위험 수용 (`A-NOTION-001`) |
 | 2026-09-04 (운영자) | **실제 Ollama Human Review를 Final Integration으로 연기** | `A-REC-001` · `A-TRANS-001`과 같은 판단이다. 개발 흐름을 유지하고 위험을 명시적으로 수용한다 — 가정이 틀리면 adapter와 프롬프트에 rework | 채택 · 위험 수용 (`A-AI-001` · `docs/PHASE-4-AI-NOTE-REVIEW.md` §10.2) |
 
 ---

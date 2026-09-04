@@ -49,10 +49,20 @@ const payloadSource = readText('../src-tauri/src/commands/payload.rs');
  * 쓰기 이름은 늘지 않았다**: Transcript는 immutable이고 (§7.1 · INV-2) 저장소가 내놓는 쓰기
  * 경로도 추가 하나뿐이다.
  *
- * 마지막 다섯이 Phase 4의 AI 노트 표면이다 — **provider 상태 조회 · 생성 시작 · 진행 상태
+ * 그다음 다섯이 Phase 4의 AI 노트 표면이다 — **provider 상태 조회 · 생성 시작 · 진행 상태
  * 조회 · 저장된 노트 읽기 둘**이다. 여기서도 쓰기 이름은 늘지 않는다: 노트는 생성으로만 늘고
  * 재생성은 대체가 아니라 추가이므로 (docs/ADR-0008-note-ai-provider.md §9.2), 고치거나 지우는
  * 이름이 만들어질 자리가 없다.
+ *
+ * 그다음 하나가 Phase 5의 **Markdown export**다 (docs/ADR-0009-notion-and-export.md §4).
+ * 저장된 것을 읽어 파일 하나를 더할 뿐이므로 여기서도 쓰기 이름은 늘지 않으며, 이미 있는
+ * 파일을 덮어쓰지 않는다 (§4.3).
+ *
+ * 마지막 여섯이 같은 Phase의 **Notion 전송**이다 — 전송 시작 · 진행 상태 조회 · 저장된 전송
+ * 기록 읽기 · 연결 확인 · token 저장 · token 삭제 (§10 · §5-D · ADR-0009 §8 · §10).
+ * 여기서도 저장된 것을 고치거나 지우는 이름은 늘지 않는다: 지우는 하나는 이 앱이 자격증명
+ * 저장소에 넣은 항목이며, 녹음 · 전사 · 노트 · 이미 만들어진 Notion 페이지를 지우는 이름은
+ * 여전히 없다 (INV-3 · INV-4). **token을 돌려주는 이름도 없다** (INV-7).
  *
  * 이 목록에 없는 이름이 등록되면 그것은 Phase 범위가 넘쳤다는 뜻이다 — 그래서 이 검사는
  * 부분집합이 아니라 **정확히 같은 집합**을 요구한다.
@@ -79,6 +89,13 @@ const REGISTERED_COMMANDS = [
   'ai_note_status',
   'list_ai_notes',
   'get_ai_note',
+  'export_markdown',
+  'start_notion_sync',
+  'notion_sync_status',
+  'get_notion_sync',
+  'check_notion_connection',
+  'save_notion_token',
+  'delete_notion_token',
 ];
 
 /** lib.rs의 generate_handler![...]에 등록된 command 이름. */
@@ -125,17 +142,25 @@ describe('command 표면', () => {
   it('아직 만들지 않은 기능의 command가 등록되어 있지 않다', () => {
     // 녹음 표면은 **capture 계열 네 동작과 상태 조회**까지다. 저장된 녹음의 재생은
     // command로 하지 않는다 — 파일은 asset protocol로 흐르므로 이 표면에 이름이 생기지
-    // 않는다 (docs/ADR-0006-audio-playback.md). Notion · export는 Phase 5다.
+    // 않는다 (docs/ADR-0006-audio-playback.md).
     // 아래 정규식이 그 선을 지킨다 —
     // `*_recording`은 Recording 레코드를 만드는 영속화 표면의 이름이므로,
     // 녹음 동작이 그 이름으로 새로 생기는 것은 여전히 막는다.
     // `queue`·`batch`·`schedule`은 여러 Recording 일괄 처리 큐의 이름이며 DEFERRED다 (§16).
     //
+    // **export는 `export_markdown` 하나만 열렸다.** Phase 5가 실제로 만든 것이 그 하나이며
+    // (docs/ADR-0009-notion-and-export.md §4), PDF·DOCX 같은 다른 포맷과 일괄 export는 여전히
+    // 범위 밖이다 (phase-prompt/05의 Out of Scope).
+    //
+    // **`notion`은 이제 여기 없다** — 전송 표면이 실제로 열렸기 때문이다 (§10). 그 대신 아래의
+    // 'Notion 표면은 여섯뿐이다'가 그 선을 지킨다: 이름이 하나 늘면 그쪽에서 먼저 드러난다.
+    //
     // **벤더 이름은 여전히 여기 있다** — AI 표면이 열린 뒤에도 command 이름은 벤더 중립이어야
     // 한다 (INV-9). 어떤 provider를 쓰는지는 설정 값이고, 그것을 아는 코드는 adapter 안에만
-    // 있다. `ollama_*` 같은 이름이 등록되면 그 경계가 새어 나온 것이다.
+    // 있다. `ollama_*` 같은 이름이 등록되면 그 경계가 새어 나온 것이다. Notion은 그와 다르다 —
+    // 제품이 보내기로 한 목적지 그 자체이며 (PRODUCT-SPEC §10), 고를 수 있는 provider가 아니다.
     const outOfScope =
-      /(start|stop|pause|resume)_recording|play|whisper|ollama|llama|openai|anthropic|claude|gemini|notion|export|queue|batch|schedule/i;
+      /(start|stop|pause|resume)_recording|play|whisper|ollama|llama|openai|anthropic|claude|gemini|export(?!_markdown\b)|pdf|docx|queue|batch|schedule/i;
 
     for (const command of registeredCommands()) {
       expect(command, `${command}는 아직 만들지 않은 기능의 command다`).not.toMatch(outOfScope);
@@ -190,6 +215,40 @@ describe('command 표면', () => {
     expect(mutating).toEqual([]);
   });
 
+  it('Markdown export 표면은 파일 하나를 만드는 이름 하나뿐이다', () => {
+    // 일괄 export도, export한 것을 지우거나 다시 쓰는 이름도 이 Phase의 범위 밖이다
+    // (phase-prompt/05의 Out of Scope · §16 DEFERRED). 그것이 생기면 표면에 먼저 드러난다.
+    const exports = registeredCommands().filter((command) => /export/i.test(command));
+
+    expect(exports).toEqual(['export_markdown']);
+  });
+
+  it('Notion 표면은 전송 둘 · 저장된 기록 읽기 · 연결 확인 · token 둘뿐이다', () => {
+    // 여러 Recording 일괄 sync도, 보낸 페이지를 지우거나 다시 쓰는 이름도 이 Phase의 범위
+    // 밖이다 (docs/ADR-0009-notion-and-export.md §13 · §16 DEFERRED). 그것이 생기면 표면에
+    // 먼저 드러난다.
+    const notion = registeredCommands().filter((command) => /notion/i.test(command));
+
+    expect(notion.sort()).toEqual([
+      'check_notion_connection',
+      'delete_notion_token',
+      'get_notion_sync',
+      'notion_sync_status',
+      'save_notion_token',
+      'start_notion_sync',
+    ]);
+  });
+
+  it('저장된 Notion 전송 기록을 고치거나 지우는 command가 없다', () => {
+    // `notion_syncs`에 쓰는 자리는 전송 순서 하나뿐이다 (§8.4). 화면에서 시작한 어떤 동작도
+    // 이미 남은 전송 기록을 고치거나 지우지 못한다 (INV-3).
+    const mutating = registeredCommands().filter((command) =>
+      /^(update|set|edit|delete|remove|save)_.*sync/i.test(command),
+    );
+
+    expect(mutating).toEqual([]);
+  });
+
   it('frontend가 부르는 이름이 등록된 이름과 정확히 같다', () => {
     const called = [...commandsSource.matchAll(/call<[^>]*>\(\s*'([\w]+)'/g)].map(
       (matched) => matched[1],
@@ -239,6 +298,66 @@ describe('wire 계약에 벤더가 없다 (INV-9)', () => {
   });
 });
 
+describe('자격증명은 이 경계를 한 방향으로만 지난다 (INV-7)', () => {
+  // integration token은 저장하는 command의 **입력**으로 한 번 지나갈 뿐이다
+  // (docs/ADR-0009-notion-and-export.md §10.4). 돌아오는 길이 하나라도 있으면 그 값은 화면
+  // 상태 · 로그 · devtools로 새어 나갈 수 있다.
+
+  it('token 값을 담는 payload 필드가 Rust 쪽에 없다', () => {
+    // 있는 것은 `tokenStored: bool`처럼 **사실**을 말하는 필드뿐이다 — 값을 담는 자리가 없다.
+    expect(payloadSource).not.toMatch(/pub\s+\w*token\w*\s*:\s*(Option\s*<\s*)?String/i);
+    expect(payloadSource).toContain('pub token_stored: bool');
+  });
+
+  it('token 값을 담는 필드가 frontend 타입에도 없다', () => {
+    expect(typesSource).not.toMatch(/readonly\s+\w*token\w*\s*:\s*string/i);
+    expect(typesSource).toMatch(/readonly tokenStored: boolean/);
+    expect(typesSource).toMatch(/readonly stored: boolean/);
+  });
+
+  it('token을 돌려받는 command가 없다', () => {
+    // 함수 시그니처에서 token이 나타날 수 있는 자리는 **인자 하나뿐**이다.
+    const signatures = [...commandsSource.matchAll(/export function ([\s\S]*?)\{/g)].map(
+      (matched) => matched[1],
+    );
+    const carryingToken = signatures.filter((signature) => /token/i.test(signature));
+
+    expect(carryingToken.length).toBeGreaterThan(0);
+    for (const signature of carryingToken) {
+      const returns = signature.split('):').at(-1) ?? '';
+      expect(returns, `token을 돌려주는 command가 있다: ${signature}`).not.toMatch(/token(?!Status)/i);
+    }
+  });
+});
+
+describe('frontend는 Notion으로 직접 나가지 않는다', () => {
+  it('src/ 아래에 네트워크로 나가는 통로가 없다', () => {
+    // 요청을 만드는 자리는 Rust의 adapter 하나이며 (ADR-0009 §5 · INV-9의 태도), webview에는
+    // 임의의 요청을 만들 수단이 없다. 있으면 자격증명도 문서도 이 경계 밖으로 나갈 수 있다.
+    const outbound = [/\bfetch\s*\(/, /XMLHttpRequest/, /\bWebSocket\b/, /EventSource/];
+
+    for (const file of frontendSources) {
+      const source = readFileSync(file, 'utf8');
+      for (const shape of outbound) {
+        expect(source, `${file}이 직접 네트워크로 나간다`).not.toMatch(shape);
+      }
+    }
+  });
+
+  it('src/ 아래에 Notion API 지식이 없다', () => {
+    // 주소 · 헤더 이름 · API 버전 · 오류 코드는 adapter 디렉터리 밖으로 나가지 않는다.
+    // Rust 쪽의 같은 검사는 `src-tauri/tests/notion_adapter.rs`에 있다.
+    const vendorKnowledge = [/notion\.com/i, /Notion-Version/i, /Bearer\b/, /\/v1\//];
+
+    for (const file of frontendSources) {
+      const source = readFileSync(file, 'utf8');
+      for (const shape of vendorKnowledge) {
+        expect(source, `${file}에 Notion API 지식이 있다`).not.toMatch(shape);
+      }
+    }
+  });
+});
+
 describe('실패 타입', () => {
   it('Rust의 실패 종류가 frontend 타입에 전부 있다', () => {
     // Rust가 새 종류를 추가했는데 화면이 모르면, 실패가 조용히 다른 모양으로 도착한다.
@@ -251,5 +370,27 @@ describe('실패 타입', () => {
     for (const kind of kinds) {
       expect(union, `FailureKind에 '${kind}'가 없다`).toContain(`'${kind}'`);
     }
+  });
+
+  it('frontend 타입에는 Rust가 만들지 않는 종류가 없다', () => {
+    // 반대 방향도 막는다 — 화면에만 있는 종류는 어느 실패로도 도착하지 않으므로, 있으면
+    // 그것은 오타이거나 사라진 실패의 흔적이다. 둘 다 화면이 잘못된 안내를 하게 만든다.
+    //
+    // `unexpected` 하나만 예외다. 그것은 **frontend 경계에서만 만들어진다** (`toFailure`).
+    const kinds = new Set(
+      [...rustFailureSource.matchAll(/Self::\w+\s*=>\s*"(\w+)"/g)].map((matched) => matched[1]),
+    );
+
+    const union = failureTypeSource.match(/export type FailureKind =([^;]+);/)?.[1] ?? '';
+    const declared = [...union.matchAll(/'(\w+)'/g)].map((matched) => matched[1]);
+    expect(declared.length).toBeGreaterThan(0);
+
+    for (const kind of declared) {
+      if (kind === 'unexpected') {
+        continue;
+      }
+      expect(kinds.has(kind), `Rust에 '${kind}'가 없다`).toBe(true);
+    }
+    expect(declared.length, '두 목록의 크기가 다르다').toBe(kinds.size + 1);
   });
 });

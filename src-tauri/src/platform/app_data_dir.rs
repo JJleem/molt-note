@@ -27,6 +27,14 @@ const RECORDINGS_DIR_NAME: &str = "recordings";
 /// 않는다 — 사용자가 두고 앱은 그 자리를 안다.
 const MODELS_DIR_NAME: &str = "models";
 
+/// export된 Markdown 파일을 두는 하위 디렉터리 이름 (ADR-0009 §4.1).
+///
+/// **`Documents`나 `Downloads`가 아니다.** 그런 자리를 고르면 OS별 규약과 권한(특히 macOS의
+/// TCC)이 새 변수로 들어오지만, 앱 데이터 루트는 Tauri가 이미 답하고 있다. 그 대가로 사용자가
+/// 파일을 찾지 못하면 안 되므로 **export는 만들어진 파일의 전체 경로를 그대로 돌려준다**
+/// (`crate::export::run`).
+const EXPORTS_DIR_NAME: &str = "exports";
+
 /// 앱이 자신의 데이터를 두는 디렉터리.
 ///
 /// 임의의 base path로 생성할 수 있으므로 테스트는 임시 디렉터리를 주입해
@@ -106,6 +114,25 @@ impl AppDataDirectory {
     /// 내린다 (ADR-0007 §8.1).
     pub fn ensure_models_dir(&self) -> Result<PathBuf, AppDataDirError> {
         let directory = self.models_dir();
+        create(&directory)?;
+        Ok(directory)
+    }
+
+    /// export된 Markdown 파일을 두는 디렉터리. 같은 루트면 항상 같은 값이다 (ADR-0009 §4.1).
+    ///
+    /// **export 코드는 플랫폼 경로를 스스로 만들지 않는다** — DB · 녹음 · 모델이 이미 이 루트
+    /// 하나에서 파생되며, export만 다른 방식으로 자리를 정하면 "이 앱이 파일을 어디에 두는가"를
+    /// 답하는 자리가 둘이 된다 (INV-10).
+    pub fn exports_dir(&self) -> PathBuf {
+        self.root.join(EXPORTS_DIR_NAME)
+    }
+
+    /// export 디렉터리가 없으면 만들고 그 경로를 돌려준다.
+    ///
+    /// [`Self::ensure_recordings_dir`]와 같이 **이미 있는 것을 지우거나 비우지 않는다.** 앞서
+    /// 내보낸 파일은 사용자의 문서이며, 다음 export가 그것을 정리하지 않는다 (ADR-0009 §4.3).
+    pub fn ensure_exports_dir(&self) -> Result<PathBuf, AppDataDirError> {
+        let directory = self.exports_dir();
         create(&directory)?;
         Ok(directory)
     }
@@ -317,6 +344,71 @@ mod tests {
             std::fs::read_to_string(&existing).expect("이전 모델이 남아 있어야 한다"),
             "이전 모델"
         );
+    }
+
+    #[test]
+    fn the_exports_directory_is_derived_from_the_same_root_as_everything_else() {
+        // export 파일의 자리도 다른 모든 경로와 같은 루트에서 나온다 (INV-10 · ADR-0009 §4.1).
+        // 녹음·모델 디렉터리와 같아지면 사용자가 내보낸 문서가 앱의 내부 파일과 섞인다.
+        let temp = TempRoot::new("exports-derived");
+        let root = temp.path().join("app-data");
+
+        let dir = AppDataDirectory::new(&root);
+
+        assert_eq!(dir.exports_dir(), root.join(EXPORTS_DIR_NAME));
+        assert_eq!(
+            dir.exports_dir(),
+            AppDataDirectory::new(&root).exports_dir(),
+            "같은 루트면 같은 경로가 나와야 한다"
+        );
+        assert_eq!(dir.exports_dir().parent(), Some(root.as_path()));
+        assert_ne!(dir.exports_dir(), dir.recordings_dir());
+        assert_ne!(dir.exports_dir(), dir.models_dir());
+        assert_ne!(dir.exports_dir(), dir.database_path());
+    }
+
+    #[test]
+    fn ensuring_the_exports_directory_keeps_the_documents_already_exported() {
+        // 내보낸 파일은 **사용자의 문서다.** 다음 export를 준비하는 일이 그것을 지우지 않는다
+        // (ADR-0009 §4.3 · INV-4의 태도).
+        let temp = TempRoot::new("exports-kept");
+        let dir = AppDataDirectory::new(temp.path().join("app-data"));
+
+        let created = dir
+            .ensure_exports_dir()
+            .expect("export 디렉터리를 만들 수 있어야 한다");
+        let existing = created.join("2026-09-01-earlier.md");
+        std::fs::write(&existing, "# 이전에 내보낸 문서").expect("사전 조건: 이전 문서를 둔다");
+
+        let again = dir
+            .ensure_exports_dir()
+            .expect("두 번째 호출도 성공해야 한다");
+
+        assert_eq!(again, created);
+        assert_eq!(
+            std::fs::read_to_string(&existing).expect("이전 문서가 남아 있어야 한다"),
+            "# 이전에 내보낸 문서"
+        );
+    }
+
+    #[test]
+    fn an_exports_directory_that_cannot_be_created_becomes_a_readable_failure() {
+        // 디렉터리가 있어야 할 자리에 파일이 있다 — ADR-0009 §4.3이 말하는 "보이는 실패"다.
+        let temp = TempRoot::new("exports-blocked");
+        let root = temp.path().join("app-data");
+        std::fs::create_dir_all(&root).expect("사전 조건: 루트를 만든다");
+        std::fs::write(root.join(EXPORTS_DIR_NAME), "디렉터리가 아니다")
+            .expect("사전 조건: 파일을 둔다");
+
+        let error = AppDataDirectory::new(&root)
+            .ensure_exports_dir()
+            .expect_err("파일 위에 디렉터리를 만들 수는 없다");
+        let failure = Failure::from(error);
+
+        assert_eq!(failure.kind, FailureKind::Storage);
+        assert!(failure.message.contains(EXPORTS_DIR_NAME));
+        assert!(failure.source_data_safe, "아무것도 쓰지 못했다 (INV-3)");
+        assert!(failure.retryable);
     }
 
     #[test]

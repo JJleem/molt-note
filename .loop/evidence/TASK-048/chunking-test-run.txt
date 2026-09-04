@@ -1,0 +1,45 @@
+# TASK-048 — chunk 관련 테스트의 실제 실행 결과
+#
+# 출처: .loop/evidence/TASK-048/gate-test-stdout.log (test Gate 원문 전체가 그 파일에 있다).
+# 여기 있는 것은 그 파일에서 chunk 모듈에 해당하는 줄만 그대로 옮긴 것이며,
+# 왼쪽 숫자는 원문의 줄 번호다. 이 파일이 요약이고 판정 근거는 원문이다.
+
+## 1) 단위 테스트 — src-tauri/src/notion/chunk.rs 안의 #[cfg(test)] mod tests
+##    (lib 테스트 바이너리: "running 384 tests" → 384 passed, 0 failed — 원문 23행 · 409행)
+
+257:test notion::chunk::tests::a_code_fence_counts_as_one_block_unit ... ok
+258:test notion::chunk::tests::a_code_fence_is_never_split ... ok
+259:test notion::chunk::tests::a_document_under_the_budget_is_not_split ... ok
+260:test notion::chunk::tests::a_document_without_a_trailing_newline_keeps_its_last_byte ... ok
+261:test notion::chunk::tests::a_document_over_the_budget_is_split_and_rejoins_into_the_original ... ok
+262:test notion::chunk::tests::a_paragraph_bigger_than_the_budget_is_split_at_its_line_boundaries ... ok
+263:test notion::chunk::tests::a_line_longer_than_the_budget_is_refused_instead_of_cut ... ok
+264:test notion::chunk::tests::an_empty_document_becomes_no_chunk_at_all ... ok
+265:test notion::chunk::tests::a_split_lands_on_a_paragraph_boundary_when_it_can ... ok
+266:test notion::chunk::tests::atoms_cover_the_whole_document_in_order ... ok
+267:test notion::chunk::tests::every_chunk_boundary_sits_on_a_line_boundary ... ok
+268:test notion::chunk::tests::the_byte_budget_stays_under_the_verified_general_request_limit ... ok
+269:test notion::chunk::tests::a_code_block_longer_than_the_budget_is_refused_instead_of_cut ... ok
+278:test notion::chunk::tests::an_hour_long_transcript_rejoins_byte_for_byte ... ok
+282:test notion::chunk::tests::the_failure_says_where_and_how_big_without_quoting_the_document ... ok
+
+## 2) 통합 테스트 — src-tauri/tests/notion_chunking.rs
+##    바이너리: src-tauri/target/debug/deps/notion_chunking-29c2692162c02db2
+##    (gate-test-stderr.log 19행이 이 바이너리가 실제로 실행됐다는 기록이다)
+
+627:running 10 tests
+628:test a_document_under_the_budget_is_sent_as_one_piece ... ok
+629:test a_code_block_that_cannot_fit_is_refused_too ... ok
+630:test a_document_over_the_budget_becomes_several_chunks_that_rejoin_into_the_original ... ok
+631:test the_chunking_module_knows_nothing_about_the_network_storage_or_files ... ok
+632:test nothing_is_truncated_when_an_atom_does_not_fit ... ok
+633:test a_line_that_cannot_fit_is_refused_instead_of_being_cut_silently ... ok
+634:test the_failure_does_not_carry_the_document_into_its_message ... ok
+635:test an_hour_long_transcript_rejoins_byte_for_byte ... ok
+636:test an_atom_over_the_budget_is_the_only_reason_to_refuse ... ok
+637:test any_document_rejoins_into_exactly_what_went_in ... ok
+639:test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+
+## 3) 문서화 테스트
+##    chunk.rs의 split_markdown 예제(`assert_eq!(chunks.concat(), markdown);`)는 doc-test로
+##    함께 실행된다 — gate-test-stdout.log의 "Doc-tests molt_note_lib" 절.

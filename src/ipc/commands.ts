@@ -1,9 +1,11 @@
 /**
  * 프론트엔드가 부를 수 있는 동작의 전부.
  *
- * `src-tauri/src/lib.rs`가 등록한 스물한 개 command와 1:1이며, 그 밖의 경로는 없다 —
- * **임의의 질의를 보낼 수단이 없다.** 저장소를 아는 코드는 Rust 안에만 있다
- * (`docs/ADR-0001-local-persistence.md` · PRODUCT-SPEC §12).
+ * `src-tauri/src/lib.rs`가 등록한 스물여덟 개 command와 1:1이며, 그 밖의 경로는 없다 —
+ * **임의의 질의를 보낼 수단이 없다.** 저장소를 아는 코드는 Rust 안에만 있고, Notion으로
+ * 나가는 요청을 만드는 코드도 마찬가지다 — webview에는 그 통로가 없다
+ * (`docs/ADR-0001-local-persistence.md` · `docs/ADR-0009-notion-and-export.md` §5 ·
+ * PRODUCT-SPEC §12 · INV-7).
  *
  * 실패는 예외로 흘리지 않고 언제나 {@link Failure}로 만들어 던진다. 화면은 어떤 실패든
  * 같은 모양으로 받아 사용자에게 보여줄 수 있다 (§13).
@@ -22,10 +24,16 @@ import type {
   AiNote,
   AiNoteStatus,
   AiProviderStatus,
+  ExportedFile,
   InputDevice,
   MissingAudio,
   NewRecording,
   NoteMode,
+  NotionConfirmation,
+  NotionConnection,
+  NotionSendStatus,
+  NotionSync,
+  NotionTokenStatus,
   Recording,
   SessionStatus,
   Settings,
@@ -43,11 +51,19 @@ export type {
   AiProviderState,
   AiProviderStatus,
   CaptureReport,
+  ExportedFile,
   InputDevice,
   MeetingNote,
   MissingAudio,
   NewRecording,
   NoteMode,
+  NotionConfirmation,
+  NotionConnection,
+  NotionConnectionState,
+  NotionSendState,
+  NotionSendStatus,
+  NotionSync,
+  NotionTokenStatus,
   ProcessingStatus,
   Recording,
   SessionState,
@@ -306,4 +322,124 @@ export function listAiNotes(transcriptId: string): Promise<AiNote[]> {
 /** AI 노트 하나를 읽는다. 그런 id가 없으면 `null`이다. */
 export function getAiNote(aiNoteId: string): Promise<AiNote | null> {
   return call<AiNote | null>('get_ai_note', { aiNoteId });
+}
+
+/**
+ * 녹음 하나를 로컬 Markdown 파일로 내보낸다 (§11 · `phase-prompt/05` 요구 A-1).
+ *
+ * **돌아온 값은 이미 만들어진 파일을 가리킨다** — 접수 사실이 아니다. 기다릴 모델도 서버도
+ * 없으므로 전사·AI 노트처럼 시작하고 상태를 물어보는 규약을 쓰지 않는다.
+ *
+ * **AI provider를 고르지 않았거나 AI 노트가 하나도 없어도 성공한다** (INV-8). 그때는
+ * Transcript와 메타데이터만으로 이루어진 유효한 문서가 나오며, 없는 AI 섹션의 빈 껍데기가
+ * 남지 않는다.
+ *
+ * **이미 있는 파일을 덮어쓰지 않는다.** 같은 이름이 있으면 backend가 번호를 붙이므로
+ * ({@link ExportedFile.fileName}), 내보낸 파일을 사용자가 손댔더라도 그것이 사라지지 않는다
+ * (docs/ADR-0009-notion-and-export.md §4.3).
+ *
+ * 아직 전사가 없는 녹음이면 실패한다 — 제목과 길이만 담긴 빈 문서를 만드는 대신 무엇이
+ * 필요한지 말한다 (§13). 어떤 실패에서도 녹음 · 전사 · 노트는 그대로다 (INV-3).
+ *
+ * **어디에 만들어지는지는 화면이 정하지 않는다.** 자리를 아는 것은 backend 하나이며 (INV-10),
+ * 그래서 만들어진 파일의 전체 경로가 함께 온다 — 사용자가 파일을 찾지 못하는 상태로 두지 않는다.
+ */
+export function exportMarkdown(recordingId: string): Promise<ExportedFile> {
+  return call<ExportedFile>('export_markdown', { recordingId });
+}
+
+/**
+ * 녹음 하나를 Notion 페이지로 보내기 시작한다. **돌아오는 것은 접수 사실이지 전송 결과가 아니다.**
+ *
+ * 실제 전송은 backend의 배경 스레드에서 돌므로 이 호출은 바로 끝난다 — 1시간짜리 transcript를
+ * 걸어도 화면과 다른 command가 멈추지 않는다. 결과는 {@link notionSyncStatus}로 물어보고,
+ * 디스크에 남은 사실은 {@link getNotionSync}로 읽는다.
+ *
+ * **진행 중인 전송을 소유하는 것은 backend다** (R-001과 같은 규약). 이미 보내는 중이면
+ * 실패한다 — 같은 녹음이어도 마찬가지이며, 두 번째 요청이 조용히 사라지지 않는다. 여러 녹음을
+ * 줄 세우는 큐는 아직 없다 (PRODUCT-SPEC §16 DEFERRED).
+ *
+ * **token이나 부모 페이지를 설정하지 않았다는 이유로는 실패하지 않는다** (INV-8): 그때는 접수된 뒤
+ * 무엇이 남았는지가 `failed` 상태에 실려 온다.
+ *
+ * `confirmation`은 사용자가 무엇을 확인했는가다 (docs/ADR-0009-notion-and-export.md §8.3).
+ * **보내지 않으면 아무것도 확인하지 않은 것이며**, 새 페이지가 필요한 상태였다면 전송은 무엇을
+ * 확인해야 하는지 말하며 거절된다 — 앱이 대신 고르지 않으므로 사용자가 모르는 사이에 페이지가
+ * 둘이 되지 않는다.
+ *
+ * **어디로 어떻게 보내는지는 화면이 알지 않는다.** 주소도 엔드포인트도 자격증명도 backend 안에만
+ * 있고, webview에는 Notion으로 가는 통로가 없다 (PRODUCT-SPEC §12 · INV-7).
+ */
+export function startNotionSync(
+  recordingId: string,
+  confirmation?: NotionConfirmation,
+): Promise<NotionSendStatus> {
+  return call<NotionSendStatus>('start_notion_sync', {
+    recordingId,
+    confirmation: confirmation ?? null,
+  });
+}
+
+/**
+ * 지금 Notion 전송이 어떤 상태인지 물어본다. **전송이 도는 동안에도 즉시 답한다.**
+ *
+ * 아직 아무것도 걸지 않았으면 `idle`이 온다 — 오류가 아니다. 실패했으면 그 {@link Failure}가
+ * 그대로 실려 오므로 화면은 무엇이 실패했는지, 원본이 안전한지, 다시 시도할 수 있는지를 그
+ * 값에서 읽는다 (§13).
+ */
+export function notionSyncStatus(): Promise<NotionSendStatus> {
+  return call<NotionSendStatus>('notion_sync_status');
+}
+
+/**
+ * 그 녹음의 **저장된** Notion 전송 기록을 읽는다. 보낸 적이 없으면 `null`이다 (오류가 아니다).
+ *
+ * {@link notionSyncStatus}와 다른 값이다 — 저쪽은 앱이 켜져 있는 동안의 진행 상황이고, 이쪽은
+ * 디스크에 남아 있는 사실이다. **부분 전송이 여기서 드러난다** (`sentChunks` · `totalChunks`).
+ *
+ * **읽기뿐이다.** 전송 기록을 고치거나 지우는 command는 없다.
+ */
+export function getNotionSync(recordingId: string): Promise<NotionSync | null> {
+  return call<NotionSync | null>('get_notion_sync', { recordingId });
+}
+
+/**
+ * 저장된 token으로 지금 Notion과 말할 수 있는지 확인한다 (§5-D의 connection test).
+ *
+ * **token을 저장하지 않았거나 부모 페이지를 고르지 않은 것은 실패가 아니다** — 그 사실이
+ * {@link NotionConnection.state} · {@link NotionConnection.destinationConfigured}로 온다 (INV-8).
+ * 확인하지 못했다면 무엇이 달랐는지가 §13의 {@link Failure}로 실려 오므로, 화면은 token을 다시
+ * 넣어야 하는 것과 부모 페이지를 공유해야 하는 것과 네트워크 문제를 구분해 안내할 수 있다.
+ *
+ * **token 값은 오지 않는다** (INV-7). 오는 것은 저장돼 있다는 사실뿐이다.
+ *
+ * 서버가 응답하지 않으면 이 호출은 그 시간만큼 걸릴 수 있다 — 그동안에도 다른 command와 화면은
+ * 계속 응답한다.
+ */
+export function checkNotionConnection(): Promise<NotionConnection> {
+  return call<NotionConnection>('check_notion_connection');
+}
+
+/**
+ * integration token을 저장하고 **저장 여부만** 받는다 (INV-7 · ADR-0009 §10).
+ *
+ * 값이 이 경계를 지나는 방향은 하나다 — 화면에서 backend의 자격증명 저장소로. 돌아오는 길에는
+ * 값이 실리지 않으며, 저장된 token을 다시 읽는 command도 없다. 그래서 화면은 값을 들고 있을
+ * 이유가 없다 — 넘긴 뒤에는 입력란을 비우면 된다.
+ *
+ * 빈 값은 저장되지 않는다 (실패한다). 어디에 저장되는지는 화면이 알지 않으며 (INV-10), 저장할
+ * 자리가 없는 시스템에서는 파일로 대신 떨어뜨리지 않고 그 사실을 실패로 알린다.
+ */
+export function saveNotionToken(token: string): Promise<NotionTokenStatus> {
+  return call<NotionTokenStatus>('save_notion_token', { token });
+}
+
+/**
+ * 저장된 integration token을 지우고 **저장 여부만** 받는다.
+ *
+ * **없던 것을 지우는 것은 실패가 아니다.** 지운 뒤에도 녹음 · 전사 · 노트 · 이미 만들어진
+ * Notion 페이지는 그대로다 (INV-3).
+ */
+export function deleteNotionToken(): Promise<NotionTokenStatus> {
+  return call<NotionTokenStatus>('delete_notion_token');
 }

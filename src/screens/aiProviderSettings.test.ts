@@ -56,6 +56,7 @@ const DEFAULT_SETTINGS: Settings = {
   aiProvider: null,
   aiBaseUrl: null,
   aiModel: null,
+  notionParentPageId: null,
 };
 
 function form(changes: Partial<SettingsForm> = {}): SettingsForm {

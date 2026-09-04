@@ -2,12 +2,16 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   aiNoteStatus,
   aiProviderStatus,
+  exportMarkdown,
+  getNotionSync,
   getRecording,
   getTranscript,
   listAiNotes,
   listMissingAudio,
+  notionSyncStatus,
   recordingAudioSource,
   startAiNote,
+  startNotionSync,
   startTranscription,
   transcriptionStatus,
 } from '../ipc/commands';
@@ -16,6 +20,9 @@ import type {
   AiNoteStatus,
   AiProviderStatus,
   NoteMode,
+  NotionConfirmation,
+  NotionSendStatus,
+  NotionSync,
   Recording,
   Transcript,
   TranscriptionStatus,
@@ -28,7 +35,23 @@ import {
   type NoteSection,
   type NoteView,
 } from './aiNoteView';
+import {
+  NO_EXPORT_ATTEMPT,
+  exportPanel,
+  exportedFile,
+  failedExport,
+  type ExportAction,
+  type ExportAttempt,
+  type ExportPanelView,
+} from './exportView';
 import { FailureNotice } from './FailureNotice';
+import {
+  notionPanel,
+  notionTrouble,
+  type NotionPanelView,
+  type NotionSendAction,
+  type NotionTrouble,
+} from './notionSyncView';
 import {
   LOADING_RECORDING_DETAIL,
   MISSING_AUDIO_NOTICE,
@@ -71,6 +94,14 @@ const TRANSCRIPTION_REFRESH_MS = 1_000;
 const AI_NOTE_REFRESH_MS = 2_000;
 
 /**
+ * Notion으로 보내는 동안 상태를 다시 물어보는 간격(밀리초).
+ *
+ * 노트 생성과 같은 간격이다 — 요청 하나하나가 왕복이고 속도 제한 때문에 기다리는 구간도 있어
+ * (docs/ADR-0009-notion-and-export.md §9.2) 초 단위로 바뀌는 값이 아니다.
+ */
+const NOTION_REFRESH_MS = 2_000;
+
+/**
  * Recording Detail 화면 (§5.C).
  *
  * 세 가지를 읽는다 — 이 녹음(`get_recording`), **레코드는 있는데 파일이 없는 녹음의 목록**
@@ -89,6 +120,17 @@ const AI_NOTE_REFRESH_MS = 2_000;
  * `transcription_status`로 **물어본다** — 녹음 화면이 `capture_status`를 물어보는 것과 같은
  * 규약이다 (R-001). 그래서 화면이 unmount돼도 전사는 이어지고, 1시간짜리 녹음을 걸어 둔
  * 동안에도 이 화면은 멎지 않는다. unmount가 하는 일은 되풀이 조회를 멈추는 것뿐이다.
+ *
+ * ## 기록을 밖으로 꺼내는 문 둘 (§10 · §11)
+ *
+ * `Export Markdown`과 `Send to Notion`은 탭 위에 나란히 있다 — 어느 탭을 보고 있든 이 녹음의
+ * Notion 상태가 보여야 하기 때문이다 (`phase-prompt/05` 요구 9). 여기서도 판단은 순수 모듈에
+ * 있다 ({@link exportPanel} · {@link notionPanel}): **AI provider 없이 · AI 노트 없이 내보낼 수
+ * 있다는 것**과 **누르면 무슨 일이 일어나는가**가 DOM 없이 판정된다.
+ *
+ * 내보내기는 상태를 물어보는 규약을 쓰지 않는다 — `export_markdown`이 이미 만들어진 파일을
+ * 돌려주기 때문이다. Notion 전송은 전사·노트 생성과 같은 규약이다: backend가 소유하고 화면은
+ * 물어본다.
  *
  * 재생은 `<audio controls>` 하나다. 파일 바이트는 IPC를 지나지 않고 asset protocol을 지나며
  * (`recordingAudioSource` · docs/ADR-0006-audio-playback.md), 그 주소는 로컬 webview 안에서만
@@ -122,12 +164,23 @@ export function RecordingDetailScreen({ route, goBack }: ScreenProps) {
   /** provider 상태를 다시 물어본 횟수. 늘어나면 다시 물어본다. */
   const [providerAttempt, setProviderAttempt] = useState(0);
 
+  /** 이 화면이 건 Markdown export 한 번 (§11). 상태를 물어보는 규약을 쓰지 않는다. */
+  const [exportAttempt, setExportAttempt] = useState<ExportAttempt>(NO_EXPORT_ATTEMPT);
+  /** 디스크에 남아 있는 Notion 전송 기록. 아직 읽지 못했거나 보낸 적이 없으면 `null`이다. */
+  const [notionSync, setNotionSync] = useState<NotionSync | null>(null);
+  /** backend가 마지막으로 알려준 Notion 전송 상태. 아직 물어보지 못했으면 `null`이다. */
+  const [notionLive, setNotionLive] = useState<NotionSendStatus | null>(null);
+  /** 거절된 Notion 관련 요청 하나. 전송 자체의 실패와 다른 자리에 놓인다 (§13). */
+  const [notionIssue, setNotionIssue] = useState<NotionTrouble | null>(null);
+
   const recordingId = route.screen === 'recording-detail' ? route.recordingId : null;
 
   /** 마지막으로 본 전사 상태. 전사가 **끝나는 순간**을 알아보는 데 쓴다. */
   const lastLiveState = useRef<TranscriptionStatus['state'] | null>(null);
   /** 마지막으로 본 노트 생성 상태. 생성이 **끝나는 순간**을 알아보는 데 쓴다. */
   const lastAiState = useRef<AiNoteStatus['state'] | null>(null);
+  /** 마지막으로 본 Notion 전송 상태. 전송이 **끝나는 순간**을 알아보는 데 쓴다. */
+  const lastNotionState = useRef<NotionSendStatus['state'] | null>(null);
 
   /** 저장된 값을 다시 읽는다. 화면을 로딩으로 되돌리지 않는다 — 보고 있던 것이 사라지지 않게. */
   const reload = useCallback(() => setAttempt((count) => count + 1), []);
@@ -278,6 +331,57 @@ export function RecordingDetailScreen({ route, goBack }: ScreenProps) {
     refreshAiNote();
   }, [refreshAiNote]);
 
+  /**
+   * 이 녹음의 **저장된** Notion 전송 기록을 읽는다 (§7 · ADR-0009 §8.4).
+   *
+   * 레코드를 읽는 경로와 갈라 두었다 — 전송 기록을 읽지 못하는 것이 녹음 상세를 못 읽는 것으로
+   * 번지면 Notion 하나 때문에 재생과 Transcript가 함께 막힌다 (INV-8). 보낸 적이 없으면 `null`이
+   * 오며 그것은 오류가 아니다.
+   */
+  useEffect(() => {
+    if (recordingId === null) {
+      return;
+    }
+    let current = true;
+    getNotionSync(recordingId).then(
+      (next) => {
+        if (current) setNotionSync(next);
+      },
+      (error: unknown) => {
+        if (current) setNotionIssue(notionTrouble('sync', error));
+      },
+    );
+    return () => {
+      current = false;
+    };
+  }, [recordingId, attempt]);
+
+  /**
+   * 지금 Notion 전송이 어떤 상태인지 backend에 물어본다.
+   *
+   * 전사 · 노트 생성과 같은 규약이다 — 화면이 상태를 만들어 내지 않는다. 전송이 끝난 것을 본
+   * 순간에는 저장된 값을 다시 읽는다: 그때 비로소 새 `notion_syncs` 행과 `notionStatus`가
+   * 저장돼 있기 때문이다.
+   */
+  const refreshNotion = useCallback(() => {
+    notionSyncStatus().then(
+      (next) => {
+        setNotionLive(next);
+        const finished = next.state === 'done' || next.state === 'failed';
+        if (finished && lastNotionState.current === 'running' && next.recordingId === recordingId) {
+          reload();
+        }
+        lastNotionState.current = next.state;
+      },
+      (error: unknown) => setNotionIssue(notionTrouble('status', error)),
+    );
+  }, [recordingId, reload]);
+
+  // 화면을 열 때 한 번 물어본다 — 이 화면에 오기 전에 걸어 둔 전송이 돌고 있을 수 있다.
+  useEffect(() => {
+    refreshNotion();
+  }, [refreshNotion]);
+
   // 레코드를 아직 읽지 못한 것은 "전사가 없다"가 아니다 — 그 둘을 접지 않는다.
   const transcriptView =
     record === null ? LOADING_TRANSCRIPT_TAB : transcriptTab(record, currentTranscript, live);
@@ -316,6 +420,27 @@ export function RecordingDetailScreen({ route, goBack }: ScreenProps) {
     return () => clearInterval(timer);
   }, [generatingNote, refreshAiNote]);
 
+  // 내보내기와 Notion 전송. 어느 쪽도 재생 · Transcript · AI Note 탭을 막지 않으며, 판단은
+  // 전부 exportPanel · notionPanel에 있고 여기에는 없다.
+  const exportView = exportPanel({
+    recording: record,
+    // 가리키는 Transcript가 없으면 노트도 없다 (§7.2) — 읽지 못한 것과 다른 사실이다.
+    notes: noteTranscriptId === null ? [] : aiNotes,
+    attempt: exportAttempt,
+  });
+  const notionView = notionPanel({ recording: record, sync: notionSync, live: notionLive });
+  const sendingToNotion = notionView.body.kind === 'sending';
+
+  useEffect(() => {
+    // 보내는 동안에만 되풀이해 물어본다. 상태 조회는 전송을 기다리지 않으므로
+    // (`NotionSender::status`) 이 되풀이가 화면을 멎게 하지 않는다.
+    if (!sendingToNotion) {
+      return;
+    }
+    const timer = setInterval(refreshNotion, NOTION_REFRESH_MS);
+    return () => clearInterval(timer);
+  }, [sendingToNotion, refreshNotion]);
+
   /**
    * 이 화면에서 전사를 시작한다 — 처음이든 실패한 뒤든 같은 동작이다 (요구 2 · 7).
    *
@@ -348,6 +473,39 @@ export function RecordingDetailScreen({ route, goBack }: ScreenProps) {
         lastAiState.current = next.state;
       },
       (error: unknown) => setAiTrouble(aiNoteTrouble('start', error)),
+    );
+  };
+
+  /**
+   * 이 녹음을 로컬 Markdown 파일로 내보낸다 (§11 · 요구 A-1).
+   *
+   * 돌아오는 것은 **이미 만들어진 파일**이지 접수 사실이 아니다 — 기다릴 모델도 서버도 없다.
+   * 실패해도 녹음 · 전사 · 노트는 그대로이며 (INV-3), 그 사실은 실패 상태가 들고 있다.
+   */
+  const beginExport = (id: string) => {
+    setExportAttempt({ kind: 'running', recordingId: id });
+    exportMarkdown(id).then(
+      (file) => setExportAttempt(exportedFile(file)),
+      // 실패를 console에만 남기지 않는다. 화면 상태가 된다 (§13).
+      (error: unknown) => setExportAttempt(failedExport(id, error)),
+    );
+  };
+
+  /**
+   * 이 녹음을 Notion으로 보내기 시작한다 (§10 · ADR-0009 §8).
+   *
+   * 돌아오는 것은 접수 사실이지 전송 결과가 아니다. **`confirmation`을 화면이 스스로 고르지
+   * 않는다** — 값은 사용자가 누른 버튼이 들고 있던 것 그대로이며, 그래서 확인 없이 페이지가
+   * 하나 더 생기는 경로가 없다 (§8.3). 거절되면 그 사실이 화면에 남는다.
+   */
+  const beginNotionSend = (id: string, confirmation: NotionConfirmation) => {
+    setNotionIssue(null);
+    startNotionSync(id, confirmation).then(
+      (next) => {
+        setNotionLive(next);
+        lastNotionState.current = next.state;
+      },
+      (error: unknown) => setNotionIssue(notionTrouble('start', error)),
     );
   };
 
@@ -427,6 +585,13 @@ export function RecordingDetailScreen({ route, goBack }: ScreenProps) {
         </div>
       )}
 
+      {/* 기록을 이 앱 밖으로 꺼내는 문 둘 (§10 · §11). 탭 위에 있으므로 어느 탭을 보고
+          있든 Notion 상태가 보인다 (요구 9). */}
+      <section className="share">
+        <ExportPanel panel={exportView} onExport={beginExport} />
+        <NotionPanel panel={notionView} trouble={notionIssue} onSend={beginNotionSend} />
+      </section>
+
       <div className="tabs" role="tablist">
         {TABS.map((name) => (
           <button
@@ -464,6 +629,243 @@ export function RecordingDetailScreen({ route, goBack }: ScreenProps) {
         />
       )}
     </div>
+  );
+}
+
+/**
+ * Markdown export 자리 (§5 C · §11 · `phase-prompt/05` 요구 A-1~3).
+ *
+ * 여섯 상태가 서로 다른 모습을 갖는다. 어느 상태인지 정하는 규칙은 여기 없고
+ * {@link exportPanel}에 있다 — 이 컴포넌트는 그리기만 한다.
+ *
+ * **AI에 대한 참조가 하나도 없다** (INV-8). 만들어진 파일의 **전체 경로**는 언제나 보인다 —
+ * export 위치가 설정으로 노출되지 않으므로 그것이 사용자가 파일을 찾는 유일한 길이다 (§4.1).
+ */
+function ExportPanel({
+  panel,
+  onExport,
+}: {
+  panel: ExportPanelView;
+  onExport: (recordingId: string) => void;
+}) {
+  const { body, contents } = panel;
+
+  return (
+    <section className="share__panel">
+      <h2 className="share__title">Markdown</h2>
+
+      {body.kind === 'loading' && <p className="hint">Loading…</p>}
+
+      {body.kind === 'nothingToExport' && (
+        // 재료가 아직 없는 것은 실패가 아니다 (§7.2).
+        <div role="status">
+          <p className="empty">{body.text}</p>
+          <p className="hint">{body.hint}</p>
+        </div>
+      )}
+
+      {body.kind === 'ready' && (
+        <>
+          <p className="hint">{body.text}</p>
+          <ExportButton action={body.start} onExport={onExport} />
+        </>
+      )}
+
+      {body.kind === 'exporting' && (
+        <p className="hint" aria-live="polite">
+          {body.text}
+        </p>
+      )}
+
+      {body.kind === 'done' && (
+        <div className="share__done" role="status">
+          <p className="share__headline">{body.file.headline}</p>
+          <p className="share__file">{body.file.fileName}</p>
+          {/* 어디에 만들어졌는가 (§4.1). 이 줄이 없으면 사용자는 파일을 찾지 못한다. */}
+          <p className="share__path">{body.file.path}</p>
+          <p className="hint">{body.text}</p>
+          <ExportButton action={body.again} onExport={onExport} />
+        </div>
+      )}
+
+      {body.kind === 'failed' && (
+        <>
+          {/* 무엇이 실패했는지 · 원본은 안전한지 · 다시 시도할 수 있는지 (§13). */}
+          <FailureNotice failure={body.failure} headline={body.headline} />
+          {/* 앱은 아무것도 지우지 않았다 (INV-3). */}
+          <p className="hint">{body.preservedNotice}</p>
+          {body.resolution !== null && <p className="hint">{body.resolution}</p>}
+          <ExportButton action={body.retry} onExport={onExport} />
+        </>
+      )}
+
+      {/* 무엇이 파일에 들어가는가 · 오디오는 복사되지 않는다 (§11 · INV-6). */}
+      <div className="share__contents">
+        <p className="share__contents-title">{contents.headline}</p>
+        <ul className="share__items">
+          {contents.items.map((item) => (
+            <li key={item} className="share__item">
+              {item}
+            </li>
+          ))}
+        </ul>
+        <p className="hint">{contents.noteText}</p>
+        <p className="hint">{contents.audioNotice}</p>
+      </div>
+    </section>
+  );
+}
+
+function ExportButton({
+  action,
+  onExport,
+}: {
+  action: ExportAction;
+  onExport: (recordingId: string) => void;
+}) {
+  return (
+    <button type="button" className="action" onClick={() => onExport(action.recordingId)}>
+      {action.label}
+    </button>
+  );
+}
+
+/**
+ * Notion 전송 자리 (§5 C · §10 · `phase-prompt/05` 요구 9 · 12 · 13).
+ *
+ * 일곱 상태가 서로 다른 모습을 갖는다. 어느 상태인지 정하는 규칙은 여기 없고
+ * {@link notionPanel}에 있다 — 이 컴포넌트는 그리기만 한다.
+ *
+ * **누르기 전에 무슨 일이 일어나는지가 버튼 옆에 있다** ({@link NotionSendAction.outcomeText} ·
+ * ADR-0009 §8.5). 그리고 **확인이 필요한 상태를 {@link FailureNotice}로 그리지 않는다** —
+ * 아무것도 하지 않고 거절된 요청이며, 사용자가 할 일은 고르는 것뿐이다.
+ */
+function NotionPanel({
+  panel,
+  trouble,
+  onSend,
+}: {
+  panel: NotionPanelView;
+  trouble: NotionTrouble | null;
+  onSend: (recordingId: string, confirmation: NotionConfirmation) => void;
+}) {
+  const { body, contents, status } = panel;
+
+  return (
+    <section className="share__panel">
+      <h2 className="share__title">
+        Notion
+        {/* 이 녹음의 Notion 상태 (§7 · 요구 9). 목록과 같은 규칙으로 만들어진 값이다. */}
+        {status !== null && <span className="share__status">{status.text}</span>}
+      </h2>
+
+      {/* 요청이 거절된 사실은 전송 상태를 덮지 않고 그 옆에 남는다 (§13). */}
+      {trouble !== null && <FailureNotice failure={trouble.failure} headline={trouble.headline} />}
+
+      {body.kind === 'loading' && <p className="hint">Loading…</p>}
+
+      {body.kind === 'nothingToSend' && (
+        <div role="status">
+          <p className="empty">{body.text}</p>
+          <p className="hint">{body.hint}</p>
+        </div>
+      )}
+
+      {body.kind === 'ready' && (
+        <>
+          <p className="empty">{body.text}</p>
+          <SendButton action={body.send} onSend={onSend} />
+        </>
+      )}
+
+      {body.kind === 'sending' && (
+        <>
+          <p className="hint" aria-live="polite">
+            {body.text}
+          </p>
+          {body.progress !== null && <p className="hint">{body.progress.text}</p>}
+        </>
+      )}
+
+      {body.kind === 'sent' && (
+        <div className="share__done" role="status">
+          <p className="share__headline">{body.headline}</p>
+          {body.pageId !== null && <p className="share__path">{body.pageId}</p>}
+          {body.syncedAt !== null && <p className="hint">{body.syncedAt}</p>}
+          {body.progress !== null && <p className="hint">{body.progress.text}</p>}
+          {/* 또 보내면 무슨 일이 일어나는가 — **누르기 전에** 적혀 있다 (§8.3). */}
+          <SendButton action={body.again} onSend={onSend} />
+        </div>
+      )}
+
+      {body.kind === 'needsConfirmation' && (
+        // 경고가 아니다. 아무것도 하지 않고 거절된 요청이며, 사용자가 고를 차례다 (§8.5).
+        <div className="share__confirm" role="status">
+          <p className="share__headline">{body.headline}</p>
+          <p className="hint">{body.text}</p>
+          {body.progress !== null && <p className="hint">{body.progress.text}</p>}
+          <p className="hint">{body.preservedNotice}</p>
+          <SendButton action={body.confirm} onSend={onSend} />
+        </div>
+      )}
+
+      {body.kind === 'failed' && (
+        <>
+          {/* 무엇이 실패했는지 · 원본은 안전한지 · 다시 시도할 수 있는지 (§13). */}
+          {body.failure !== null && (
+            <FailureNotice failure={body.failure} headline={body.headline} />
+          )}
+          {body.failure === null && <p className="failure__headline">{body.headline}</p>}
+          {/* 부분 전송이었다면 그 사실이 드러난다 (§8.4 · 요구 12). */}
+          {body.progress !== null && <p className="hint">{body.progress.text}</p>}
+          {/* 녹음도 전사도 노트도, 이미 Notion에 있는 것도 그대로다 (INV-3). */}
+          <p className="hint">{body.preservedNotice}</p>
+          {body.resolution !== null && <p className="hint">{body.resolution}</p>}
+          <SendButton action={body.retry} onSend={onSend} />
+        </>
+      )}
+
+      {/* 무엇이 전송되는가 · 오디오는 나가지 않는다 (INV-5 · INV-6 · 요구 13). */}
+      <div className="share__contents">
+        <p className="share__contents-title">{contents.headline}</p>
+        <ul className="share__items">
+          {contents.items.map((item) => (
+            <li key={item} className="share__item">
+              {item}
+            </li>
+          ))}
+        </ul>
+        <p className="hint">{contents.audioNotice}</p>
+      </div>
+    </section>
+  );
+}
+
+/**
+ * 보내는 버튼 하나.
+ *
+ * **어떤 확인을 싣는지는 이 컴포넌트가 정하지 않는다** — 값은 {@link NotionSendAction}에 있고,
+ * 그래서 확인 없이 새 페이지를 만드는 버튼이 실수로 만들어질 수 없다 (ADR-0009 §8.3).
+ */
+function SendButton({
+  action,
+  onSend,
+}: {
+  action: NotionSendAction;
+  onSend: (recordingId: string, confirmation: NotionConfirmation) => void;
+}) {
+  return (
+    <>
+      {/* 누르면 무슨 일이 일어나는가 — 버튼보다 먼저 읽힌다 (§8.5 · 요구 8). */}
+      <p className="hint">{action.outcomeText}</p>
+      <button
+        type="button"
+        className="action"
+        onClick={() => onSend(action.recordingId, action.confirmation)}
+      >
+        {action.label}
+      </button>
+    </>
   );
 }
 

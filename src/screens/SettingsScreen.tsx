@@ -1,5 +1,13 @@
-import { useEffect, useState } from 'react';
-import { aiProviderStatus, getSettings, listInputDevices, updateSettings } from '../ipc/commands';
+import { useEffect, useRef, useState } from 'react';
+import {
+  aiProviderStatus,
+  checkNotionConnection,
+  deleteNotionToken,
+  getSettings,
+  listInputDevices,
+  saveNotionToken,
+  updateSettings,
+} from '../ipc/commands';
 import { toFailure, type Failure } from '../ipc/failure';
 import type { InputDevice } from '../ipc/types';
 import {
@@ -30,6 +38,26 @@ import {
   resolveDefaultMicrophone,
 } from './defaultMicrophone';
 import { FailureNotice } from './FailureNotice';
+import {
+  CHECKING_NOTION_TEXT,
+  HOW_TO_SET_A_DESTINATION,
+  NOTION_CHECK_USES_SAVED_SETTINGS,
+  NOTION_NOT_CHECKED_TEXT,
+  NOTION_SETTINGS_UNAFFECTED_NOTICE,
+  TOKEN_INPUT_NOTICE,
+  TOKEN_INPUT_PLACEHOLDER,
+  checkedNotionConnection,
+  failedNotionCheck,
+  notionDestinationChanged,
+  notionDestinationNotice,
+  notionTokenNotice,
+  notionTokenState,
+  notionTokenTrouble,
+  tokenStateOf,
+  type NotionConnectionView,
+  type NotionTokenState,
+  type NotionTokenTrouble,
+} from './notionSettings';
 import {
   LOADING_SETTINGS,
   editedSettings,
@@ -67,8 +95,15 @@ import {
  * 저장 경로에 닿지 않는다** (INV-8). AI 상태를 `SettingsView`가 아니라 별도의 state로 들고
  * 있는 이유가 이것이며, 장치 목록 실패를 설정 읽기 실패와 섞지 않는 것과 같은 규칙이다.
  *
- * Notion은 섹션 자리만 둔다 — 그 안의 기능은 Phase 5의 일이고, secret(API key ·
- * integration token) 입력은 INV-7에 따라 다루지 않는다.
+ * Notion 그룹은 **token 저장과 삭제 · destination · 연결 확인** 셋이다 (Phase 5 · §5-D).
+ * AI 구역과 나란히 있고 같은 규칙을 따른다 — 확인은 사용자가 눌러야 나가고, 그 결과가 어떻든
+ * 나머지 설정의 저장 경로에 닿지 않는다 (INV-8).
+ *
+ * **token만은 다른 규칙으로 다룬다** (INV-7 · ADR-0009 §10.4). 입력란은 `value`를 갖지 않는
+ * uncontrolled 입력이며, 그래서 그 값은 **React 상태에도 이 컴포넌트에도 남지 않는다.** 저장
+ * command에 한 번 넘긴 직후 입력란을 비우고, 저장된 값을 되읽어 채우지 않는다 — 되읽을
+ * command 자체가 없다. 화면이 아는 것은 '저장돼 있다/없다'뿐이며 ({@link NotionTokenState}),
+ * 그 사실조차 자기가 누른 버튼이 아니라 자격증명 저장소가 답한 값에서 온다.
  *
  * **Save는 화면 전체에 하나다.** 설정은 한 벌이고 한 번에 저장되므로, 그룹마다 버튼을 두어
  * "이 그룹만 저장된다"처럼 보이게 하지 않는다.
@@ -96,6 +131,35 @@ export function SettingsScreen() {
   });
   /** 확인이 실제로 물어본 대상 — 마지막으로 저장소에서 온 AI 세 값. */
   const [savedAi, setSavedAi] = useState<AiSettingsSnapshot | null>(null);
+  /**
+   * Notion 연결 확인이 지금까지 말해 준 것. **`view`와 따로 있다** — AI 쪽과 같은 이유이며,
+   * 이 값이 무엇이 되든 다른 설정은 그대로 저장된다 (INV-8).
+   */
+  const [notion, setNotion] = useState<NotionConnectionView>({
+    kind: 'notChecked',
+    text: NOTION_NOT_CHECKED_TEXT,
+  });
+  /**
+   * integration token이 저장돼 있는가. **값이 아니라 사실이다** (INV-7).
+   *
+   * 화면을 열자마자 자격증명 저장소를 뒤지지 않으므로 처음에는 `unknown`이다 — 없다고 적으면
+   * 알지 못하는 것을 아는 것처럼 말하는 것이 된다.
+   */
+  const [tokenState, setTokenState] = useState<NotionTokenState>('unknown');
+  /** 지금 진행 중인 token 작업. 없으면 `null`이다. */
+  const [tokenBusy, setTokenBusy] = useState<'save' | 'delete' | null>(null);
+  /** 저장·삭제가 거절됐다면 그 실패 (§13). 확인 결과와 섞지 않는다. */
+  const [tokenTrouble, setTokenTrouble] = useState<NotionTokenTrouble | null>(null);
+  /** 확인이 실제로 물어본 destination — 마지막으로 저장소에서 온 부모 페이지 값. */
+  const [savedDestination, setSavedDestination] = useState<string | null>(null);
+  /**
+   * token 입력란 그 자체.
+   *
+   * **state가 아니라 ref인 것이 이 화면의 INV-7이다.** 입력한 값은 React 상태에 들어가지
+   * 않고, 저장 command로 한 번 지나간 뒤 곧바로 지워진다 — 그래서 이 컴포넌트가 다시 그려질
+   * 때 값이 어디에도 남아 있지 않는다.
+   */
+  const tokenInput = useRef<HTMLInputElement>(null);
 
   /** 다시 읽는다. 상태를 되돌리는 것은 effect가 아니라 이 사용자 동작의 일이다. */
   const retryLoad = () => {
@@ -117,6 +181,8 @@ export function SettingsScreen() {
         if (!current) return;
         setView(loadedSettings(settings));
         setSavedAi(aiSettingsSnapshot(toForm(settings)));
+        // Notion 확인도 **저장된** destination에게 물어본다. 그 대상이 무엇인지 여기서 안다.
+        setSavedDestination(toForm(settings).notionParentPageId);
       },
       (error: unknown) => {
         // 실패를 console에만 남기지 않는다. 화면 상태가 된다 (§13).
@@ -179,6 +245,7 @@ export function SettingsScreen() {
         setView(savedSettings(settings));
         // 확인이 물어보는 대상은 저장된 값이다. 방금 저장한 것이 그 대상이 됐다.
         setSavedAi(aiSettingsSnapshot(toForm(settings)));
+        setSavedDestination(toForm(settings).notionParentPageId);
       },
       (error: unknown) => setView((state) => failedSave(state, error)),
     );
@@ -198,6 +265,74 @@ export function SettingsScreen() {
     );
   };
 
+  /**
+   * 입력한 token을 저장 command로 **넘기고 곧바로 입력란을 비운다** (INV-7 · ADR-0009 §10.4).
+   *
+   * 응답을 기다렸다가 비우지 않는다 — 값이 화면에 머무는 시간이 길어질 이유가 없고, 실패했을
+   * 때 그 값을 다시 쓰기 위해 붙들고 있으면 그것이 곧 화면에 남은 secret이 된다. 실패하면
+   * 무엇이 실패했는지가 §13으로 보이고, 사용자는 다시 붙여 넣는다.
+   *
+   * **빈 값을 여기서 걸러 내지 않는다.** 무엇이 저장될 수 있는 값인지는 backend가 정하며
+   * (`save_notion_token`), 그 답도 §13의 실패로 온다 — 같은 규칙이 두 벌이 되지 않게 한다.
+   */
+  const saveToken = () => {
+    const input = tokenInput.current;
+    if (input === null) return;
+
+    const typed = input.value;
+    input.value = '';
+
+    setTokenBusy('save');
+    setTokenTrouble(null);
+    saveNotionToken(typed).then(
+      (status) => {
+        setTokenBusy(null);
+        setTokenState(notionTokenState(status));
+        // 확인된 것은 방금 저장한 token이 아니라 그 전 것이다. 결과를 그대로 두면 화면이
+        // 확인하지 않은 것을 확인한 것처럼 말하게 된다.
+        setNotion({ kind: 'notChecked', text: NOTION_NOT_CHECKED_TEXT });
+      },
+      (error: unknown) => {
+        setTokenBusy(null);
+        setTokenTrouble(notionTokenTrouble('save', error));
+      },
+    );
+  };
+
+  /** 저장된 token을 지운다. **없던 것을 지우는 것도 실패가 아니다** (INV-3 · INV-8). */
+  const removeToken = () => {
+    setTokenBusy('delete');
+    setTokenTrouble(null);
+    deleteNotionToken().then(
+      (status) => {
+        setTokenBusy(null);
+        setTokenState(notionTokenState(status));
+        setNotion({ kind: 'notChecked', text: NOTION_NOT_CHECKED_TEXT });
+      },
+      (error: unknown) => {
+        setTokenBusy(null);
+        setTokenTrouble(notionTokenTrouble('delete', error));
+      },
+    );
+  };
+
+  /**
+   * 저장된 token으로 지금 Notion과 말할 수 있는지 물어본다 (§5-D).
+   *
+   * **저장된 것에게 물어본다** — token은 자격증명 저장소에서, destination은 설정에서 온다.
+   * 확인은 저장 여부에 대한 가장 최근의 사실도 함께 들고 오므로 그것으로 화면을 맞춘다.
+   */
+  const checkNotion = () => {
+    setNotion({ kind: 'checking', text: CHECKING_NOTION_TEXT });
+    checkNotionConnection().then(
+      (connection) => {
+        setNotion(checkedNotionConnection(connection));
+        setTokenState(tokenStateOf(connection));
+      },
+      (error: unknown) => setNotion(failedNotionCheck(error)),
+    );
+  };
+
   const { form, saving, saved, failure } = view;
   // 저장된 값과 지금 있는 장치를 맞춰 본다. 판단은 순수 모듈이 하고 화면은 그리기만 한다.
   const chosen = chosenMicrophone(form.defaultMicrophone);
@@ -208,6 +343,12 @@ export function SettingsScreen() {
   const transfer = aiTransferNotice(aiProviderLocality(form.aiProvider));
   const modelNotice = aiModelNotice(form.aiModel, connection);
   const staleCheck = aiSettingsChanged(form, savedAi);
+
+  // Notion 쪽도 같다 — 저장 여부의 문구도, destination에 대한 말도, 확인 결과의 갈래도 전부
+  // 순수 모듈이 정한다 (`notionSettings.ts`).
+  const tokenNotice = notionTokenNotice(tokenState);
+  const destinationNotice = notionDestinationNotice(form.notionParentPageId);
+  const staleDestination = notionDestinationChanged(form.notionParentPageId, savedDestination);
 
   return (
     <div className="screen">
@@ -402,7 +543,104 @@ export function SettingsScreen() {
 
       <section className="group">
         <h2 className="group__title">Notion</h2>
-        <p className="hint">Not available yet.</p>
+
+        {/* 저장돼 있는가 — 그것이 화면이 token에 대해 아는 전부다 (INV-7). 저장된 값이
+            없는 것은 오류가 아니라 상태이므로 담담한 문장 한 줄로 보인다 (INV-8). */}
+        <p className="hint">{tokenNotice.text}</p>
+        {tokenNotice.resolution !== null && <p className="hint">{tokenNotice.resolution}</p>}
+
+        <label className="field" htmlFor="notion-token">
+          <span className="field__label">Integration token</span>
+          {/* **`value`가 없다.** 입력한 값은 React 상태에 들어가지 않고, 저장된 값이 여기
+              채워지는 일도 없다 — 되읽는 command 자체가 없다 (INV-7). */}
+          <input
+            id="notion-token"
+            type="password"
+            className="field__input"
+            placeholder={TOKEN_INPUT_PLACEHOLDER}
+            autoComplete="off"
+            ref={tokenInput}
+          />
+        </label>
+        <p className="hint">{TOKEN_INPUT_NOTICE}</p>
+
+        <button
+          type="button"
+          className="action"
+          disabled={tokenBusy !== null}
+          onClick={saveToken}
+        >
+          {tokenBusy === 'save' ? 'Saving the token…' : 'Save the token'}
+        </button>
+        <button
+          type="button"
+          className="action"
+          disabled={tokenBusy !== null}
+          onClick={removeToken}
+        >
+          {tokenBusy === 'delete' ? 'Removing the token…' : 'Remove the saved token'}
+        </button>
+        {tokenTrouble !== null && (
+          <FailureNotice
+            failure={tokenTrouble.failure}
+            headline={tokenTrouble.text}
+            // 저장 실패에는 다시 시도 수단을 두지 않는다 — 넘긴 값은 이미 화면에 없으므로
+            // 같은 버튼이 같은 일을 할 수 없다. 지우기는 값 없이 다시 할 수 있다.
+            onRetry={tokenTrouble.request === 'delete' ? removeToken : undefined}
+          />
+        )}
+
+        <label className="field" htmlFor="notion-parent-page">
+          <span className="field__label">Parent page (destination)</span>
+          {/* secret이 아니라 **어디에 쓰는지**다. 그래서 다른 설정과 같은 폼 값이며 화면
+              전체의 Save 하나가 저장한다 (ADR-0009 §8.4 · `settingsView.ts`). */}
+          <input
+            id="notion-parent-page"
+            type="text"
+            className="field__input"
+            placeholder="Not set"
+            value={form.notionParentPageId}
+            onChange={(event) => edit({ notionParentPageId: event.currentTarget.value })}
+          />
+        </label>
+        {destinationNotice !== null && <p className="hint">{destinationNotice}</p>}
+        <p className="hint">{HOW_TO_SET_A_DESTINATION}</p>
+
+        <button
+          type="button"
+          className="action"
+          disabled={notion.kind === 'checking'}
+          onClick={checkNotion}
+        >
+          {notion.kind === 'checking' ? 'Checking…' : 'Check the Notion connection'}
+        </button>
+        <p className="hint">{NOTION_CHECK_USES_SAVED_SETTINGS}</p>
+        {staleDestination && (
+          <p className="hint">
+            The parent page above has changed since the last save, so this result is about the
+            saved one.
+          </p>
+        )}
+
+        {/* 성공 · token 없음 · 인증 실패 · 권한 없는 destination · 네트워크 없음 · 확인 거절이
+            서로 다른 값으로 온다. 화면은 그것을 다시 뭉치지 않는다 (`NotionConnectionView`). */}
+        <p className="hint">{notion.text}</p>
+        {notion.kind === 'noToken' && <p className="hint">{notion.resolution}</p>}
+        {notion.kind === 'connected' && notion.destinationNotice !== null && (
+          <p className="hint">{notion.destinationNotice}</p>
+        )}
+        {notion.kind === 'failed' && (
+          <>
+            <p className="hint">{notion.resolution}</p>
+            <FailureNotice failure={notion.failure} onRetry={checkNotion} />
+          </>
+        )}
+        {notion.kind === 'checkFailed' && (
+          <FailureNotice failure={notion.failure} onRetry={checkNotion} />
+        )}
+
+        {/* Notion 쪽이 어떻게 끝나든 나머지 설정은 그대로 저장된다 (INV-8). */}
+        <p className="hint">{NOTION_SETTINGS_UNAFFECTED_NOTICE}</p>
       </section>
 
       {/* 설정은 한 벌이므로 저장도 한 번이다. */}

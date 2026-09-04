@@ -1,0 +1,59 @@
+# Notion command와 IPC 표면
+# Runtime이 PLAN-20260904T025945Z 승인 시점에 생성했다 (proposal P8). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-050
+status: DONE
+
+request: |-
+  P7의 실행 순서와 P4의 설정 보관을 frontend가 쓸 수 있도록 Tauri command와 타입 계약을 만든다. 표면은 최소로 둔다: 전송 시작 · 지금 전송 상태 조회 · 저장된 `NotionSync` 읽기 · **connection test**(§5-D — ADR-0009대로 `GET /v1/users/me`로 token과 destination의 유효성을 확인한다) · token 저장과 삭제. `src-tauri/src/lib.rs`에 등록하고, `commands::payload`에 대응 payload를 두고, `src/ipc/commands.ts`와 `src/ipc/types.ts`에 1:1로 함수와 타입을 더한다. **어떤 조회 command도 token을 돌려주지 않는다** — token은 저장 command의 입력으로만 지나가고, 저장 여부(있다/없다)만 상태로 답한다. provider 상태 조회가 그랬듯이 '아직 설정하지 않았다'는 실패가 아니라 상태값이다. 이미 전송 중일 때 들어온 두 번째 요청은 조용히 사라지지 않고 거절된다. 실패는 전부 §13의 `Failure`로 도달하며 token이 그 문장에 섞이지 않는다. 저장소·네트워크를 아는 코드는 이 경계를 넘지 않는다 — frontend는 임의 요청을 만들 수단을 갖지 않는다.
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-049
+
+stop_condition:
+  gates: [build, lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 3
+
+acceptance_criteria:
+  - id: P8-AC1
+    description: |-
+      build Gate가 통과한다.
+    verification:
+      type: gate
+      ref: build
+  - id: P8-AC2
+    description: |-
+      lint Gate가 통과한다.
+    verification:
+      type: gate
+      ref: lint
+  - id: P8-AC3
+    description: |-
+      test Gate가 통과한다 — command 경계 테스트와 IPC 경계 테스트가 새 command를 포함한다.
+    verification:
+      type: gate
+      ref: test
+  - id: P8-AC4
+    description: |-
+      connection test command가 존재하고, stub transport로 성공/인증 실패/권한 없는 destination을 구분해 답하는 테스트가 있다 (§5-D · §13).
+    verification:
+      type: verifier
+  - id: P8-AC5
+    description: |-
+      token을 돌려주는 command가 하나도 없고, 저장 여부만 상태로 노출된다 (INV-7).
+    verification:
+      type: verifier
+  - id: P8-AC6
+    description: |-
+      `src/ipc/commands.ts` · `types.ts`가 등록된 command와 1:1이며 frontend가 Notion으로 직접 나가는 통로를 갖지 않는다.
+    verification:
+      type: verifier
+
+evidence: []
+
+failure_memo: []

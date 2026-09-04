@@ -1,0 +1,779 @@
+diff --git a/src-tauri/Cargo.lock b/src-tauri/Cargo.lock
+index bf8c27c..8e1ee85 100644
+--- a/src-tauri/Cargo.lock
++++ b/src-tauri/Cargo.lock
+@@ -451,6 +451,16 @@ dependencies = [
+  "version_check",
+ ]
+ 
++[[package]]
++name = "core-foundation"
++version = "0.9.4"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "91e195e091a93c46f7102ec7818a2aa394e1e1771c3ab4825963fa03e45afb8f"
++dependencies = [
++ "core-foundation-sys",
++ "libc",
++]
++
+ [[package]]
+ name = "core-foundation"
+ version = "0.10.1"
+@@ -474,7 +484,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "064badf302c3194842cf2c5d61f56cc88e54a759313879cdf03abdd27d0c3b97"
+ dependencies = [
+  "bitflags 2.13.1",
+- "core-foundation",
++ "core-foundation 0.10.1",
+  "core-graphics-types",
+  "foreign-types",
+  "libc",
+@@ -487,7 +497,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "3d44a101f213f6c4cdc1853d4b78aef6db6bdfa3468798cc1d9912f4735013eb"
+ dependencies = [
+  "bitflags 2.13.1",
+- "core-foundation",
++ "core-foundation 0.10.1",
+  "libc",
+ ]
+ 
+@@ -1931,6 +1941,20 @@ dependencies = [
+  "unicode-segmentation",
+ ]
+ 
++[[package]]
++name = "keyring"
++version = "3.6.3"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "eebcc3aff044e5944a8fbaf69eb277d11986064cba30c468730e8b9909fb551c"
++dependencies = [
++ "byteorder",
++ "log",
++ "security-framework 2.11.1",
++ "security-framework 3.7.0",
++ "windows-sys 0.60.2",
++ "zeroize",
++]
++
+ [[package]]
+ name = "libappindicator"
+ version = "0.9.0"
+@@ -2112,6 +2136,7 @@ version = "0.1.0"
+ dependencies = [
+  "cpal",
+  "hound",
++ "keyring",
+  "rubato",
+  "rusqlite",
+  "serde",
+@@ -2937,6 +2962,20 @@ dependencies = [
+  "web-sys",
+ ]
+ 
++[[package]]
++name = "ring"
++version = "0.17.14"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "a4689e6c2294d81e88dc6261c768b63bc4fcdb852be6d1352498b114f61383b7"
++dependencies = [
++ "cc",
++ "cfg-if",
++ "getrandom 0.2.17",
++ "libc",
++ "untrusted",
++ "windows-sys 0.52.0",
++]
++
+ [[package]]
+ name = "rsqlite-vfs"
+ version = "0.1.1"
+@@ -3007,6 +3046,41 @@ dependencies = [
+  "transpose",
+ ]
+ 
++[[package]]
++name = "rustls"
++version = "0.23.43"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "0283386ce02abc0151e1761d08802dfe86c173b0b494af5cbc086574e453da06"
++dependencies = [
++ "log",
++ "once_cell",
++ "ring",
++ "rustls-pki-types",
++ "rustls-webpki",
++ "subtle",
++ "zeroize",
++]
++
++[[package]]
++name = "rustls-pki-types"
++version = "1.15.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "2f4925028c7eb5d1fcdaf196971378ed9d2c1c4efc7dc5d011256f76c99c0a96"
++dependencies = [
++ "zeroize",
++]
++
++[[package]]
++name = "rustls-webpki"
++version = "0.103.15"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "f3c3cf1d8b1e7d4927e2d154c3fcb02979afb9939629c62cd9048d4f07b60ac2"
++dependencies = [
++ "ring",
++ "rustls-pki-types",
++ "untrusted",
++]
++
+ [[package]]
+ name = "rustversion"
+ version = "1.0.23"
+@@ -3079,6 +3153,42 @@ version = "1.2.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
+ 
++[[package]]
++name = "security-framework"
++version = "2.11.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "897b2245f0b511c87893af39b033e5ca9cce68824c4d7e7630b5a1d339658d02"
++dependencies = [
++ "bitflags 2.13.1",
++ "core-foundation 0.9.4",
++ "core-foundation-sys",
++ "libc",
++ "security-framework-sys",
++]
++
++[[package]]
++name = "security-framework"
++version = "3.7.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "b7f4bc775c73d9a02cde8bf7b2ec4c9d12743edf609006c7facc23998404cd1d"
++dependencies = [
++ "bitflags 2.13.1",
++ "core-foundation 0.10.1",
++ "core-foundation-sys",
++ "libc",
++ "security-framework-sys",
++]
++
++[[package]]
++name = "security-framework-sys"
++version = "2.17.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "6ce2691df843ecc5d231c0b14ece2acc3efb62c0a398c7e1d875f3983ce020e3"
++dependencies = [
++ "core-foundation-sys",
++ "libc",
++]
++
+ [[package]]
+ name = "selectors"
+ version = "0.36.1"
+@@ -3442,6 +3552,12 @@ version = "0.11.1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
+ 
++[[package]]
++name = "subtle"
++version = "2.6.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
++
+ [[package]]
+ name = "swift-rs"
+ version = "1.0.8"
+@@ -3526,7 +3642,7 @@ checksum = "d1c93047acf68669466a34690ac58cca7010bd1b201e1ec86f1fd0a75d3dd4a9"
+ dependencies = [
+  "bitflags 2.13.1",
+  "block2",
+- "core-foundation",
++ "core-foundation 0.10.1",
+  "core-graphics",
+  "crossbeam-channel",
+  "dbus",
+@@ -4207,6 +4323,12 @@ version = "1.13.3"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "c6f5d3c3b1bf09027a88a6bc961fc00497d651009560b5463668dc81b0fa87a8"
+ 
++[[package]]
++name = "untrusted"
++version = "0.9.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
++
+ [[package]]
+ name = "ureq"
+ version = "3.4.0"
+@@ -4216,8 +4338,11 @@ dependencies = [
+  "base64 0.23.1",
+  "log",
+  "percent-encoding",
++ "rustls",
++ "rustls-pki-types",
+  "ureq-proto",
+  "utf8-zero",
++ "webpki-roots",
+ ]
+ 
+ [[package]]
+@@ -4498,6 +4623,15 @@ dependencies = [
+  "system-deps",
+ ]
+ 
++[[package]]
++name = "webpki-roots"
++version = "1.0.9"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "7dcd9d09a39985f5344844e66b0c530a33843579125f23e21e9f0f220850f22a"
++dependencies = [
++ "rustls-pki-types",
++]
++
+ [[package]]
+ name = "webview2-com"
+ version = "0.38.2"
+@@ -4801,6 +4935,15 @@ dependencies = [
+  "windows-targets 0.42.2",
+ ]
+ 
++[[package]]
++name = "windows-sys"
++version = "0.52.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "282be5f36a8ce781fad8c8ae18fa3f9beff57ec1b52cb3de0789201425d9a33d"
++dependencies = [
++ "windows-targets 0.52.6",
++]
++
+ [[package]]
+ name = "windows-sys"
+ version = "0.59.0"
+@@ -4810,6 +4953,15 @@ dependencies = [
+  "windows-targets 0.52.6",
+ ]
+ 
++[[package]]
++name = "windows-sys"
++version = "0.60.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "f2f500e4d28234f72040990ec9d39e3a6b950f9f22d3dba18416c35882612bcb"
++dependencies = [
++ "windows-targets 0.53.5",
++]
++
+ [[package]]
+ name = "windows-sys"
+ version = "0.61.2"
+@@ -4843,13 +4995,30 @@ dependencies = [
+  "windows_aarch64_gnullvm 0.52.6",
+  "windows_aarch64_msvc 0.52.6",
+  "windows_i686_gnu 0.52.6",
+- "windows_i686_gnullvm",
++ "windows_i686_gnullvm 0.52.6",
+  "windows_i686_msvc 0.52.6",
+  "windows_x86_64_gnu 0.52.6",
+  "windows_x86_64_gnullvm 0.52.6",
+  "windows_x86_64_msvc 0.52.6",
+ ]
+ 
++[[package]]
++name = "windows-targets"
++version = "0.53.5"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "4945f9f551b88e0d65f3db0bc25c33b8acea4d9e41163edf90dcd0b19f9069f3"
++dependencies = [
++ "windows-link 0.2.1",
++ "windows_aarch64_gnullvm 0.53.1",
++ "windows_aarch64_msvc 0.53.1",
++ "windows_i686_gnu 0.53.1",
++ "windows_i686_gnullvm 0.53.1",
++ "windows_i686_msvc 0.53.1",
++ "windows_x86_64_gnu 0.53.1",
++ "windows_x86_64_gnullvm 0.53.1",
++ "windows_x86_64_msvc 0.53.1",
++]
++
+ [[package]]
+ name = "windows-threading"
+ version = "0.1.0"
+@@ -4889,6 +5058,12 @@ version = "0.52.6"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "32a4622180e7a0ec044bb555404c800bc9fd9ec262ec147edd5989ccd0c02cd3"
+ 
++[[package]]
++name = "windows_aarch64_gnullvm"
++version = "0.53.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "a9d8416fa8b42f5c947f8482c43e7d89e73a173cead56d044f6a56104a6d1b53"
++
+ [[package]]
+ name = "windows_aarch64_msvc"
+ version = "0.42.2"
+@@ -4901,6 +5076,12 @@ version = "0.52.6"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "09ec2a7bb152e2252b53fa7803150007879548bc709c039df7627cabbd05d469"
+ 
++[[package]]
++name = "windows_aarch64_msvc"
++version = "0.53.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "b9d782e804c2f632e395708e99a94275910eb9100b2114651e04744e9b125006"
++
+ [[package]]
+ name = "windows_i686_gnu"
+ version = "0.42.2"
+@@ -4913,12 +5094,24 @@ version = "0.52.6"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "8e9b5ad5ab802e97eb8e295ac6720e509ee4c243f69d781394014ebfe8bbfa0b"
+ 
++[[package]]
++name = "windows_i686_gnu"
++version = "0.53.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "960e6da069d81e09becb0ca57a65220ddff016ff2d6af6a223cf372a506593a3"
++
+ [[package]]
+ name = "windows_i686_gnullvm"
+ version = "0.52.6"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "0eee52d38c090b3caa76c563b86c3a4bd71ef1a819287c19d586d7334ae8ed66"
+ 
++[[package]]
++name = "windows_i686_gnullvm"
++version = "0.53.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "fa7359d10048f68ab8b09fa71c3daccfb0e9b559aed648a8f95469c27057180c"
++
+ [[package]]
+ name = "windows_i686_msvc"
+ version = "0.42.2"
+@@ -4931,6 +5124,12 @@ version = "0.52.6"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "240948bc05c5e7c6dabba28bf89d89ffce3e303022809e73deaefe4f6ec56c66"
+ 
++[[package]]
++name = "windows_i686_msvc"
++version = "0.53.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "1e7ac75179f18232fe9c285163565a57ef8d3c89254a30685b57d83a38d326c2"
++
+ [[package]]
+ name = "windows_x86_64_gnu"
+ version = "0.42.2"
+@@ -4943,6 +5142,12 @@ version = "0.52.6"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "147a5c80aabfbf0c7d901cb5895d1de30ef2907eb21fbbab29ca94c5b08b1a78"
+ 
++[[package]]
++name = "windows_x86_64_gnu"
++version = "0.53.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "9c3842cdd74a865a8066ab39c8a7a473c0778a3f29370b5fd6b4b9aa7df4a499"
++
+ [[package]]
+ name = "windows_x86_64_gnullvm"
+ version = "0.42.2"
+@@ -4955,6 +5160,12 @@ version = "0.52.6"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "24d5b23dc417412679681396f2b49f3de8c1473deb516bd34410872eff51ed0d"
+ 
++[[package]]
++name = "windows_x86_64_gnullvm"
++version = "0.53.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "0ffa179e2d07eee8ad8f57493436566c7cc30ac536a3379fdf008f47f6bb7ae1"
++
+ [[package]]
+ name = "windows_x86_64_msvc"
+ version = "0.42.2"
+@@ -4967,6 +5178,12 @@ version = "0.52.6"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
+ 
++[[package]]
++name = "windows_x86_64_msvc"
++version = "0.53.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "d6bbff5f0aada427a1e5a6da5f1f98158182f26556f345ac9e04d36d0ebed650"
++
+ [[package]]
+ name = "winnow"
+ version = "0.5.40"
+@@ -5122,6 +5339,12 @@ dependencies = [
+  "synstructure",
+ ]
+ 
++[[package]]
++name = "zeroize"
++version = "1.9.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "e13c156562582aa81c60cb29407084cdb54c4164760106ab78e6c5b0858cf64e"
++
+ [[package]]
+ name = "zerotrie"
+ version = "0.2.5"
+diff --git a/src-tauri/Cargo.toml b/src-tauri/Cargo.toml
+index eb7c087..9ff2994 100644
+--- a/src-tauri/Cargo.toml
++++ b/src-tauri/Cargo.toml
+@@ -56,11 +56,21 @@ rubato = "5"
+ # 호출 하나 때문에 async runtime을 들이지 않는다 (PRODUCT-SPEC §20.5).
+ # 쓰는 자리는 `ai::ollama::network` 하나이며, 그 위는 얇은 trait이라 교체 비용이 파일 하나다.
+ #
+-# `default-features = false`인 이유: 이 Phase는 사용자의 로컬 주소로만 나가므로 **TLS가 필요
+-# 없다.** 기본 feature는 rustls/ring을 함께 들여오고, 그것은 Phase 5(Notion·HTTPS)가 실제로
+-# 필요해질 때 켜는 것이 맞다 — 지금 켜 두면 미래 의존성 선입금이다 (ADR-0008 §12.2).
+-# 버전은 이 Run에서 cargo가 crates.io 인덱스로부터 실제로 해석한 값이다(3.4.0 ·
+-# `Cargo.lock`이 checksum까지 고정한다). MSRV는 확인하지 못했다 —
+-# `.loop/evidence/TASK-036/verification-log.md`.
+-ureq = { version = "3.4", default-features = false }
++# `default-features = false`를 **유지한다** (ADR-0009 §11.2-1) — 기본값을 다시 켜면 압축 ·
++# 쿠키 · 프록시처럼 이 앱이 쓰지 않는 것이 함께 들어온다. 필요한 것만 이름으로 켠다.
++#
++# ★ TLS — Phase 5는 HTTPS로 나간다 (Notion). 그래서 TLS 경로를 **명시적으로 하나 켠다.**
++#   켠 feature 이름:  `rustls`      (ADR-0009 §11.3의 1순위 — 순수 Rust TLS 구현)
++#   확인한 버전:      ureq 3.4.0    (`Cargo.lock`이 checksum까지 고정한다)
++#   루트 인증서 출처: `webpki-roots`(번들된 루트) — `Cargo.lock`이 실제로 무엇을 들여왔는지로
++#                     판정했다. OS 신뢰 저장소를 쓰는 구성이 아니다.
++#   판정 근거:        `.loop/evidence/TASK-047/ureq-tls-verification.md`
++#                     (ADR-0009 §11.4: "feature를 켰다고 적어 두고 lock이 그대로면 켜지지 않은
++#                      것이다" — before는 lock에 TLS crate가 하나도 없는 상태였다)
++# **인증서 검증을 끄는 구성은 없다** — 설정으로도 개발용 플래그로도 두지 않는다 (§11.2-3).
++# token이 실려 나가는 연결이다.
++#
++# MSRV는 확인하지 못했다 — `.loop/evidence/TASK-036/verification-log.md`.
++ureq = { version = "3.4", default-features = false, features = ["rustls"] }
++keyring = { version = "3", default-features = false, features = ["apple-native", "windows-native"] }
+ 
+diff --git a/src-tauri/src/domain/failure.rs b/src-tauri/src/domain/failure.rs
+index c27fb98..c0853c3 100644
+--- a/src-tauri/src/domain/failure.rs
++++ b/src-tauri/src/domain/failure.rs
+@@ -21,13 +21,13 @@ use serde::Serialize;
+ 
+ /// 실패가 어느 종류인지.
+ ///
+-/// **지금 실제로 만들어지는 것만 있다.** Notion의 실패 종류는 §13에 이미 적혀 있지만, 그
+-/// 기능이 존재하는 Phase가 그때 함께 추가한다 — 만들지 않은 실패의 자리를 미리 만들어 두지
++/// **지금 실제로 만들어지는 것만 있다** — 만들지 않은 실패의 자리를 미리 만들어 두지
+ /// 않는다 (§20.6). 전사 실패 네 종류는 **전사가 실재하는 Phase 3에서** 그 규칙대로 추가됐고
+ /// (`crate::transcription::engine`), AI provider 실패 다섯 종류는 **provider 계약이 실재하는
+ /// Phase 4에서** 같은 규칙으로 추가됐다 (`crate::ai::provider`). 여섯 번째인
+ /// [`Self::AiInputTooLarge`]는 그보다 늦다 — **요청 전에 크기를 판정하는 실행 순서가 실재하는
+-/// 자리에서** 추가됐다 (`crate::ai::run`).
++/// 자리에서** 추가됐다 (`crate::ai::run`). Notion 실패 다섯 종류도 같은 규칙으로 **Notion과
++/// 실제로 말하는 adapter가 실재하는 Phase 5에서** 추가됐다 (`crate::notion::client`).
+ #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+ #[serde(rename_all = "camelCase")]
+ pub enum FailureKind {
+@@ -94,6 +94,44 @@ pub enum FailureKind {
+     /// **provider가 만드는 실패가 아니다.** 만드는 쪽은 요청 전에 크기를 판정하는 실행 순서이며
+     /// (`crate::ai::run`), 그래서 `crate::ai::provider::AI_PROVIDER_FAILURE_KINDS`에 없다.
+     AiInputTooLarge,
++    /// Notion이 이 앱의 자격증명을 받아들이지 않았다 (§13 `authentication failure` ·
++    /// `docs/ADR-0009-notion-and-export.md` §9.3).
++    ///
++    /// **아래 다섯 Notion 실패도 서로 다른 종류로 남는다.** 전사 실패 넷 · AI 실패 여섯과 같은
++    /// 이유다 — 사용자가 할 수 있는 일이 전부 다르다: token을 다시 넣는 것 · 부모 페이지를
++    /// integration에 공유하는 것 · 잠시 기다리는 것 · 다시 시도하는 것 · Notion에서 무엇이
++    /// 만들어졌는지 확인하는 것.
++    ///
++    /// **다섯뿐인 것도 같은 규칙이다** (§20.6). Notion 설정이 없는 상태 · 전송이 진행 중인
++    /// 상태처럼 아직 만들어지지 않은 실패의 자리를 미리 만들지 않았다 — 다섯 전부
++    /// `crate::notion::client`가 실제로 만드는 것이며, 그 사실을 `NOTION_FAILURE_KINDS`와
++    /// 그 테스트가 고정한다.
++    NotionAuthFailed,
++    /// 보내려는 자리에 닿을 수 없다 — 부모 페이지가 없거나 integration에 공유되지 않았다
++    /// (§13 `sync failure` 중 `권한 없는 destination` · `phase-prompt/05` 요구 12).
++    ///
++    /// 인증 실패와 나누는 이유는 사용자가 할 일이 다르기 때문이다. token은 멀쩡한데 페이지를
++    /// 공유하지 않은 상황이 이 제품에서 가장 흔한 첫 실패이며, "token을 다시 넣어라"는 안내는
++    /// 그 사용자를 엉뚱한 곳으로 보낸다.
++    NotionDestinationUnavailable,
++    /// Notion이 요청 속도를 제한하고 있다 (§13 `rate limit` · ADR-0009 §9).
++    ///
++    /// **다시 보내면 되는 실패다.** 언제 보내면 되는지는 `crate::notion::RetryAfter`가 값으로
++    /// 함께 나온다 — 그 값을 `Failure`에 담지 않는 이유는 벤더 하나 때문에 domain 계약이
++    /// 넓어지지 않게 하기 위해서다.
++    NotionRateLimited,
++    /// Notion에 보낸 요청이 실패했다 (§13 `sync failure` — 연결 불가 · 타임아웃 · 거절된 요청 ·
++    /// 서버 쪽 오류).
++    ///
++    /// 재시도 가치는 원인에 따라 갈리지만 사용자가 보는 종류는 하나다 — 어느 쪽이든 할 수 있는
++    /// 일은 "다시 시도한다"뿐이다.
++    NotionRequestFailed,
++    /// Notion이 응답했지만 만들어진 페이지를 확인할 수 없다 (ADR-0009 §7.3 · §8.5의 '결과를 모름').
++    ///
++    /// **"모른다"를 "실패했다"로도 "성공했다"로도 바꿔 적지 않는다.** 페이지가 만들어졌을 수
++    /// 있으므로 그대로 다시 보내면 사용자가 모르는 사이에 페이지가 둘이 된다. 그래서 이 실패는
++    /// 재시도 가능으로 표시되지 않고, 사용자가 Notion을 확인한 뒤 다시 고르는 자리로 남는다.
++    NotionResponseUnusable,
+ }
+ 
+ impl FailureKind {
+@@ -116,6 +154,11 @@ impl FailureKind {
+             Self::AiRequestFailed => "aiRequestFailed",
+             Self::AiResponseUnusable => "aiResponseUnusable",
+             Self::AiInputTooLarge => "aiInputTooLarge",
++            Self::NotionAuthFailed => "notionAuthFailed",
++            Self::NotionDestinationUnavailable => "notionDestinationUnavailable",
++            Self::NotionRateLimited => "notionRateLimited",
++            Self::NotionRequestFailed => "notionRequestFailed",
++            Self::NotionResponseUnusable => "notionResponseUnusable",
+         }
+     }
+ }
+@@ -283,6 +326,17 @@ mod tests {
+         assert_eq!(FailureKind::AiRequestFailed.as_str(), "aiRequestFailed");
+         assert_eq!(FailureKind::AiResponseUnusable.as_str(), "aiResponseUnusable");
+         assert_eq!(FailureKind::AiInputTooLarge.as_str(), "aiInputTooLarge");
++        assert_eq!(FailureKind::NotionAuthFailed.as_str(), "notionAuthFailed");
++        assert_eq!(
++            FailureKind::NotionDestinationUnavailable.as_str(),
++            "notionDestinationUnavailable"
++        );
++        assert_eq!(FailureKind::NotionRateLimited.as_str(), "notionRateLimited");
++        assert_eq!(FailureKind::NotionRequestFailed.as_str(), "notionRequestFailed");
++        assert_eq!(
++            FailureKind::NotionResponseUnusable.as_str(),
++            "notionResponseUnusable"
++        );
+ 
+         // 이 문자열들은 `src/ipc/failure.ts`의 union과 1:1이다. 겹치면 화면이 두 실패를
+         // 구분하지 못한다.
+@@ -301,6 +355,11 @@ mod tests {
+             FailureKind::AiRequestFailed,
+             FailureKind::AiResponseUnusable,
+             FailureKind::AiInputTooLarge,
++            FailureKind::NotionAuthFailed,
++            FailureKind::NotionDestinationUnavailable,
++            FailureKind::NotionRateLimited,
++            FailureKind::NotionRequestFailed,
++            FailureKind::NotionResponseUnusable,
+         ];
+         let mut seen = Vec::new();
+         for kind in kinds {
+diff --git a/src-tauri/src/lib.rs b/src-tauri/src/lib.rs
+index 0eba1ac..ec7b6f7 100644
+--- a/src-tauri/src/lib.rs
++++ b/src-tauri/src/lib.rs
+@@ -3,12 +3,14 @@ pub mod audio;
+ pub mod commands;
+ pub mod db;
+ pub mod domain;
++pub mod export;
++pub mod notion;
+ pub mod platform;
+ pub mod transcription;
+ 
+ use tauri::Manager;
+ 
+-use commands::{AudioDevices, NoteGenerator, Recorder, Storage, Transcriber};
++use commands::{AudioDevices, Exporter, NoteGenerator, Recorder, Storage, Transcriber};
+ use platform::app_data_dir::AppDataDirectory;
+ 
+ #[cfg_attr(mobile, tauri::mobile_entry_point)]
+@@ -56,6 +58,15 @@ pub fn run() {
+             // 열람은 그대로 동작한다 (INV-8).
+             app.manage(NoteGenerator::open_for(app));
+ 
++            // Markdown export도 앱 데이터 루트 하나에서 자리를 얻는다 (INV-10 · ADR-0009 §4.1).
++            // **여기서 디렉터리를 만들지 않는다** — 한 번도 내보내지 않은 사용자에게 빈
++            // `exports/`를 만들어 두지 않으려는 것이며, 자리는 실제로 내보낼 때 준비된다.
++            //
++            // 진행 중인 무언가를 들고 있지도 않다. export는 기다릴 모델도 서버도 없는 짧은
++            // 일이라 배경 스레드와 상태 조회 규약을 쓰지 않는다 (crate::commands::export).
++            // 경로를 얻지 못한 실패는 값으로 남아 내보내려 할 때 사용자에게 전달된다 (§13).
++            app.manage(Exporter::open_for(app));
++
+             // 저장된 녹음을 재생하려면 webview가 그 파일을 읽을 수 있어야 한다.
+             // 그 통로는 Tauri v2의 asset protocol이고(`protocol-asset` feature),
+             // **열어 주는 자리는 녹음 디렉터리 하나뿐이다** — 사용자의 홈도, 앱 데이터
+@@ -113,6 +124,10 @@ pub fn run() {
+             commands::ai_note_status,
+             commands::list_ai_notes,
+             commands::get_ai_note,
++            // Markdown export의 표면은 이 하나다 — Recording 하나를 파일 하나로 만든다.
++            // **AI가 없어도 부를 수 있고** (INV-8), 이미 있는 파일을 덮어쓰지 않으며
++            // (ADR-0009 §4.3), 저장된 것을 고치거나 지우는 이름은 여기에도 없다.
++            commands::export_markdown,
+         ])
+         .run(tauri::generate_context!());
+ 
+diff --git a/src-tauri/tests/ollama_adapter.rs b/src-tauri/tests/ollama_adapter.rs
+index 2637e6d..76168f3 100644
+--- a/src-tauri/tests/ollama_adapter.rs
++++ b/src-tauri/tests/ollama_adapter.rs
+@@ -365,9 +365,13 @@ fn the_default_address_lives_in_the_settings_and_not_in_the_adapter() {
+ }
+ 
+ #[test]
+-fn only_one_file_in_the_repository_can_open_a_socket() {
++fn only_the_two_declared_files_in_the_repository_can_open_a_socket() {
+     // §18: 자동 검증이 실제 서버에 닿지 않는다는 것은 "그런 테스트를 안 썼다"가 아니라
+     // **네트워크에 닿을 수 있는 코드가 어디에 있는지**로 말한다.
++    //
++    // 둘인 것은 Phase 5가 Notion adapter를 더했기 때문이다 (`notion/network.rs`). 그 파일도
++    // 같은 규약 위에 있다 — Gate가 컴파일만 하고 테스트는 double을 쓴다
++    // (`tests/notion_adapter.rs`가 그 사실을 따로 확인한다). **목록은 이 둘로 닫혀 있다.**
+     let mut users: Vec<String> = Vec::new();
+ 
+     for path in rust_sources() {
+@@ -377,11 +381,20 @@ fn only_one_file_in_the_repository_can_open_a_socket() {
+         }
+     }
+ 
+-    assert_eq!(users.len(), 1, "네트워크에 닿는 파일이 하나가 아니다: {users:?}");
+-    assert!(
+-        users[0].ends_with("ai/ollama/network.rs"),
+-        "네트워크에 닿는 파일이 예상 밖이다: {users:?}"
++    users.sort();
++    let expected = ["ai/ollama/network.rs", "notion/network.rs"];
++
++    assert_eq!(
++        users.len(),
++        expected.len(),
++        "네트워크에 닿는 파일이 선언된 둘이 아니다: {users:?}"
+     );
++    for (found, declared) in users.iter().zip(expected) {
++        assert!(
++            found.ends_with(declared),
++            "네트워크에 닿는 파일이 예상 밖이다: {users:?}"
++        );
++    }
+ }
+ 
+ #[test]
+diff --git a/src/ipc/failure.ts b/src/ipc/failure.ts
+index 2e50a69..b8260d2 100644
+--- a/src/ipc/failure.ts
++++ b/src/ipc/failure.ts
+@@ -34,6 +34,16 @@
+  * `aiInputTooLarge`는 **요청을 보내지 않았다**는 뜻이다. 전사를 잘라서 보내는 대신 그 사실을
+  * 상태로 보이며, 사용자가 할 수 있는 일은 context 크기를 키우거나 더 짧은 녹음을 고르는
+  * 것이다 (ADR-0008 §8.2).
++ *
++ * `notion*` 다섯도 같은 이유로 서로 따로 있다 (§13 · Rust의 `notion::client` ·
++ * `docs/ADR-0009-notion-and-export.md` §9.3). token을 다시 넣는 것 · 부모 페이지를
++ * integration에 공유하는 것 · 잠시 기다렸다 다시 보내는 것 · 다시 시도하는 것은 전부 다른
++ * 상황이다.
++ *
++ * `notionResponseUnusable`은 **결과를 모른다**는 뜻이다 (ADR-0009 §7.3 · §8.5). Notion이
++ * 응답했지만 만들어진 페이지를 확인하지 못했으므로, 그대로 다시 보내면 사용자가 모르는 사이에
++ * 페이지가 둘이 될 수 있다. 화면은 "실패했다"도 "성공했다"도 아닌 그 사실을 그대로 말하고,
++ * 사용자가 Notion을 확인한 뒤 고르게 한다.
+  */
+ export type FailureKind =
+   | 'storage'
+@@ -50,6 +60,11 @@ export type FailureKind =
+   | 'aiRequestFailed'
+   | 'aiResponseUnusable'
+   | 'aiInputTooLarge'
++  | 'notionAuthFailed'
++  | 'notionDestinationUnavailable'
++  | 'notionRateLimited'
++  | 'notionRequestFailed'
++  | 'notionResponseUnusable'
+   | 'unexpected';
+ 
+ export interface Failure {
+diff --git a/tests/ipc-boundary.test.ts b/tests/ipc-boundary.test.ts
+index 51e6083..704523b 100644
+--- a/tests/ipc-boundary.test.ts
++++ b/tests/ipc-boundary.test.ts
+@@ -49,11 +49,16 @@ const payloadSource = readText('../src-tauri/src/commands/payload.rs');
+  * 쓰기 이름은 늘지 않았다**: Transcript는 immutable이고 (§7.1 · INV-2) 저장소가 내놓는 쓰기
+  * 경로도 추가 하나뿐이다.
+  *
+- * 마지막 다섯이 Phase 4의 AI 노트 표면이다 — **provider 상태 조회 · 생성 시작 · 진행 상태
++ * 그다음 다섯이 Phase 4의 AI 노트 표면이다 — **provider 상태 조회 · 생성 시작 · 진행 상태
+  * 조회 · 저장된 노트 읽기 둘**이다. 여기서도 쓰기 이름은 늘지 않는다: 노트는 생성으로만 늘고
+  * 재생성은 대체가 아니라 추가이므로 (docs/ADR-0008-note-ai-provider.md §9.2), 고치거나 지우는
+  * 이름이 만들어질 자리가 없다.
+  *
++ * 마지막 하나가 Phase 5의 **Markdown export**다 (docs/ADR-0009-notion-and-export.md §4).
++ * 저장된 것을 읽어 파일 하나를 더할 뿐이므로 여기서도 쓰기 이름은 늘지 않으며, 이미 있는
++ * 파일을 덮어쓰지 않는다 (§4.3). **Notion 전송의 이름은 아직 없다** — 그것은 이 Phase의 다음
++ * Task이며, 만들지 않은 것의 이름을 미리 두지 않는다.
++ *
+  * 이 목록에 없는 이름이 등록되면 그것은 Phase 범위가 넘쳤다는 뜻이다 — 그래서 이 검사는
+  * 부분집합이 아니라 **정확히 같은 집합**을 요구한다.
+  */
+@@ -79,6 +84,7 @@ const REGISTERED_COMMANDS = [
+   'ai_note_status',
+   'list_ai_notes',
+   'get_ai_note',
++  'export_markdown',
+ ];
+ 
+ /** lib.rs의 generate_handler![...]에 등록된 command 이름. */
+@@ -125,17 +131,22 @@ describe('command 표면', () => {
+   it('아직 만들지 않은 기능의 command가 등록되어 있지 않다', () => {
+     // 녹음 표면은 **capture 계열 네 동작과 상태 조회**까지다. 저장된 녹음의 재생은
+     // command로 하지 않는다 — 파일은 asset protocol로 흐르므로 이 표면에 이름이 생기지
+-    // 않는다 (docs/ADR-0006-audio-playback.md). Notion · export는 Phase 5다.
++    // 않는다 (docs/ADR-0006-audio-playback.md).
+     // 아래 정규식이 그 선을 지킨다 —
+     // `*_recording`은 Recording 레코드를 만드는 영속화 표면의 이름이므로,
+     // 녹음 동작이 그 이름으로 새로 생기는 것은 여전히 막는다.
+     // `queue`·`batch`·`schedule`은 여러 Recording 일괄 처리 큐의 이름이며 DEFERRED다 (§16).
+     //
++    // **export는 `export_markdown` 하나만 열렸다.** Phase 5가 실제로 만든 것이 그 하나이며
++    // (docs/ADR-0009-notion-and-export.md §4), PDF·DOCX 같은 다른 포맷과 일괄 export는 여전히
++    // 범위 밖이다 (phase-prompt/05의 Out of Scope). `notion`은 아직 만들지 않았으므로 그대로
++    // 막는다 — 만들어지는 Task에서 이 줄이 함께 바뀐다.
++    //
+     // **벤더 이름은 여전히 여기 있다** — AI 표면이 열린 뒤에도 command 이름은 벤더 중립이어야
+     // 한다 (INV-9). 어떤 provider를 쓰는지는 설정 값이고, 그것을 아는 코드는 adapter 안에만
+     // 있다. `ollama_*` 같은 이름이 등록되면 그 경계가 새어 나온 것이다.
+     const outOfScope =
+-      /(start|stop|pause|resume)_recording|play|whisper|ollama|llama|openai|anthropic|claude|gemini|notion|export|queue|batch|schedule/i;
++      /(start|stop|pause|resume)_recording|play|whisper|ollama|llama|openai|anthropic|claude|gemini|notion|export(?!_markdown\b)|pdf|docx|queue|batch|schedule/i;
+ 
+     for (const command of registeredCommands()) {
+       expect(command, `${command}는 아직 만들지 않은 기능의 command다`).not.toMatch(outOfScope);
+@@ -190,6 +201,14 @@ describe('command 표면', () => {
+     expect(mutating).toEqual([]);
+   });
+ 
++  it('Markdown export 표면은 파일 하나를 만드는 이름 하나뿐이다', () => {
++    // 일괄 export도, export한 것을 지우거나 다시 쓰는 이름도 이 Phase의 범위 밖이다
++    // (phase-prompt/05의 Out of Scope · §16 DEFERRED). 그것이 생기면 표면에 먼저 드러난다.
++    const exports = registeredCommands().filter((command) => /export/i.test(command));
++
++    expect(exports).toEqual(['export_markdown']);
++  });
++
+   it('frontend가 부르는 이름이 등록된 이름과 정확히 같다', () => {
+     const called = [...commandsSource.matchAll(/call<[^>]*>\(\s*'([\w]+)'/g)].map(
+       (matched) => matched[1],
+@@ -252,4 +271,26 @@ describe('실패 타입', () => {
+       expect(union, `FailureKind에 '${kind}'가 없다`).toContain(`'${kind}'`);
+     }
+   });
++
++  it('frontend 타입에는 Rust가 만들지 않는 종류가 없다', () => {
++    // 반대 방향도 막는다 — 화면에만 있는 종류는 어느 실패로도 도착하지 않으므로, 있으면
++    // 그것은 오타이거나 사라진 실패의 흔적이다. 둘 다 화면이 잘못된 안내를 하게 만든다.
++    //
++    // `unexpected` 하나만 예외다. 그것은 **frontend 경계에서만 만들어진다** (`toFailure`).
++    const kinds = new Set(
++      [...rustFailureSource.matchAll(/Self::\w+\s*=>\s*"(\w+)"/g)].map((matched) => matched[1]),
++    );
++
++    const union = failureTypeSource.match(/export type FailureKind =([^;]+);/)?.[1] ?? '';
++    const declared = [...union.matchAll(/'(\w+)'/g)].map((matched) => matched[1]);
++    expect(declared.length).toBeGreaterThan(0);
++
++    for (const kind of declared) {
++      if (kind === 'unexpected') {
++        continue;
++      }
++      expect(kinds.has(kind), `Rust에 '${kind}'가 없다`).toBe(true);
++    }
++    expect(declared.length, '두 목록의 크기가 다르다').toBe(kinds.size + 1);
++  });
+ });

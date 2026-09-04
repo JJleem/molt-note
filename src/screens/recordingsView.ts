@@ -97,14 +97,21 @@ function toListItem(recording: Recording, options: RecordedAtOptions): Recording
     // Rust가 보낸 값을 그대로 쓴다. 여기서 다시 계산하지 않는다.
     durationLabel: recording.durationLabel,
     statuses: [
-      badge('Transcript', recording.transcriptionStatus),
-      badge('AI Note', recording.aiStatus),
-      badge('Notion', recording.notionStatus),
+      statusBadge('Transcript', recording.transcriptionStatus),
+      statusBadge('AI Note', recording.aiStatus),
+      statusBadge('Notion', recording.notionStatus),
     ],
   };
 }
 
-function badge(label: string, status: ProcessingStatus): RecordingStatusBadge {
+/**
+ * 후처리 상태 하나를 화면 표현으로 옮긴다 (§7).
+ *
+ * 목록만의 것이 아니라 **상태를 보여주는 모든 자리**가 이 함수를 쓴다 — 같은 상태가 목록과
+ * 상세에서 다른 말로 읽히면 사용자는 두 화면이 다른 것을 말하고 있다고 읽는다
+ * (`notionSyncView.ts`가 Recording Detail에서 이 함수를 쓴다).
+ */
+export function statusBadge(label: string, status: ProcessingStatus): RecordingStatusBadge {
   return { label, status, text: STATUS_TEXT[status] ?? status };
 }
 

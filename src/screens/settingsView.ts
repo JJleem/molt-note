@@ -5,7 +5,8 @@
  * 읽기 · 편집 · 저장 · 실패 경로를 vitest로 그대로 판정할 수 있다 (§18).
  *
  * **INV-7: secret이 없다.** API key · integration token은 이 상태에도, 폼에도 없다.
- * 전사 모델 값은 secret이 아니라 **파일이 어디 있는지**다 (ADR-0007 §8.2).
+ * 전사 모델 값은 secret이 아니라 **파일이 어디 있는지**다 (ADR-0007 §8.2). 같은 이유로
+ * Notion destination도 secret이 아니다 — **어디에 쓰는지**일 뿐이다 (ADR-0009 §8.4).
  *
  * **이 모듈은 사용자의 설정 값을 대신 고치지 않는다.** 모델이 없어서 지금 전사할 수 없다는
  * 것은 사실이지만, 그 사실 때문에 자동 전사 토글을 뒤집지 않는다 — 그 상태는 값을 바꾸는
@@ -69,6 +70,19 @@ export interface SettingsForm {
    * 이 값만으로 알 수 없고, 없다고 해서 앱이 값을 지우거나 다른 모델로 바꾸지 않는다.
    */
   readonly aiModel: string;
+  /**
+   * Notion 페이지를 만들 부모 페이지의 식별자. 고르지 않았으면 빈 문자열이다
+   * (docs/ADR-0009-notion-and-export.md §8.4).
+   *
+   * Settings 화면의 Notion 구역이 이 값을 편집하며 (Phase 5 · `notionSettings.ts`), 저장은
+   * 화면 전체의 Save 하나가 한다 — 설정은 한 벌이기 때문이다. 폼이 이 값을 들고 있어야 하는
+   * 이유는 그 전부터 같았다: {@link toSettings}가 폼 전체를 저장할 값으로 옮기므로, 폼에 없는
+   * 설정은 저장할 때마다 `null`이 되어 **사용자가 고른 값이 조용히 지워진다.**
+   *
+   * **secret이 아니다** — 어디에 쓰는지일 뿐이다. integration 자격증명은 이 폼에도, 이
+   * 화면의 어떤 상태에도 없다 (INV-7 · ADR-0009 §10.4).
+   */
+  readonly notionParentPageId: string;
 }
 
 /**
@@ -168,6 +182,9 @@ export function toSettings(form: SettingsForm): Settings {
     aiProvider: chosen(form.aiProvider),
     aiBaseUrl: chosen(form.aiBaseUrl),
     aiModel: chosen(form.aiModel),
+    // 화면이 편집하지 않는 값이지만 **그대로 지나간다.** 여기서 `null`로 적으면 다른 설정을
+    // 저장할 때마다 사용자가 고른 Notion destination이 조용히 지워진다.
+    notionParentPageId: chosen(form.notionParentPageId),
   };
 }
 
@@ -189,6 +206,7 @@ export function toForm(settings: Settings): SettingsForm {
     aiProvider: settings.aiProvider ?? '',
     aiBaseUrl: settings.aiBaseUrl ?? '',
     aiModel: settings.aiModel ?? '',
+    notionParentPageId: settings.notionParentPageId ?? '',
   };
 }
 

@@ -171,9 +171,21 @@ fn the_four_concepts_live_in_four_separate_tables_with_the_fields_section_7_list
             "generated_at",
         ]
     );
+    // 앞의 다섯이 §7이 요구하는 전부이고, 뒤의 셋은 **끝나지 않은 전송을 이어갈 수 있게 하는
+    // 진행도**다 (`docs/ADR-0009-notion-and-export.md` §8.4 · migration 8). 셋 다 secret이
+    // 아니다 — 어디에 무엇을 어디까지 보냈는가일 뿐이며, token은 이 테이블에 오지 않는다 (INV-7).
     assert_eq!(
         columns_of(&connection, "notion_syncs"),
-        ["recording_id", "page_id", "synced_at", "status", "error"]
+        [
+            "recording_id",
+            "page_id",
+            "synced_at",
+            "status",
+            "error",
+            "sent_chunks",
+            "total_chunks",
+            "content_fingerprint",
+        ]
     );
 
     // Transcript와 AINote는 서로 다른 테이블이다 — 하나가 다른 하나를 덮어쓸 자리가 없다 (INV-2).
@@ -604,6 +616,11 @@ fn notion_sync_round_trips_including_the_failure_shape() {
         synced_at: None,
         status: ProcessingStatus::Failed,
         error: Some("네트워크에 연결할 수 없다".to_string()),
+        // 진행도는 그 실패가 어디서 멈췄는지를 말한다 — 페이지가 만들어졌는지조차 확인하지
+        // 못한 자리다 (`docs/ADR-0009-notion-and-export.md` §8.5의 '결과를 모름').
+        sent_chunks: Some(0),
+        total_chunks: Some(3),
+        content_fingerprint: Some("a".repeat(64)),
     };
     store::save_notion_sync(&connection, &failed).expect("실패 기록을 저장할 수 있어야 한다");
     assert_eq!(
@@ -619,6 +636,10 @@ fn notion_sync_round_trips_including_the_failure_shape() {
         synced_at: Some("2026-09-02T15:00:00Z".to_string()),
         status: ProcessingStatus::Done,
         error: None,
+        // 끝난 전송은 보낸 조각 수와 전체가 같다 (ADR-0009 §8.4-5).
+        sent_chunks: Some(3),
+        total_chunks: Some(3),
+        content_fingerprint: Some("a".repeat(64)),
     };
     store::save_notion_sync(&connection, &succeeded).expect("성공 기록을 저장할 수 있어야 한다");
     assert_eq!(

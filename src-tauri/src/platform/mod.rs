@@ -11,8 +11,10 @@
 //! app_data_dir.rs   앱 데이터가 놓이는 자리   (Tauri가 플랫폼 차이를 안다)
 //! clock.rs          흐르는 시간
 //! microphone.rs     마이크 접근 권한          (macOS 설정 경로를 아는 유일한 자리)
+//! secret_store.rs   secret이 놓이는 자리      (OS 자격증명 저장소를 아는 유일한 자리)
 //! ```
 
 pub mod app_data_dir;
 pub mod clock;
 pub mod microphone;
+pub mod secret_store;

@@ -56,11 +56,30 @@ rubato = "5"
 # 호출 하나 때문에 async runtime을 들이지 않는다 (PRODUCT-SPEC §20.5).
 # 쓰는 자리는 `ai::ollama::network` 하나이며, 그 위는 얇은 trait이라 교체 비용이 파일 하나다.
 #
-# `default-features = false`인 이유: 이 Phase는 사용자의 로컬 주소로만 나가므로 **TLS가 필요
-# 없다.** 기본 feature는 rustls/ring을 함께 들여오고, 그것은 Phase 5(Notion·HTTPS)가 실제로
-# 필요해질 때 켜는 것이 맞다 — 지금 켜 두면 미래 의존성 선입금이다 (ADR-0008 §12.2).
-# 버전은 이 Run에서 cargo가 crates.io 인덱스로부터 실제로 해석한 값이다(3.4.0 ·
-# `Cargo.lock`이 checksum까지 고정한다). MSRV는 확인하지 못했다 —
-# `.loop/evidence/TASK-036/verification-log.md`.
-ureq = { version = "3.4", default-features = false }
+# `default-features = false`를 **유지한다** (ADR-0009 §11.2-1) — 기본값을 다시 켜면 압축 ·
+# 쿠키 · 프록시처럼 이 앱이 쓰지 않는 것이 함께 들어온다. 필요한 것만 이름으로 켠다.
+#
+# ★ TLS — Phase 5는 HTTPS로 나간다 (Notion). 그래서 TLS 경로를 **명시적으로 하나 켠다.**
+#   켠 feature 이름:  `rustls`      (ADR-0009 §11.3의 1순위 — 순수 Rust TLS 구현)
+#   확인한 버전:      ureq 3.4.0    (`Cargo.lock`이 checksum까지 고정한다)
+#   루트 인증서 출처: `webpki-roots`(번들된 루트) — `Cargo.lock`이 실제로 무엇을 들여왔는지로
+#                     판정했다. OS 신뢰 저장소를 쓰는 구성이 아니다.
+#   판정 근거:        `.loop/evidence/TASK-047/ureq-tls-verification.md`
+#                     (ADR-0009 §11.4: "feature를 켰다고 적어 두고 lock이 그대로면 켜지지 않은
+#                      것이다" — before는 lock에 TLS crate가 하나도 없는 상태였다)
+# **인증서 검증을 끄는 구성은 없다** — 설정으로도 개발용 플래그로도 두지 않는다 (§11.2-3).
+# token이 실려 나가는 연결이다.
+#
+# MSRV는 확인하지 못했다 — `.loop/evidence/TASK-036/verification-log.md`.
+ureq = { version = "3.4", default-features = false, features = ["rustls"] }
+keyring = { version = "3", default-features = false, features = ["apple-native", "windows-native"] }
+# 보낸 문서의 지문(sha256 hex). ADR-0009 §8.4의 `content_fingerprint`가 쓰는 것이며,
+# **끝나지 않은 전송을 이어 붙여도 되는가**를 판정하는 유일한 근거다 (§8.2).
+#
+# 이것은 자격증명을 다루지 않는다 — 해시가 걸리는 값은 이미 사용자에게 보이는 markdown 문서
+# 하나이고, token은 여기에도 저장소에도 오지 않는다 (INV-7 · §10.5).
+#
+# 이미 이 저장소의 `Cargo.lock`에 들어와 있던 crate다(전이 의존성). 지문 하나 때문에 새 코드를
+# 손으로 쓰지 않으며, 쓰는 자리는 `sync::run::content_fingerprint` 하나다.
+sha2 = "0.10"
 

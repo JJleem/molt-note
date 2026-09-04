@@ -3,12 +3,17 @@ pub mod audio;
 pub mod commands;
 pub mod db;
 pub mod domain;
+pub mod export;
+pub mod notion;
 pub mod platform;
+pub mod sync;
 pub mod transcription;
 
 use tauri::Manager;
 
-use commands::{AudioDevices, NoteGenerator, Recorder, Storage, Transcriber};
+use commands::{
+    AudioDevices, Exporter, NoteGenerator, NotionSender, Recorder, Storage, Transcriber,
+};
 use platform::app_data_dir::AppDataDirectory;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -55,6 +60,28 @@ pub fn run() {
             // 문제가 아니라 정상 상태다** — AI를 설정하지 않은 사용자에게도 녹음 · 전사 ·
             // 열람은 그대로 동작한다 (INV-8).
             app.manage(NoteGenerator::open_for(app));
+
+            // Markdown export도 앱 데이터 루트 하나에서 자리를 얻는다 (INV-10 · ADR-0009 §4.1).
+            // **여기서 디렉터리를 만들지 않는다** — 한 번도 내보내지 않은 사용자에게 빈
+            // `exports/`를 만들어 두지 않으려는 것이며, 자리는 실제로 내보낼 때 준비된다.
+            //
+            // 진행 중인 무언가를 들고 있지도 않다. export는 기다릴 모델도 서버도 없는 짧은
+            // 일이라 배경 스레드와 상태 조회 규약을 쓰지 않는다 (crate::commands::export).
+            // 경로를 얻지 못한 실패는 값으로 남아 내보내려 할 때 사용자에게 전달된다 (§13).
+            app.manage(Exporter::open_for(app));
+
+            // 진행 중인 **Notion 전송**의 소유자도 여기다 — 전사 · 노트 생성과 같은 이유이며
+            // (R-001), 하나가 더 있다: 긴 transcript는 여러 요청으로 나뉘어 나가고 속도 제한을
+            // 만나면 그 사이에 기다린다 (ADR-0009 §6 · §9). 그동안 목록을 보거나 설정을 바꾸는
+            // 일이 멈추면 안 되고, 화면을 떠났다 왔다는 이유로 진행 중인 전송이 사라져도 안 된다
+            // (crate::commands::notion).
+            //
+            // **token은 여기서 읽지 않는다.** 값이 지나가는 자리는 전송이 도는 배경 스레드 하나뿐이며
+            // (ADR-0009 §10.4 · INV-7), 어느 자격증명 저장소가 서는지는 platform 경계가 정한다
+            // (INV-10). 저장하지 않은 것은 앱 시작을 막는 문제가 아니라 정상 상태다 (INV-8) —
+            // Notion을 설정하지 않은 사용자에게도 녹음 · 전사 · 열람 · Markdown export는 그대로
+            // 동작한다.
+            app.manage(NotionSender::open_for(app));
 
             // 저장된 녹음을 재생하려면 webview가 그 파일을 읽을 수 있어야 한다.
             // 그 통로는 Tauri v2의 asset protocol이고(`protocol-asset` feature),
@@ -113,6 +140,23 @@ pub fn run() {
             commands::ai_note_status,
             commands::list_ai_notes,
             commands::get_ai_note,
+            // Markdown export의 표면은 이 하나다 — Recording 하나를 파일 하나로 만든다.
+            // **AI가 없어도 부를 수 있고** (INV-8), 이미 있는 파일을 덮어쓰지 않으며
+            // (ADR-0009 §4.3), 저장된 것을 고치거나 지우는 이름은 여기에도 없다.
+            commands::export_markdown,
+            // Notion 전송의 표면은 이 여섯이다 — 전송 시작 · 진행 상태 조회 · 저장된 전송 기록
+            // 읽기 · 연결 확인 · token 저장 · token 삭제. **저장된 것을 고치거나 지우는 이름은
+            // 여기에도 없다**: 지우는 하나는 이 앱이 넣은 자격증명 항목이며, 녹음 · 전사 · 노트 ·
+            // 이미 만들어진 Notion 페이지를 지우는 경로는 어디에도 없다 (INV-3 · INV-4).
+            //
+            // **token을 돌려주는 이름이 없다는 것이 INV-7의 표현이다** — 값은 저장 command의
+            // 입력으로 한 번 지나가고, 조회가 답하는 것은 저장돼 있다는 사실뿐이다.
+            commands::start_notion_sync,
+            commands::notion_sync_status,
+            commands::get_notion_sync,
+            commands::check_notion_connection,
+            commands::save_notion_token,
+            commands::delete_notion_token,
         ])
         .run(tauri::generate_context!());
 

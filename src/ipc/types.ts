@@ -288,6 +288,19 @@ export interface Settings {
    * 바꾸지 않는다.**
    */
   readonly aiModel: string | null;
+  /**
+   * Notion 페이지를 **어느 페이지 아래에** 만드는가
+   * (docs/ADR-0009-notion-and-export.md §5.1 · §8.4).
+   * 아직 고르지 않았으면 `null`이며, 그것도 정상 상태다.
+   *
+   * **secret이 아니다** — 어디에 쓰는지일 뿐이므로 INV-7과 충돌하지 않는다. 그 workspace에
+   * 들어가기 위한 자격증명은 **이 타입에도, 어떤 command 응답에도 없다** — backend가 OS
+   * 보안 저장소에 넣고, 화면은 "설정돼 있는가"만 묻는다 (ADR-0009 §10.4).
+   *
+   * `aiBaseUrl` · `transcriptionModel`과 같은 성질을 갖는다. 이 페이지가 지금도 있는지는 이
+   * 값만으로 알 수 없고, **없다고 해서 앱이 값을 지우거나 다른 페이지로 바꾸지 않는다.**
+   */
+  readonly notionParentPageId: string | null;
 }
 
 /**
@@ -460,4 +473,149 @@ export interface AiNote {
   readonly promptVersion: string;
   /** ISO-8601 UTC 텍스트. */
   readonly generatedAt: string;
+}
+
+/**
+ * 방금 만들어진 Markdown 파일 하나 (§11 · docs/ADR-0009-notion-and-export.md §4).
+ *
+ * **경로가 이 값의 요점이다.** export 위치는 설정으로 노출되지 않으므로 (§4.1), 화면이
+ * `path`를 보여주지 않으면 사용자는 방금 만든 파일을 찾을 수 없다.
+ *
+ * `fileName`이 따로 있는 이유는 **요청한 이름과 다를 수 있기 때문이다** — 같은 이름이 이미
+ * 있으면 backend가 덮어쓰지 않고 번호를 붙인다 (§4.3: `…-2.md` · `…-3.md`). 화면이 경로
+ * 문자열을 잘라 이름을 짐작하지 않도록 실제로 쓰인 이름이 함께 온다.
+ *
+ * 문서 본문은 오지 않는다 — 그것은 파일에 있고, IPC로 한 번 더 흘려보낼 이유가 없다.
+ */
+export interface ExportedFile {
+  readonly recordingId: string;
+  /** 만들어진 파일의 전체 경로. 사용자에게 그대로 보여줄 수 있는 값이다. */
+  readonly path: string;
+  /** 그 파일의 이름 (`2026-09-01-3dgs-study-04.md`). */
+  readonly fileName: string;
+}
+
+/** 지금 돌고 있는 Notion 전송 한 건의 상태 (§10). */
+export type NotionSendState = 'idle' | 'running' | 'done' | 'failed';
+
+/**
+ * 지금 Notion 전송이 어떤 상태인지 (§10 · docs/ADR-0009-notion-and-export.md §8).
+ *
+ * {@link TranscriptionStatus} · {@link AiNoteStatus}와 같은 자리에 있는 값이다 — **진행 중인
+ * 전송을 소유하는 것은 backend이고 화면은 그것을 물어본다.** 화면이 다시 그려지거나 사용자가
+ * 다른 화면에 다녀와도 여기서 같은 답이 나온다.
+ *
+ * ```text
+ * state      recordingId   pageId   createdPage   failure
+ * idle       null          null     false         null
+ * running    있음          null     false         null
+ * done       있음          있음     true/false    null
+ * failed     있음          null     false         있음
+ * ```
+ *
+ * `createdPage`가 따로 있는 이유는 **이어 보낸 것과 새로 만든 것이 다른 결과이기 때문이다**
+ * (§8.2 · §8.3) — 끝나지 않은 전송을 이어 보냈다면 페이지는 그때 만들어진 그 페이지이며, 화면은
+ * "새 페이지를 만들었다"고 말하면 안 된다.
+ *
+ * `failure`에는 §13의 Notion 실패가 그대로 실려 온다. **부분 전송 뒤의 실패도 여기로 온다** —
+ * 어디까지 갔는지는 {@link NotionSync}가 말한다.
+ */
+export interface NotionSendStatus {
+  readonly state: NotionSendState;
+  /** 지금 보내고 있거나 마지막으로 보낸 녹음. */
+  readonly recordingId: string | null;
+  /** 성공했을 때 그 녹음이 된 Notion 페이지의 식별자. */
+  readonly pageId: string | null;
+  /** 이번 실행에서 **새로** 만든 페이지인가. 이어 보낸 것이면 `false`다. */
+  readonly createdPage: boolean;
+  readonly failure: Failure | null;
+}
+
+/**
+ * 사용자가 무엇을 확인했는가 (§8.3 · §8.5).
+ *
+ * **아무것도 보내지 않는 것은 `notAsked`와 같다.** 이어 보낼 수 없는 상태에서 새 페이지를
+ * 만드는 일은 사용자가 알고 누른 결과여야 하며, 앱이 스스로 고르지 않는다 — 그래서 화면이 값을
+ * 싣지 않았을 때 조용히 페이지가 하나 더 생기지 않는다.
+ */
+export type NotionConfirmation = 'notAsked' | 'newPage';
+
+/**
+ * 저장된 Notion 전송 상태 하나 (§7의 `notion_syncs` · §8.4).
+ *
+ * {@link NotionSendStatus}와 다른 값이다 — 저쪽은 **앱이 켜져 있는 동안의 진행 상황**이고,
+ * 이쪽은 **디스크에 남아 있는 사실**이다. 앱을 다시 켜도 이 값은 그대로 있다.
+ *
+ * `sentChunks`와 `totalChunks`가 함께 오는 이유는 하나다 — **부분 전송이 상태에서 드러나야
+ * 하기 때문이다** (§8.4). 실패한 요청은 세지 않으므로, 둘이 다르면 그 페이지에는 문서의 일부만
+ * 들어가 있다. 기록하기 전에 만들어진 행이면 둘 다 `null`이며 그것도 정상 상태다.
+ *
+ * **읽기 전용 값이다.** 이 타입을 backend로 되돌려보내는 command가 없고, 전송 기록을 고치거나
+ * 지우는 이름도 없다 (INV-3).
+ */
+export interface NotionSync {
+  readonly recordingId: string;
+  /** 만들어진 페이지의 식별자. 성공한 적이 없으면 `null`이다. */
+  readonly pageId: string | null;
+  /** 마지막으로 성공한 시각(ISO-8601 UTC 텍스트). */
+  readonly syncedAt: string | null;
+  readonly status: ProcessingStatus;
+  /** 마지막 실패 사유. 실패한 적이 없으면 `null`이다. */
+  readonly error: string | null;
+  /** 이 페이지에 **성공적으로** 반영된 조각 수. */
+  readonly sentChunks: number | null;
+  /** 그 문서를 나눈 조각 수. */
+  readonly totalChunks: number | null;
+}
+
+/** 연결 확인의 결과 (§5-D). `notConfigured`는 오류가 아니라 정상 상태다 (INV-8). */
+export type NotionConnectionState = 'notConfigured' | 'connected' | 'failed';
+
+/**
+ * Notion 연결이 지금 어떤 상태인지 (§5-D의 connection test).
+ *
+ * {@link AiProviderStatus}와 같은 성질의 값이다 — **아직 설정하지 않은 것은 실패가 아니라
+ * 상태다** (INV-8). 그래서 화면은 이 값을 경고가 아니라 담담한 상태로 그린다.
+ *
+ * ```text
+ * state           tokenStored   workspaceName    failure
+ * notConfigured   false         null             아직 token을 저장하지 않았다 (요청도 나가지 않는다)
+ * connected       true          Notion이 말한 것  이 token으로 지금 말할 수 있다
+ * failed          true          null             말하지 못했다 — 무엇이 다른지는 failure가 말한다
+ * ```
+ *
+ * **세 상태를 boolean 하나로 뭉개지 않는 이유는 §13이다** — token을 넣는 것 · token을 고치는
+ * 것(`notionAuthFailed`) · 부모 페이지를 integration에 공유하는 것
+ * (`notionDestinationUnavailable`) · 네트워크를 확인하는 것(`notionRequestFailed`)은 사용자가
+ * 할 일이 전부 다르다.
+ *
+ * **token 값은 오지 않는다** (INV-7). 오는 것은 저장돼 있다는 사실 하나뿐이다.
+ */
+export interface NotionConnection {
+  readonly state: NotionConnectionState;
+  /** integration token이 저장돼 있는가. **값이 아니라 사실이다.** */
+  readonly tokenStored: boolean;
+  /** 보낼 부모 페이지를 골랐는가. 고르지 않은 것도 정상 상태다 (INV-8). */
+  readonly destinationConfigured: boolean;
+  /**
+   * **어느 워크스페이스에 연결됐는가** (§5-D). 연결됐고 Notion이 이름을 말해 줬을 때만 있다.
+   *
+   * 말해 주지 않았으면 `null`이며, 그때 화면은 이름을 지어내지 않고 연결됐다는 사실만 보인다.
+   * **secret이 아니다** — 사용자가 자기 워크스페이스를 알아보기 위한 값이고, token은 여전히
+   * 이 타입 어디에도 없다 (INV-7).
+   */
+  readonly workspaceName: string | null;
+  /** 연결하지 못한 이유. `failed`에서만 있다. */
+  readonly failure: Failure | null;
+}
+
+/**
+ * integration token이 저장돼 있는가 (INV-7 · §10).
+ *
+ * **화면이 token에 대해 알 수 있는 전부다.** 값을 돌려주는 command는 없으며, 저장·삭제 뒤에
+ * 자격증명 저장소가 실제로 어떤 상태인지가 이 값으로 온다 — 화면은 자기가 방금 무엇을 눌렀는지로
+ * 상태를 짐작하지 않는다.
+ */
+export interface NotionTokenStatus {
+  readonly stored: boolean;
 }

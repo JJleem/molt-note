@@ -23,7 +23,7 @@ pub fn load(connection: &Connection) -> Result<Settings, DatabaseError> {
     let row = connection.query_row(
         "SELECT recordings_directory, automatic_processing, default_microphone,
                 automatic_transcription, transcription_model,
-                ai_provider, ai_base_url, ai_model
+                ai_provider, ai_base_url, ai_model, notion_parent_page_id
          FROM settings WHERE id = ?1",
         [SETTINGS_ROW_ID],
         |row| {
@@ -36,6 +36,7 @@ pub fn load(connection: &Connection) -> Result<Settings, DatabaseError> {
                 row.get::<_, Option<String>>(5)?,
                 row.get::<_, Option<String>>(6)?,
                 row.get::<_, Option<String>>(7)?,
+                row.get::<_, Option<String>>(8)?,
             ))
         },
     );
@@ -50,6 +51,7 @@ pub fn load(connection: &Connection) -> Result<Settings, DatabaseError> {
             ai_provider,
             ai_base_url,
             ai_model,
+            notion_parent_page_id,
         )) => Ok(Settings {
             recordings_directory,
             automatic_processing: decode_toggle("automatic_processing", automatic_processing)?,
@@ -76,6 +78,11 @@ pub fn load(connection: &Connection) -> Result<Settings, DatabaseError> {
             ai_provider,
             ai_base_url,
             ai_model,
+            // 이 열은 version 7에서 더해졌고 NULL을 허용한다. **NULL은 '아직 고르지 않았다'는
+            // 정상 상태다** — 어느 페이지 아래에 만들지 고르지 않은 것은 오류가 아니다
+            // (INV-8 · ADR-0009 §8.4). 그 페이지가 지금도 있는지, integration에 공유돼
+            // 있는지를 저장소는 묻지 않으며, 아니라고 해서 저장된 선택을 지우지 않는다.
+            notion_parent_page_id,
         }),
         // 행이 없는 것은 오류가 아니다 — 기본값 정책이 답을 갖고 있다.
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(Settings::DEFAULT),
@@ -91,8 +98,9 @@ pub fn save(connection: &Connection, settings: &Settings) -> Result<(), Database
         .execute(
             "INSERT INTO settings (id, recordings_directory, automatic_processing,
                                    default_microphone, automatic_transcription,
-                                   transcription_model, ai_provider, ai_base_url, ai_model)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                                   transcription_model, ai_provider, ai_base_url, ai_model,
+                                   notion_parent_page_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
              ON CONFLICT (id) DO UPDATE
              SET recordings_directory = excluded.recordings_directory,
                  automatic_processing = excluded.automatic_processing,
@@ -101,7 +109,8 @@ pub fn save(connection: &Connection, settings: &Settings) -> Result<(), Database
                  transcription_model = excluded.transcription_model,
                  ai_provider = excluded.ai_provider,
                  ai_base_url = excluded.ai_base_url,
-                 ai_model = excluded.ai_model",
+                 ai_model = excluded.ai_model,
+                 notion_parent_page_id = excluded.notion_parent_page_id",
             rusqlite::params![
                 SETTINGS_ROW_ID,
                 settings.recordings_directory,
@@ -115,6 +124,9 @@ pub fn save(connection: &Connection, settings: &Settings) -> Result<(), Database
                 settings.ai_provider,
                 settings.ai_base_url,
                 settings.ai_model,
+                // Notion destination도 자기 열에만 쓰인다. 고르지 않은 값(`None`)은 NULL로
+                // 남고, 다른 값에서 채워 넣지 않는다.
+                settings.notion_parent_page_id,
             ],
         )
         .map_err(DatabaseError::Sql)?;

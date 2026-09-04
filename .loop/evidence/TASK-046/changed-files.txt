@@ -1,0 +1,59 @@
+ src-tauri/Cargo.lock                   | 149 ++++++++++++++++++++++++-
+ src-tauri/Cargo.toml                   |   1 +
+ src-tauri/src/commands/mod.rs          |  40 +++++--
+ src-tauri/src/commands/payload.rs      |  53 +++++++++
+ src-tauri/src/db/migrations.rs         |  27 +++++
+ src-tauri/src/db/settings.rs           |  20 +++-
+ src-tauri/src/domain/settings.rs       |  24 ++++-
+ src-tauri/src/lib.rs                   |  16 ++-
+ src-tauri/src/platform/app_data_dir.rs |  92 ++++++++++++++++
+ src-tauri/src/platform/mod.rs          |   2 +
+ src-tauri/tests/command_boundary.rs    |  15 +++
+ src-tauri/tests/settings_repository.rs | 192 ++++++++++++++++++++++++++++++++-
+ src/ipc/commands.ts                    |  28 ++++-
+ src/ipc/types.ts                       |  33 ++++++
+ src/screens/aiProviderSettings.test.ts |   1 +
+ src/screens/settingsView.test.ts       |  25 +++++
+ src/screens/settingsView.ts            |  20 +++-
+ tests/ipc-boundary.test.ts             |  25 ++++-
+ 18 files changed, 736 insertions(+), 27 deletions(-)
+ M src-tauri/Cargo.lock
+ M src-tauri/Cargo.toml
+ M src-tauri/src/commands/mod.rs
+ M src-tauri/src/commands/payload.rs
+ M src-tauri/src/db/migrations.rs
+ M src-tauri/src/db/settings.rs
+ M src-tauri/src/domain/settings.rs
+ M src-tauri/src/lib.rs
+ M src-tauri/src/platform/app_data_dir.rs
+ M src-tauri/src/platform/mod.rs
+ M src-tauri/tests/command_boundary.rs
+ M src-tauri/tests/settings_repository.rs
+ M src/ipc/commands.ts
+ M src/ipc/types.ts
+ M src/screens/aiProviderSettings.test.ts
+ M src/screens/settingsView.test.ts
+ M src/screens/settingsView.ts
+ M tests/ipc-boundary.test.ts
+?? .loop/evidence/TASK-043/
+?? .loop/evidence/TASK-044/
+?? .loop/evidence/TASK-045/
+?? .loop/evidence/TASK-046/
+?? .loop/tasks/TASK-043.yaml
+?? .loop/tasks/TASK-044.yaml
+?? .loop/tasks/TASK-045.yaml
+?? .loop/tasks/TASK-046.yaml
+?? .loop/tasks/TASK-047.yaml
+?? .loop/tasks/TASK-048.yaml
+?? .loop/tasks/TASK-049.yaml
+?? .loop/tasks/TASK-050.yaml
+?? .loop/tasks/TASK-051.yaml
+?? .loop/tasks/TASK-052.yaml
+?? .loop/tasks/TASK-053.yaml
+?? .loop/tasks/TASK-054.yaml
+?? docs/ADR-0009-notion-and-export.md
+?? src-tauri/src/commands/export.rs
+?? src-tauri/src/export/
+?? src-tauri/src/platform/secret_store.rs
+?? src-tauri/tests/markdown_export.rs
+?? src-tauri/tests/secret_store.rs

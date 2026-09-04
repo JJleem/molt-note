@@ -1,0 +1,9 @@
+Self-check (advisory — the runtime reruns gates independently after the worker finishes)
+Gates: build
+
+[build] npm run build
+
+build: PASS  exit=0  1.0s
+
+Self-check: all gates passed
+Artifacts: .loop-local/self-check/  (advisory only — not a gate report)

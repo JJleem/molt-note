@@ -12,7 +12,28 @@
 //! 고치거나 지우는 이름은 이 표면에 없다 (§7.1 · INV-2).
 //! Phase 4가 **AI 노트** 다섯을 더한다 — provider 상태 조회 · 생성 시작 · 진행 상태 조회 ·
 //! 저장된 노트 읽기 둘 ([`NoteGenerator`]). 여기서도 쓰기 이름은 늘지 않는다: 노트는 생성으로만
-//! 늘고, 재생성은 대체가 아니라 추가다 (ADR-0008 §9.2). Notion을 위한 command는 Phase 5다.
+//! 늘고, 재생성은 대체가 아니라 추가다 (ADR-0008 §9.2).
+//! Phase 5가 **Markdown export** 하나를 더한다 ([`Exporter`]) — 저장소를 읽어 파일 하나를
+//! 만들 뿐, 저장된 것을 고치거나 지우지 않는다.
+//!
+//! **Notion 전송의 소유자도 이 경계에 있다** ([`NotionSender`]) — 전사 · 노트 생성과 같은
+//! 규약이다 (`crate::commands::notion`). 그 표면은 여섯이다 — 전송 시작 · 전송 상태 조회 ·
+//! 저장된 전송 기록 읽기 · 연결 확인 · token 저장 · token 삭제
+//! ([`start_notion_sync`] · [`notion_sync_status`] · [`get_notion_sync`] ·
+//! [`check_notion_connection`] · [`save_notion_token`] · [`delete_notion_token`]).
+//! 저장된 것을 고치거나 지우는 이름은 여기서도 늘지 않는다 — Notion 전송이 만지는 것은
+//! `notion_syncs` 행과 `recordings.notion_status`뿐이다 (INV-3 · ADR-0009 §8.5).
+//!
+//! ## token은 한 방향으로만 지나간다 (INV-7 · ADR-0009 §10.4)
+//!
+//! ```text
+//! 화면 ──token──▶ save_notion_token ──▶ 자격증명 저장소
+//! 화면 ◀──있다/없다── (저장 · 삭제 · 연결 확인이 답하는 것은 이 사실 하나다)
+//! ```
+//!
+//! **값을 돌려주는 command가 없다.** 조회하는 이름도, 되돌려받는 payload 필드도 없으므로,
+//! 저장된 token을 화면이 다시 읽는 경로는 만들어질 수 없다. 값이 실제로 쓰이는 자리는 전송이
+//! 도는 배경 스레드 하나뿐이다 (`crate::commands::notion`).
 //!
 //! ## AI provider가 없는 것은 이 표면의 실패가 아니다 (INV-8)
 //!
@@ -52,7 +73,9 @@
 //! 모든 command 응답으로 돌려준다. 초기화 경로에 `unwrap` · `expect` · `panic!`이 없는 이유가
 //! 이것이다 — 여기서 죽으면 사용자는 아무 설명도 받지 못하고, 실패는 콘솔에만 남는다 (§13).
 
+pub mod export;
 pub mod notes;
+pub mod notion;
 pub mod payload;
 pub mod transcriber;
 
@@ -76,12 +99,15 @@ use crate::platform::microphone::{
     self, MicrophoneAccess, MicrophonePermission, SystemMicrophonePermission,
 };
 
+pub use export::Exporter;
 pub use notes::NoteGenerator;
+pub use notion::{NotionSendStatus, NotionSender};
 pub use payload::{
     AiNotePayload, AiNoteStatusPayload, AiProviderStatusPayload, CaptureReportPayload,
-    InputDevicePayload, MissingAudioPayload, NewRecording, RecordingPayload, SessionStatusPayload,
-    SettingsPayload, StoppedRecordingPayload, StructuredNotePayload, TranscriptPayload,
-    TranscriptSegmentPayload, TranscriptionStatusPayload,
+    ExportedFilePayload, InputDevicePayload, MissingAudioPayload, NewRecording,
+    NotionConnectionPayload, NotionSendStatusPayload, NotionSyncPayload, NotionTokenStatusPayload,
+    RecordingPayload, SessionStatusPayload, SettingsPayload, StoppedRecordingPayload,
+    StructuredNotePayload, TranscriptPayload, TranscriptSegmentPayload, TranscriptionStatusPayload,
 };
 pub use transcriber::Transcriber;
 
@@ -180,6 +206,22 @@ impl Storage {
             store::list_ai_notes_for_transcript(&connection, &TranscriptId::new(transcript_id))?;
 
         notes.into_iter().map(AiNotePayload::decoded).collect()
+    }
+
+    /// 그 녹음의 **저장된 Notion 전송 상태**를 돌려준다. 보낸 적이 없으면 `None`이다
+    /// (오류가 아니다 · §7 · ADR-0009 §8.4).
+    ///
+    /// 화면은 이것으로 "어디까지 갔는가"를 읽는다 — 부분 전송 뒤에 앱을 다시 켜도 같은 답이
+    /// 나온다. 지금 돌고 있는 전송 한 건은 여기 있지 않다 ([`NotionSender::status`]).
+    ///
+    /// **읽기뿐이다** — `notion_syncs`에 쓰는 자리는 전송 순서 하나뿐이므로
+    /// ([`crate::sync::run`]), 이 command가 열려도 화면이 전송 기록을 고치거나 지울 수 있게
+    /// 되지는 않는다 (INV-3).
+    pub fn notion_sync(&self, recording_id: &str) -> Result<Option<NotionSyncPayload>, Failure> {
+        let connection = self.connection()?;
+        let sync = store::load_notion_sync(&connection, &RecordingId::new(recording_id))?;
+
+        Ok(sync.map(NotionSyncPayload::from))
     }
 
     /// AI 노트 하나를 돌려준다. 그런 id가 없으면 `None`이다 (오류가 아니다).
@@ -755,9 +797,10 @@ fn validated(recording: NewRecording) -> Result<NewRecording, Failure> {
 
 // --- Tauri command 표면 -------------------------------------------------------------
 //
-// 아래 스물한 개가 frontend가 부를 수 있는 전부다. 각 함수는 [`Storage`] · [`AudioDevices`] ·
-// [`Recorder`] · [`Transcriber`] · [`NoteGenerator`]의 같은 이름 동작이나 [`finish_recording`]을
-// 그대로 부른다 — 로직을 여기에 두지 않으므로, 실제 동작은 Tauri 없이 테스트할 수 있다.
+// 아래 스물여덟 개가 frontend가 부를 수 있는 전부다. 각 함수는 [`Storage`] · [`AudioDevices`] ·
+// [`Recorder`] · [`Transcriber`] · [`NoteGenerator`] · [`Exporter`] · [`NotionSender`]의 같은 이름
+// 동작이나 [`finish_recording`]을 그대로 부른다 — 로직을 여기에 두지 않으므로, 실제 동작은
+// Tauri 없이 테스트할 수 있다.
 
 #[tauri::command]
 pub fn list_recordings(storage: State<'_, Storage>) -> Result<Vec<RecordingPayload>, Failure> {
@@ -954,4 +997,125 @@ pub fn get_ai_note(
     ai_note_id: String,
 ) -> Result<Option<AiNotePayload>, Failure> {
     storage.ai_note(&ai_note_id)
+}
+
+/// Recording 하나를 로컬 Markdown 파일로 내보내고 **쓰인 파일의 경로를 돌려준다** (§11).
+///
+/// 돌아온 값은 이미 만들어진 파일을 가리킨다 — 접수 사실이 아니다. 기다릴 모델도 서버도 없으므로
+/// 전사·노트 생성의 시작·상태 조회 규약을 쓰지 않는다 ([`Exporter`]).
+///
+/// **AI provider를 고르지 않았거나 AI Note가 하나도 없다는 이유로 거절하지 않는다** (INV-8).
+/// 그때는 Transcript와 메타데이터만으로 이루어진 유효한 문서가 나온다.
+///
+/// 같은 이름의 파일이 이미 있으면 **덮어쓰지 않고 번호를 붙인다** (ADR-0009 §4.3) — 앞서
+/// 내보낸 파일은 사용자의 문서이며, 이 command에는 그것을 지우거나 고치는 경로가 없다.
+///
+/// `async`인 이유는 디스크가 느릴 때 창이 함께 멈추지 않게 하기 위해서다
+/// ([`ai_provider_status`]와 같은 이유).
+#[tauri::command(async)]
+pub fn export_markdown(
+    exporter: State<'_, Exporter>,
+    recording_id: String,
+) -> Result<ExportedFilePayload, Failure> {
+    exporter.export(&recording_id)
+}
+
+/// Recording 하나의 Notion 전송을 시작한다. **돌아오는 것은 접수 사실이지 전송 결과가 아니다.**
+///
+/// 실제 전송은 배경 스레드에서 돌므로 이 호출은 바로 끝난다 — 1시간짜리 transcript를 걸어도 이
+/// command가 IPC를 붙잡지 않는다 (전사 · 노트 생성과 같은 규약). 결과는
+/// [`notion_sync_status`]로 물어본다.
+///
+/// 이미 보내는 중이면 **거절한다** — 같은 녹음이어도 마찬가지이며, 두 번째 요청이 조용히
+/// 사라지지 않는다 ([`NotionSender::start`]).
+///
+/// **token이나 부모 페이지를 설정하지 않았다는 이유로는 거절하지 않는다** (INV-8): 그 상태에서
+/// 시작하면 무엇이 남았는지가 `failed` 상태에 실려 온다.
+///
+/// `confirmation`은 사용자가 무엇을 확인했는가다 (ADR-0009 §8.3). 보내지 않으면 아무것도
+/// 확인하지 않은 것이며, 그때 새 페이지가 필요한 상태라면 전송은 무엇을 확인해야 하는지를
+/// 말하며 거절된다 — 앱이 대신 고르지 않는다.
+#[tauri::command]
+pub fn start_notion_sync(
+    sender: State<'_, NotionSender>,
+    recording_id: String,
+    confirmation: Option<String>,
+) -> Result<NotionSendStatusPayload, Failure> {
+    let confirmation = notion::parse_confirmation(confirmation.as_deref())?;
+
+    Ok(sender.start(&recording_id, confirmation)?.into())
+}
+
+/// 지금 Notion 전송이 어떤 상태인지 묻는다. **전송이 도는 동안에도 즉시 답한다.**
+#[tauri::command]
+pub fn notion_sync_status(
+    sender: State<'_, NotionSender>,
+) -> Result<NotionSendStatusPayload, Failure> {
+    Ok(sender.status()?.into())
+}
+
+/// 그 녹음의 **저장된** Notion 전송 상태를 읽는다. 보낸 적이 없으면 `null`이다.
+///
+/// [`notion_sync_status`]와 다른 값이다 — 저쪽은 앱이 켜져 있는 동안의 진행 상황이고, 이쪽은
+/// 디스크에 남아 있는 사실이다 (부분 전송이 여기서 드러난다 · ADR-0009 §8.4).
+///
+/// **읽기뿐이다.** 전송 기록을 고치거나 지우는 command는 없다.
+#[tauri::command]
+pub fn get_notion_sync(
+    storage: State<'_, Storage>,
+    recording_id: String,
+) -> Result<Option<NotionSyncPayload>, Failure> {
+    storage.notion_sync(&recording_id)
+}
+
+/// 저장된 token으로 지금 Notion과 말할 수 있는지 확인한다 (§5-D의 connection test).
+///
+/// **token을 저장하지 않았거나 부모 페이지를 고르지 않은 것은 이 command의 실패가 아니다** —
+/// [`NotionConnectionPayload`]의 상태값으로 온다 (INV-8 · §13). 이 command가 `Err`를 내는 경우는
+/// 자격증명 저장소나 저장소를 읽지 못했을 때이며, 그것은 Notion과 무관하다
+/// ([`ai_provider_status`]와 같은 규칙).
+///
+/// **어떤 값도 돌려주지 않는다** (INV-7) — 저장돼 있다는 사실과, 확인됐는지와, 확인하지 못했다면
+/// 그 이유뿐이다.
+///
+/// `async`인 이유는 이 호출이 **응답하지 않을 수 있는 서버를 기다릴 수 있기 때문이다**
+/// ([`ai_provider_status`]와 같은 이유). 시작·상태 조회 규약을 쓰지 않는 것은 이것이 시작이
+/// 아니라 한 번의 질의이기 때문이다.
+#[tauri::command(async)]
+pub fn check_notion_connection(
+    sender: State<'_, NotionSender>,
+    storage: State<'_, Storage>,
+) -> Result<NotionConnectionPayload, Failure> {
+    let settings = storage.settings()?;
+
+    sender.check_connection(settings.notion_parent_page_id.as_deref())
+}
+
+/// integration token을 저장하고 **저장 여부만** 돌려준다 (INV-7 · ADR-0009 §10).
+///
+/// 값이 이 경계를 지나는 방향은 하나다 — 화면에서 자격증명 저장소로. 돌아오는 길에는 값이
+/// 실리지 않으며, 그것을 담을 자리가 [`NotionTokenStatusPayload`]에 없다.
+///
+/// 어디에 저장되는지는 화면이 알지 않는다 (INV-10). 저장할 자리가 없는 시스템에서는 파일로
+/// 대신 떨어뜨리지 않고 그 사실을 실패로 알린다 (ADR-0009 §10.2).
+///
+/// `async`인 이유는 OS 자격증명 저장소가 잠겨 있을 때 **사용자의 허용을 기다릴 수 있기
+/// 때문이다** — 그동안 창 전체가 멈추지 않게 한다.
+#[tauri::command(async)]
+pub fn save_notion_token(
+    sender: State<'_, NotionSender>,
+    token: String,
+) -> Result<NotionTokenStatusPayload, Failure> {
+    sender.save_token(&token)
+}
+
+/// 저장된 integration token을 지우고 **저장 여부만** 돌려준다.
+///
+/// **없던 것을 지우는 것은 실패가 아니다.** 지운 뒤에도 녹음 · 전사 · 노트 · 이미 만들어진
+/// Notion 페이지는 그대로다 (INV-3).
+#[tauri::command(async)]
+pub fn delete_notion_token(
+    sender: State<'_, NotionSender>,
+) -> Result<NotionTokenStatusPayload, Failure> {
+    sender.delete_token()
 }

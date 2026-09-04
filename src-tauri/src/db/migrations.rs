@@ -214,6 +214,55 @@ pub const MIGRATIONS: &[Migration] = &[
               ALTER TABLE settings ADD COLUMN ai_base_url TEXT;
               ALTER TABLE settings ADD COLUMN ai_model TEXT;",
     },
+    // `docs/ADR-0009-notion-and-export.md` §8.4의 Notion destination 설정. 앞의 migration을
+    // 고치지 않고 **열을 더한다** — version 6까지 적용된 사용자 DB가 이미 있을 수 있고, 그 행의
+    // 값은 그대로 남아야 한다. 이미 있는 행의 새 열은 NULL, 즉 '아직 고르지 않음'으로 시작한다.
+    //
+    // 담는 값은 **어느 페이지 아래에 만드는가**다 (ADR-0009 §5.1의 `parent.page_id`).
+    // **secret이 아니다** — 어디에 쓰는지일 뿐이며, `ai_base_url`이 secret이 아닌 것과 같다.
+    //
+    // **NOT NULL도 DEFAULT도 두지 않는다.** 기본값 정책은 스키마가 아니라
+    // `domain::settings::Settings::DEFAULT`가 갖는다는 것이 이 테이블의 규약이다 (version 3의
+    // 주석). NULL은 '아직 고르지 않았다'는 **정상 상태**이며, 고르지 않은 것은 오류가 아니다 —
+    // 그 상태에서 녹음 · 전사 · 노트 · markdown export는 전부 그대로 동작한다 (INV-8).
+    //
+    // 저장된 페이지가 지금도 그 자리에 있는지, integration에 공유돼 있는지를 저장소는 묻지
+    // 않는다 — `default_microphone` · `transcription_model` · `ai_base_url`과 같은 이유이며,
+    // 아니라고 해서 저장된 선택을 조용히 지우거나 바꾸지 않는다.
+    //
+    // INV-7: 여기서도 secret 열은 만들지 않는다. Notion integration에 필요한 자격증명은
+    // **SQLite에 들어오지 않으며** OS 자격증명 저장소에만 있다
+    // (`crate::platform::secret_store` · ADR-0009 §10.5).
+    Migration {
+        version: 7,
+        name: "add_notion_settings",
+        sql: "ALTER TABLE settings ADD COLUMN notion_parent_page_id TEXT;",
+    },
+    // `docs/ADR-0009-notion-and-export.md` §8.4가 요구하는 **재시도가 기대는 상태**.
+    // version 2의 `notion_syncs`를 고치지 않고 **열을 더한다** — 그 스키마로 저장된 사용자 DB가
+    // 이미 있을 수 있고, 그 행의 값은 그대로 남아야 한다. 이미 있는 행의 새 열은 NULL이며,
+    // 그것은 '이 진행도를 기록하기 전에 만들어진 행'이라는 정상 상태다.
+    //
+    // 이 세 열이 있어야 부분 성공 뒤의 재시도가 **중복도 유실도 만들지 않는다** (§8.2 · §8.4).
+    //
+    // ```text
+    // sent_chunks          지금까지 **성공한** 요청 수. 실패한 요청은 세지 않는다 (§8.4-4)
+    // total_chunks         이 문서를 나눈 조각 수 — 부분 전송이 상태에서 드러나는 자리다
+    // content_fingerprint  그때 나눈 그 문서였는가 (sha256 hex). 다르면 이어 보내지 않는다 (§8.2)
+    // ```
+    //
+    // **NOT NULL도 DEFAULT도 두지 않는다** — version 3의 규약을 그대로 따른다. 진행도의 의미를
+    // 스키마가 아니라 실행 순서(`crate::sync::run`)가 갖는다.
+    //
+    // INV-7: 여기서도 secret 열은 만들지 않는다. 지문은 **보낸 문서의 해시**이지 자격증명이
+    // 아니며, token은 SQLite에 들어오지 않는다 (`crate::platform::secret_store` · §10.5).
+    Migration {
+        version: 8,
+        name: "add_notion_sync_progress",
+        sql: "ALTER TABLE notion_syncs ADD COLUMN sent_chunks         INTEGER;
+              ALTER TABLE notion_syncs ADD COLUMN total_chunks        INTEGER;
+              ALTER TABLE notion_syncs ADD COLUMN content_fingerprint TEXT;",
+    },
 ];
 
 /// 코드가 알고 있는 최신 스키마 버전. migration이 없으면 0이다.
@@ -335,8 +384,27 @@ mod tests {
                 (4, "add_default_microphone_to_settings"),
                 (5, "add_transcription_settings"),
                 (6, "add_ai_provider_settings"),
+                (7, "add_notion_settings"),
+                (8, "add_notion_sync_progress"),
             ]
         );
+    }
+
+    #[test]
+    fn a_new_notion_sync_column_is_added_by_a_new_migration_instead_of_editing_an_old_one() {
+        // `create_domain_tables`를 고쳐 열을 넣으면 version 2까지 적용된 DB에는 그 열이 영영
+        // 생기지 않는다 — migration은 다시 실행되지 않기 때문이다 (설정 테이블과 같은 규칙).
+        let create_domain_tables = MIGRATIONS
+            .iter()
+            .find(|migration| migration.name == "create_domain_tables")
+            .expect("domain 테이블을 만드는 migration이 있어야 한다");
+
+        for column in ["sent_chunks", "total_chunks", "content_fingerprint"] {
+            assert!(
+                !create_domain_tables.sql.contains(column),
+                "나중에 생긴 열 {column}이 이미 적용된 migration 안에 들어가 있다"
+            );
+        }
     }
 
     #[test]
@@ -356,6 +424,8 @@ mod tests {
             "ai_provider",
             "ai_base_url",
             "ai_model",
+            // Phase 5가 더한 Notion destination 설정 (ADR-0009 §8.4).
+            "notion_parent_page_id",
         ] {
             assert!(
                 !create_settings.sql.contains(column),

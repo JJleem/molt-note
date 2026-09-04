@@ -1,0 +1,70 @@
+# Notion adapter — 요청 조립 · 응답 해석 · 실패 변환
+# Runtime이 PLAN-20260904T025945Z 승인 시점에 생성했다 (proposal P5). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-047
+status: DONE
+
+request: |-
+  `src-tauri/src/notion/` 아래에 Notion과 말하는 adapter를 만든다. 구성은 Phase 4의 Ollama adapter와 같은 모양이다: (a) 실제 네트워크에 닿는 **유일한 경계**(요청 · 응답 · transport 오류)와 그 위의 순수한 wire 계층, (b) 요청 조립 — `POST /v1/pages`에 `parent: { page_id }`와 **`markdown` 문자열**을 담고(같은 요청에 `children`/`content`를 함께 쓰지 않는다), 이어붙이기는 `PATCH /v1/pages/:page_id/markdown`의 `insert_content` + `position: { type: "end" }`, 연결 확인은 `GET /v1/users/me`. 헤더는 `Authorization: Bearer <secret>` · **`Notion-Version: 2026-03-11`** · `Content-Type`. markdown은 실제 개행을 기대하므로 JSON 직렬화에서 `\n`으로 나가야 한다. (c) 응답 해석 — 성공 시 생성된 page id를 값으로 돌려주고, `validation_error` · `unauthorized` · `restricted_resource` · `object_not_found` · `rate_limited` · `conflict_error` · `internal_server_error` · `service_unavailable` 등을 §13의 제품 상태로 옮긴다. `crate::domain::FailureKind`에 Notion 실패 종류를 **지금 실제로 만들어지는 것만** 추가하고(인증 실패 · 권한 없는 destination · 요청 실패 · rate limit 등, 사용자가 할 수 있는 일이 다르면 종류를 나눈다), `FailureKind::as_str`와 `src/ipc/failure.ts`의 union 1:1을 고정한 기존 테스트를 함께 갱신한다. (d) `429`와 `529`의 `Retry-After`를 **정수 초**로 읽어 대기 지시를 값으로 표현한다. (e) `src-tauri/Cargo.toml`의 `ureq`에 ADR-0009가 확인한 TLS feature를 켜고, 켠 feature 이름과 버전을 주석으로 남긴다 — Notion은 HTTPS이므로 TLS 없이 동작한다고 가정하지 않는다. **자동 테스트는 stub transport로만 수행하며 실제 Notion에 요청하지 않는다.** token · destination 값이 실패 message · detail · 로그로 새어 나가지 않는 것을 테스트가 고정한다.
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-043
+  - TASK-046
+
+stop_condition:
+  gates: [build, lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 3
+
+acceptance_criteria:
+  - id: P5-AC1
+    description: |-
+      build Gate가 통과한다.
+    verification:
+      type: gate
+      ref: build
+  - id: P5-AC2
+    description: |-
+      lint Gate가 통과한다.
+    verification:
+      type: gate
+      ref: lint
+  - id: P5-AC3
+    description: |-
+      test Gate가 통과한다 — `FailureKind` 문자열과 `src/ipc/failure.ts` union의 1:1이 유지된다.
+    verification:
+      type: gate
+      ref: test
+  - id: P5-AC4
+    description: |-
+      요청 조립이 `Notion-Version: 2026-03-11`과 Bearer 인증을 쓰고, 페이지 생성은 `markdown` body param을, 이어붙이기는 `insert_content` + `position: end`를 쓴다. 조사 날짜나 MCP 프로토콜 버전을 API 버전으로 보내지 않는다.
+    verification:
+      type: verifier
+  - id: P5-AC5
+    description: |-
+      `429`/`529`의 `Retry-After`를 정수 초로 해석하는 경로에 테스트가 있다.
+    verification:
+      type: verifier
+  - id: P5-AC6
+    description: |-
+      테스트가 실제 Notion API를 호출하지 않는다 — stub transport만 쓴다 (§18).
+    verification:
+      type: verifier
+  - id: P5-AC7
+    description: |-
+      token과 destination 값이 실패 message · detail · 로그에 남지 않으며, 그것을 확인하는 테스트가 있다 (INV-7).
+    verification:
+      type: verifier
+  - id: P5-AC8
+    description: |-
+      `ureq`의 TLS 경로가 명시적으로 켜져 있고, 켠 feature 이름과 확인한 버전이 기록돼 있다 (P-4).
+    verification:
+      type: verifier
+
+evidence: []
+
+failure_memo: []

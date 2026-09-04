@@ -255,7 +255,12 @@ pub struct AiNote {
 
 /// Recording 하나의 Notion 전송 상태 (§7).
 ///
-/// 이 Task는 스키마와 저장/복원만 다룬다. 실제 전송은 이후 Phase가 구현한다.
+/// 앞의 다섯 필드가 §7이 요구하는 전부이고, 뒤의 셋은 **끝나지 않은 전송을 이어갈 수 있게
+/// 하는 진행도**다 (`docs/ADR-0009-notion-and-export.md` §8.4). 셋 다 `Option`인 것은 그 열이
+/// 나중에 생겼기 때문이며 (migration 8), `None`은 '그 진행도를 모른다'는 정상 상태다.
+///
+/// **여기에 secret은 없다** (INV-7). 이 값은 저장소에 그대로 들어가고, token은 저장소에 들어오지
+/// 않는다 — 이어가기에 필요한 것은 어디에 무엇을 어디까지 보냈는가뿐이다 (ADR-0009 §8.4).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NotionSync {
     pub recording_id: RecordingId,
@@ -265,6 +270,14 @@ pub struct NotionSync {
     pub status: ProcessingStatus,
     /// 마지막 실패 사유. 실패한 적이 없으면 `None`이다.
     pub error: Option<String>,
+    /// 이 페이지에 **성공적으로** 반영된 조각 수 (ADR-0009 §8.4-4).
+    ///
+    /// 실패한 요청은 세지 않는다 — 세면 재시도가 그 조각을 건너뛰고, 그것은 조용한 유실이다.
+    pub sent_chunks: Option<i64>,
+    /// 이 문서를 나눈 조각 수. `sent_chunks`와 함께 **부분 전송을 상태에서 드러내는** 값이다.
+    pub total_chunks: Option<i64>,
+    /// 그때 나눈 그 문서였는가 (sha256 hex). 다르면 이어 붙이지 않는다 (ADR-0009 §8.2).
+    pub content_fingerprint: Option<String>,
 }
 
 #[cfg(test)]

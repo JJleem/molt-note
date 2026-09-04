@@ -1,0 +1,15 @@
+Self-check (advisory — the runtime reruns gates independently after the worker finishes)
+Gates: build, lint, test
+
+[build] npm run build
+[lint] npm run lint
+[test] npm run test
+
+build: PASS  exit=0  0.9s
+
+lint: PASS  exit=0  1.5s
+
+test: PASS  exit=0  2.6s
+
+Self-check: all gates passed
+Artifacts: .loop-local/self-check/  (advisory only — not a gate report)

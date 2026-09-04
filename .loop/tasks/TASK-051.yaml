@@ -1,0 +1,67 @@
+# Recording Detail · Recordings 목록 — Export와 Send to Notion
+# Runtime이 PLAN-20260904T025945Z 승인 시점에 생성했다 (proposal P9). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-051
+status: DONE
+
+request: |-
+  사용자가 실제로 누르는 자리를 만든다. Recording Detail(`src/screens/RecordingDetailScreen.tsx`)에 **`Export Markdown`**과 **`Send to Notion`**을 넣고, Recordings 목록과 Detail에 Notion 상태(`none` · `pending` · `running` · `done` · `failed`)를 보인다 (요구 9). 표시 로직은 기존 관례대로 순수 view 모듈(`src/screens/` 아래)에 두고 컴포넌트는 그리기만 한다 — 그래야 아래 조건이 실제 앱 없이 테스트된다. 반드시 테스트로 남아야 하는 것(P-3): **AI provider 없이 Markdown export가 된다 · AI Note 없이 Markdown export가 된다 · export 실패가 원본 데이터를 훼손하지 않는다.** 그 밖에: 실패는 §13대로 무엇이 실패했는지 · 원본은 안전한지 · 다시 시도할 수 있는지를 보이고 재시도 수단을 준다(부분 전송 후 실패도 그 사실이 드러난다); **무엇이 전송되는지 화면에 드러난다 — 전송되는 것은 노트/전사 텍스트이고 오디오는 나가지 않는다** (INV-5 · INV-6); 같은 Recording을 두 번 보냈을 때 무슨 일이 일어나는지가 ADR-0009의 중복 sync 정책 그대로 **버튼을 누르기 전에 예측 가능하게** 적혀 있다. export 성공은 쓰인 파일 경로를 사용자에게 알린다.
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-045
+  - TASK-050
+
+stop_condition:
+  gates: [build, lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 3
+
+acceptance_criteria:
+  - id: P9-AC1
+    description: |-
+      build Gate가 통과한다.
+    verification:
+      type: gate
+      ref: build
+  - id: P9-AC2
+    description: |-
+      lint Gate가 통과한다.
+    verification:
+      type: gate
+      ref: lint
+  - id: P9-AC3
+    description: |-
+      test Gate가 통과한다.
+    verification:
+      type: gate
+      ref: test
+  - id: P9-AC4
+    description: |-
+      세 조건이 각각 테스트로 남아 있다 — AI provider 없이 export 가능 · AI Note 없이 export 가능 · export 실패가 원본을 훼손하지 않음 (P-3 · INV-8 · INV-3).
+    verification:
+      type: verifier
+      instruction: |-
+        세 조건에 대응하는 테스트가 실제로 존재하고 view 순수 모듈 수준에서 판정되는지 확인한다.
+  - id: P9-AC5
+    description: |-
+      Notion 상태가 Recordings 목록과 Detail 양쪽에 보이고, 실패가 §13의 세 질문에 답하며 재시도 수단이 있다.
+    verification:
+      type: verifier
+  - id: P9-AC6
+    description: |-
+      전송되는 데이터가 UI에 드러나고, 오디오가 전송되지 않는다는 것이 화면에서 확인 가능하다 (INV-5 · INV-6).
+    verification:
+      type: verifier
+  - id: P9-AC7
+    description: |-
+      같은 Recording을 두 번 보냈을 때의 결과가 ADR-0009의 중복 sync 정책과 일치하게 UI에서 예측 가능하다.
+    verification:
+      type: verifier
+
+evidence: []
+
+failure_memo: []

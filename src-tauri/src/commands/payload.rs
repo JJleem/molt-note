@@ -19,9 +19,11 @@ use crate::ai::note::{decode_content, MeetingNote, StructuredNote, StudyNote, Su
 use crate::ai::provider::{Availability, ProviderDescriptor};
 use crate::audio::{CaptureReport, InputDevice, SessionState, SessionSummary};
 use crate::domain::{
-    AiNote, Failure, NoteType, ProcessingStatus, Recording, RecordingId, RecordingView, Settings,
-    Transcript, TranscriptSegment,
+    AiNote, Failure, NoteType, NotionSync, ProcessingStatus, Recording, RecordingId, RecordingView,
+    Settings, Transcript, TranscriptSegment,
 };
+
+use super::notion::NotionSendStatus;
 
 /// 조회된 녹음 하나. 목록 화면과 상세 화면이 그대로 쓴다 (§5 A · C).
 ///
@@ -466,6 +468,16 @@ pub struct SettingsPayload {
     /// 없다고 해서 저장된 선택이 지워지지 않는다.
     #[serde(default)]
     pub ai_model: Option<String>,
+    /// Notion 페이지를 **어느 페이지 아래에** 만드는가 (ADR-0009 §5.1 · §8.4).
+    /// 고르지 않은 상태(`null`)도 정상이다.
+    ///
+    /// **secret이 아니다** — 어디에 쓰는지일 뿐이며, `ai_base_url`이 secret이 아닌 것과 같은
+    /// 이유로 INV-7과 충돌하지 않는다. **integration 자격증명은 이 경계를 지나지 않는다** —
+    /// 받는 자리도 돌려주는 자리도 여기가 아니다 (ADR-0009 §10.4).
+    ///
+    /// 이 페이지가 지금도 있는지, integration에 공유돼 있는지는 여기서 말하지 않는다.
+    #[serde(default)]
+    pub notion_parent_page_id: Option<String>,
 }
 
 impl From<Settings> for SettingsPayload {
@@ -479,6 +491,7 @@ impl From<Settings> for SettingsPayload {
             ai_provider: settings.ai_provider,
             ai_base_url: settings.ai_base_url,
             ai_model: settings.ai_model,
+            notion_parent_page_id: settings.notion_parent_page_id,
         }
     }
 }
@@ -524,6 +537,13 @@ impl From<SettingsPayload> for Settings {
                 .ai_model
                 .map(|model| model.trim().to_string())
                 .filter(|model| !model.is_empty()),
+            // Notion destination도 같은 규칙이다 — 공백뿐인 입력은 '고르지 않음'이며
+            // **그것뿐이다.** 이 자리에서 페이지 식별자의 모양을 검사하지도, 그 페이지가
+            // 실재하는지 물어보지도 않는다 (INV-10 · ADR-0009 §8.4).
+            notion_parent_page_id: payload
+                .notion_parent_page_id
+                .map(|page| page.trim().to_string())
+                .filter(|page| !page.is_empty()),
         }
     }
 }
@@ -772,4 +792,258 @@ impl AiNotePayload {
             generated_at: note.generated_at,
         })
     }
+}
+
+/// 방금 만들어진 Markdown 파일 하나 (§11 · ADR-0009 §4).
+///
+/// **경로가 이 값의 요점이다.** export 위치는 설정으로 노출되지 않으므로 (ADR-0009 §4.1),
+/// 화면이 사용자에게 "어디에 만들어졌는가"를 말해 주지 못하면 사용자는 파일을 찾을 수 없다.
+///
+/// `file_name`이 따로 있는 이유는 **요청한 이름과 다를 수 있기 때문이다** — 같은 이름이 이미
+/// 있으면 덮어쓰지 않고 번호가 붙는다 (ADR-0009 §4.3). 화면이 경로 문자열을 잘라 이름을
+/// 짐작하지 않도록 실제로 쓰인 이름을 함께 싣는다.
+///
+/// 내용은 싣지 않는다. 문서 본문은 파일에 있고, 그것을 IPC로 한 번 더 흘려보낼 이유가 없다.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportedFilePayload {
+    /// 내보낸 녹음. 화면이 어느 녹음의 결과인지 확인할 수 있게 함께 싣는다.
+    pub recording_id: String,
+    /// 만들어진 파일의 전체 경로. 사용자에게 그대로 보여줄 수 있는 값이다.
+    pub path: String,
+    /// 그 파일의 이름. `2026-09-01-3dgs-study-04-2.md`처럼 번호가 붙어 있을 수 있다.
+    pub file_name: String,
+}
+
+impl ExportedFilePayload {
+    /// 실제로 쓰인 파일 하나를 화면이 읽을 수 있는 모양으로 옮긴다.
+    ///
+    /// 경로는 [`std::path::Path::display`]로 옮긴다 — UTF-8이 아닌 경로에서도 값을 잃지 않고
+    /// 사람이 읽을 수 있는 문자열이 나가며, 여기서 실패를 만들지 않는다.
+    pub(super) fn new(recording_id: &str, written: crate::export::WrittenFile) -> Self {
+        Self {
+            recording_id: recording_id.to_string(),
+            path: written.path.display().to_string(),
+            file_name: written.name,
+        }
+    }
+}
+
+/// 지금 Notion 전송이 어떤 상태인지 (§10 · ADR-0009 §8).
+///
+/// [`TranscriptionStatusPayload`] · [`AiNoteStatusPayload`]와 같은 자리에 있는 값이다 —
+/// **진행 중인 전송을 들고 있는 것은 backend이고 화면은 그것을 물어본다**
+/// ([`crate::commands::NotionSender`]). 그래서 화면이 다시 그려지거나 사용자가 다른 화면에
+/// 다녀와도 여기서 같은 답이 나온다.
+///
+/// ```text
+/// state      recordingId   pageId   createdPage   failure
+/// idle       null          null     false         null
+/// running    있음          null     false         null
+/// done       있음          있음     true/false    null
+/// failed     있음          null     false         있음
+/// ```
+///
+/// `created_page`가 따로 있는 이유는 **이어 보낸 것과 새로 만든 것이 다른 결과이기 때문이다**
+/// (ADR-0009 §8.2 · §8.3). 끝나지 않은 전송을 이어 보냈다면 페이지는 그때 만들어진 그 페이지이며,
+/// 화면은 "새 페이지를 만들었다"고 말하면 안 된다.
+///
+/// **실패는 [`Failure`] 그대로 실려 온다.** §13의 Notion 실패 다섯은 사용자가 할 일이 전부
+/// 다르므로 여기서 문장을 새로 만들거나 종류를 뭉개지 않는다. **부분 전송 뒤의 실패도 이 자리로
+/// 온다** — 어디까지 갔는지는 저장된 [`NotionSyncPayload`]가 말한다.
+///
+/// **token은 어느 상태에도 실리지 않는다** (INV-7). 담을 자리가 이 타입에 없다.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotionSendStatusPayload {
+    /// `idle · running · done · failed` 중 하나.
+    ///
+    /// **[`RecordingPayload::notion_status`]와 다른 값이다.** 저쪽은 녹음 하나에 저장된 후처리
+    /// 상태(§7)이고, 이쪽은 지금 이 앱이 실제로 돌리고 있는 전송 한 건이다.
+    pub state: String,
+    /// 지금 보내고 있거나 마지막으로 보낸 녹음. 아무것도 하지 않았으면 없다.
+    pub recording_id: Option<String>,
+    /// 성공했을 때 그 녹음이 된 Notion 페이지의 식별자.
+    pub page_id: Option<String>,
+    /// 이번 실행에서 **새로 만든** 페이지인가. 이어 보낸 것이면 `false`다.
+    pub created_page: bool,
+    /// 실패했을 때 그 실패 그대로.
+    pub failure: Option<Failure>,
+}
+
+impl From<NotionSendStatus> for NotionSendStatusPayload {
+    fn from(status: NotionSendStatus) -> Self {
+        let idle = Self {
+            state: "idle".to_string(),
+            recording_id: None,
+            page_id: None,
+            created_page: false,
+            failure: None,
+        };
+
+        match status {
+            NotionSendStatus::Idle => idle,
+            NotionSendStatus::Running { recording_id } => Self {
+                state: "running".to_string(),
+                recording_id: Some(recording_id),
+                ..idle
+            },
+            NotionSendStatus::Done {
+                recording_id,
+                page_id,
+                created_page,
+            } => Self {
+                state: "done".to_string(),
+                recording_id: Some(recording_id),
+                page_id: Some(page_id),
+                created_page,
+                ..idle
+            },
+            NotionSendStatus::Failed {
+                recording_id,
+                failure,
+            } => Self {
+                state: "failed".to_string(),
+                recording_id: Some(recording_id),
+                failure: Some(failure),
+                ..idle
+            },
+        }
+    }
+}
+
+/// 저장된 Notion 전송 상태 하나 (§7의 `notion_syncs` · ADR-0009 §8.4).
+///
+/// [`NotionSendStatusPayload`]와 다른 값이다 — 저쪽은 **앱이 켜져 있는 동안의 진행 상황**이고,
+/// 이쪽은 **디스크에 남아 있는 사실**이다. 앱을 다시 켜도 이 값은 그대로 있다.
+///
+/// `sent_chunks`와 `total_chunks`가 함께 오는 이유는 하나다 — **부분 전송이 상태에서 드러나야
+/// 하기 때문이다** (ADR-0009 §8.4-4). 실패한 요청은 세지 않으므로, 둘이 다르면 그 페이지에는
+/// 문서의 일부만 들어가 있다.
+///
+/// **읽기 전용 값이다.** 이 payload를 되돌려받는 command는 없다 — `notion_syncs`에 쓰는 자리는
+/// 전송 순서 하나뿐이며 ([`crate::sync::run`]), 화면이 전송 기록을 고치거나 지우는 경로는
+/// 만들어질 수 없다.
+///
+/// `content_fingerprint`는 싣지 않는다. 그것은 **이어 붙여도 되는가**를 판정하기 위한 내부
+/// 근거이며 (ADR-0009 §8.2), 그 판정을 하는 자리는 backend 하나다 — 화면에 보낼 이유가 없다.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotionSyncPayload {
+    pub recording_id: String,
+    /// 만들어진 페이지의 식별자. 성공한 적이 없으면 없다.
+    pub page_id: Option<String>,
+    /// 마지막으로 성공한 시각(ISO-8601 UTC 텍스트). 성공한 적이 없으면 없다.
+    pub synced_at: Option<String>,
+    /// `none · pending · running · done · failed` 중 하나 (§7).
+    pub status: String,
+    /// 마지막 실패 사유. 실패한 적이 없으면 없다.
+    pub error: Option<String>,
+    /// 이 페이지에 **성공적으로** 반영된 조각 수. 기록하기 전의 행이면 없다.
+    pub sent_chunks: Option<i64>,
+    /// 그 문서를 나눈 조각 수. 기록하기 전의 행이면 없다.
+    pub total_chunks: Option<i64>,
+}
+
+impl From<NotionSync> for NotionSyncPayload {
+    fn from(sync: NotionSync) -> Self {
+        Self {
+            recording_id: sync.recording_id.as_str().to_string(),
+            page_id: sync.page_id,
+            synced_at: sync.synced_at,
+            status: sync.status.as_str().to_string(),
+            error: sync.error,
+            sent_chunks: sync.sent_chunks,
+            total_chunks: sync.total_chunks,
+        }
+    }
+}
+
+/// Notion 연결이 지금 어떤 상태인지 (§5-D의 connection test · ADR-0009 §5.1).
+///
+/// [`AiProviderStatusPayload`]와 같은 성질의 값이다 — **아직 설정하지 않은 것은 실패가 아니라
+/// 상태다** (INV-8). 그래서 화면은 이 값을 경고가 아니라 담담한 상태로 그릴 수 있다.
+///
+/// ```text
+/// state           tokenStored   workspaceName   failure
+/// notConfigured   false         null            아직 token을 저장하지 않았다 (요청도 보내지 않았다)
+/// connected       true          Notion이 말한 것 이 token으로 지금 말할 수 있다
+/// failed          true          null            말하지 못했다 — 무엇이 다른지는 failure가 말한다
+/// ```
+///
+/// **세 상태를 boolean 하나로 뭉개지 않는 이유는 §13이다** — token을 넣는 것 · token을 고치는
+/// 것 · 부모 페이지를 integration에 공유하는 것 · 네트워크를 확인하는 것은 사용자가 할 일이 전부
+/// 다르다. 그 구분은 `failure.kind`가 그대로 들고 온다
+/// ([`crate::notion::NOTION_FAILURE_KINDS`]).
+///
+/// **token은 여기에 오지 않는다** (INV-7 · ADR-0009 §10.4). 오는 것은 저장돼 있다는 사실
+/// 하나뿐이며, 값을 담을 자리가 이 타입에 없다.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotionConnectionPayload {
+    /// `notConfigured · connected · failed` 중 하나.
+    pub state: String,
+    /// integration token이 저장돼 있는가. **값이 아니라 사실이다.**
+    pub token_stored: bool,
+    /// 보낼 부모 페이지를 골랐는가 (설정 값 · ADR-0009 §8.4).
+    ///
+    /// **고르지 않은 것도 정상 상태다** (INV-8). 그 상태에서도 token 확인은 그대로 하며,
+    /// 여기서 페이지 식별자를 돌려주지 않는다 — 그 값을 아는 자리는 설정 조회다.
+    pub destination_configured: bool,
+    /// **어느 워크스페이스에 연결됐는가** (§5-D). `connected`에서만, 그리고 Notion이 말해
+    /// 줬을 때만 있다 — 말해 주지 않은 이름을 지어내지 않는다
+    /// ([`crate::notion::ConnectedIdentity`]).
+    ///
+    /// secret이 아니다. token은 여전히 이 타입에 담길 자리가 없다 (INV-7).
+    pub workspace_name: Option<String>,
+    /// 연결하지 못한 이유. **`failed`에서만 있다** — 그 밖의 상태는 실패가 아니다.
+    pub failure: Option<Failure>,
+}
+
+impl NotionConnectionPayload {
+    /// 아직 token을 저장하지 않았다. **오류가 아니라 정상 상태다** (INV-8).
+    pub(super) fn not_configured(destination_configured: bool) -> Self {
+        Self {
+            state: "notConfigured".to_string(),
+            token_stored: false,
+            destination_configured,
+            workspace_name: None,
+            failure: None,
+        }
+    }
+
+    /// 저장된 token으로 지금 말할 수 있다. **누구에게인지는 Notion이 말한 그대로다.**
+    pub(super) fn connected(destination_configured: bool, workspace_name: Option<String>) -> Self {
+        Self {
+            state: "connected".to_string(),
+            token_stored: true,
+            workspace_name,
+            ..Self::not_configured(destination_configured)
+        }
+    }
+
+    /// 말하지 못했다. **무엇이 달랐는지는 실려 온 실패가 말한다** (§13).
+    ///
+    /// 워크스페이스 이름은 없다 — 확인하지 못했으므로 어느 워크스페이스인지도 알지 못한다.
+    pub(super) fn failed(destination_configured: bool, failure: Failure) -> Self {
+        Self {
+            state: "failed".to_string(),
+            failure: Some(failure),
+            ..Self::connected(destination_configured, None)
+        }
+    }
+}
+
+/// integration token이 저장돼 있는가 (INV-7 · ADR-0009 §10.4).
+///
+/// **이 앱에서 token에 대해 화면이 알 수 있는 전부다.** 값을 돌려주는 command는 없고, 이
+/// 타입에도 값을 담을 자리가 없다 — 저장하는 command의 입력으로 한 번 지나갈 뿐이다.
+///
+/// 저장 뒤에도 삭제 뒤에도 같은 값이 돌아오므로, 화면은 자기가 방금 무엇을 했는지 추측하지
+/// 않고 **자격증명 저장소가 실제로 어떤 상태인지** 그대로 받는다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotionTokenStatusPayload {
+    /// 저장돼 있으면 `true`. **저장한 적이 없는 것은 실패가 아니다** (INV-8).
+    pub stored: bool,
 }

@@ -4,11 +4,13 @@
 //! 함께 추가한다** — 값을 담을 자리만 미리 만들어 두지 않는다 (§20.6). Phase 1이
 //! recordings directory · automatic 처리 토글 · default microphone을 두었고, Phase 3이
 //! 전사 두 값(**자동 전사 토글**과 **모델 선택**)을 더하며, Phase 4가 AI provider 세 값을
-//! 더한다 (`docs/ADR-0008-note-ai-provider.md` §11.1). Notion destination은 여전히 없다.
+//! 더한다 (`docs/ADR-0008-note-ai-provider.md` §11.1). Phase 5가 Notion destination 하나를
+//! 더한다 (`docs/ADR-0009-notion-and-export.md` §8.4).
 //!
 //! **INV-7: 이 타입에는 secret이 없다.** API key · integration token · password 류 값을
-//! 담는 필드를 두지 않으며, 저장소에도 그런 열이 없다. secret 보관은 이 Phase의 범위 밖이다
-//! (`phase-prompt/01-application-foundation.md` Out of Scope).
+//! 담는 필드를 두지 않으며, 저장소에도 그런 열이 없다. **Notion 설정이 생겨도 그대로다** —
+//! 어느 페이지 아래에 만드는가는 여기 있고, 그 workspace에 들어가기 위한 자격증명은 OS
+//! 자격증명 저장소에만 있다 (`crate::platform::secret_store` · ADR-0009 §10.5).
 
 /// 사용자가 바꿀 수 있는 앱 설정 값.
 ///
@@ -88,6 +90,18 @@ pub struct Settings {
     /// 그것은 **이 값이 틀렸다는 뜻이 아니라 지금 그 모델이 없다**는 뜻이다 — 그 구분은
     /// 서버에게 물어본 쪽이 하며, 앱이 조용히 다른 모델로 바꾸지 않는다.
     pub ai_model: Option<String>,
+    /// Notion 페이지를 **어느 페이지 아래에** 만드는가 (ADR-0009 §5.1 · §8.4).
+    /// `None`은 **아직 고르지 않았다**는 정상 상태다.
+    ///
+    /// **secret이 아니다** — 어디에 쓰는지일 뿐이며, `ai_base_url`이 secret이 아닌 것과
+    /// 같은 이유로 INV-7과 충돌하지 않는다. 그 workspace에 들어가기 위한 자격증명은 이
+    /// 타입에도 저장소에도 없다 (`crate::platform::secret_store`).
+    ///
+    /// domain은 이 문자열이 어떤 모양인지 알지 않는다 (INV-10) — 형식을 검사하지도, 그
+    /// 페이지가 지금 있는지 묻지도 않는다. `transcription_model` · `ai_model`과 같은 성질을
+    /// 갖는다: 가리키는 것이 사라져 있을 수 있고, **그것은 이 값이 틀렸다는 뜻이 아니라 지금
+    /// 그 페이지에 닿지 못한다는 뜻**이며, 그 사실 때문에 저장된 선택을 지우거나 바꾸지 않는다.
+    pub notion_parent_page_id: Option<String>,
 }
 
 /// AI provider에 연결할 주소를 아직 고르지 않았을 때 쓰는 값.
@@ -126,6 +140,9 @@ impl Settings {
     ///   달라져도 고른 적 없는 사용자의 DB를 고치지 않아도 된다.
     /// - `ai_model`: 고르지 않은 상태(`None`). 설치된 모델 중 아무 것이나 골라 두지
     ///   않는다 — `transcription_model`과 같은 이유다.
+    /// - `notion_parent_page_id`: 고르지 않은 상태(`None`). **어떤 페이지도 기본으로 굳혀
+    ///   두지 않는다** — Notion으로 보내는 것은 사용자가 시작하는 일이고, 고르지 않은 상태가
+    ///   그 자체로 정상이다 (INV-8 · ADR-0009 §8.4).
     pub const DEFAULT: Self = Self {
         recordings_directory: None,
         automatic_processing: false,
@@ -135,6 +152,7 @@ impl Settings {
         ai_provider: None,
         ai_base_url: None,
         ai_model: None,
+        notion_parent_page_id: None,
     };
 
     /// 실제로 연결할 주소. 고른 값이 없으면 [`DEFAULT_AI_BASE_URL`]이다.

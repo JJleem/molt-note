@@ -1,0 +1,62 @@
+# Markdown renderer와 안전한 파일명 — 순수 모듈
+# Runtime이 PLAN-20260904T025945Z 승인 시점에 생성했다 (proposal P2). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-044
+status: DONE
+
+request: |-
+  `src-tauri/src/export/` 아래에 **파일 시스템을 모르는 순수 모듈 두 개**를 만든다. 첫째, Markdown 렌더러: 입력은 Recording 메타데이터 + Transcript + **선택적** Structured Note(`crate::ai::note`의 provider 중립 타입 — §9.3 · INV-9)이고, 출력은 결정론적인 `String`이다. §11의 구조를 따른다(`# 제목` · `Date:` · `Duration:` · AI Note 섹션 · `## Transcript`와 `### 00:00:03` 형태의 타임스탬프 소제목). 세 note mode(meeting · study · summary)의 섹션 제목은 §9.5의 출력 섹션 이름을 그대로 쓴다. **AI Note가 없는 입력도 유효한 문서를 낸다** — Transcript와 메타데이터만으로 읽을 수 있어야 하며, 빈 AI 섹션 자리를 남기지 않는다 (INV-8 · §17.1). 특정 AI 벤더의 응답 형태(원시 JSON · provider 고유 필드)를 소비하지 않는다 (INV-9). 둘째, 파일명 정규화: Recording의 날짜와 제목에서 `exports/2026-09-01-3dgs-study-04.md` 형태의 결정론적이고 안전한 이름을 만든다 — 슬래시 · 콜론 · 백슬래시 · 이모지 · 개행 · 제어문자 · `..` 같은 경로 탈출 시도 · 빈 제목 · 지나치게 긴 제목이 전부 안전한 이름 하나로 떨어져야 한다. 두 모듈 모두 파일 쓰기 · 저장소 · 시계 · 플랫폼 접근을 하지 않으므로 실제 파일 없이 전부 테스트된다 (§18). 테스트에는 **AI Note가 없는 입력**과 **적대적인 제목 입력**이 반드시 포함되고, 같은 입력이 언제나 같은 문자열을 낸다는 것을 고정한다.
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-043
+
+stop_condition:
+  gates: [lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 3
+
+acceptance_criteria:
+  - id: P2-AC1
+    description: |-
+      lint Gate가 통과한다 (clippy --all-targets -D warnings).
+    verification:
+      type: gate
+      ref: lint
+  - id: P2-AC2
+    description: |-
+      test Gate가 통과한다.
+    verification:
+      type: gate
+      ref: test
+  - id: P2-AC3
+    description: |-
+      렌더러가 순수 함수다 — 파일 시스템 · 저장소 · 시계 · 네트워크에 닿지 않고, 같은 입력에 같은 문자열을 낸다. 테스트가 결정성을 고정한다.
+    verification:
+      type: verifier
+      instruction: |-
+        모듈이 std::fs · db · 시계 · HTTP를 import하지 않는지, 결정성을 주장하는 테스트가 실제로 두 번 렌더해 비교하거나 기대 문자열 전체를 고정하는지 확인한다.
+  - id: P2-AC4
+    description: |-
+      AI Note가 없는 입력에 대한 테스트가 존재하고, 그 출력이 §11 구조를 가진 유효한 문서다 (INV-8).
+    verification:
+      type: verifier
+      instruction: |-
+        AINote 없이 렌더한 결과에 제목 · Date · Duration · Transcript 섹션이 있고 빈 AI 섹션 껍데기가 남지 않는지 확인한다.
+  - id: P2-AC5
+    description: |-
+      파일명 정규화가 슬래시 · 콜론 · 이모지 · 개행 · 경로 탈출 · 빈 제목을 안전하게 처리하고, 그 각각이 테스트로 고정돼 있다.
+    verification:
+      type: verifier
+  - id: P2-AC6
+    description: |-
+      렌더러가 §9.3의 provider 중립 Structured Note를 소비하며 벤더 고유 응답 형태에 의존하지 않는다 (INV-9).
+    verification:
+      type: verifier
+
+evidence: []
+
+failure_memo: []

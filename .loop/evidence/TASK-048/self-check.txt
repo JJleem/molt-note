@@ -1,0 +1,37 @@
+# TASK-048 self-check (2026-09-04, RUN-20260904T051916Z-TASK-048)
+#
+# 이것은 참고용이다 — 완료 판정이 아니다. Runtime이 Worker 종료 뒤 Gate를 독립적으로 다시 돌린다.
+
+$ node tools/loop-runtime/loopctl.mjs self-check lint test
+
+Self-check (advisory — the runtime reruns gates independently after the worker finishes)
+Gates: lint, test
+
+[lint] npm run lint
+[test] npm run test
+
+lint: PASS  exit=0  1.8s
+
+test: PASS  exit=0  5.0s
+
+Self-check: all gates passed
+Artifacts: .loop-local/self-check/  (advisory only — not a gate report)
+
+[exited with code 0]
+
+---
+
+두 Gate가 무엇을 실제로 돌렸는가 (원문은 같은 디렉터리의 gate-*.log):
+
+  lint  = npm run lint:web && npm run lint:rust
+        = eslint .
+          cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+        → gate-lint-stdout.log · gate-lint-stderr.log ("Finished `dev` profile ... in 0.44s":
+          앞선 시도가 이미 컴파일해 둔 것이라 재컴파일이 없었다. 경고는 하나도 없다)
+
+  test  = vitest run && cargo test
+        → gate-test-stdout.log (전체) · gate-test-stderr.log (실행된 테스트 바이너리 목록)
+        → chunk 모듈에 해당하는 줄만 추린 것: chunking-test-run.txt
+
+경과 시간이 짧은 이유: 이 Task의 앞선 시도(RUN-20260904T044650Z-TASK-048, worker timeout으로
+중단)가 이미 같은 트리를 컴파일해 두었다. cargo가 그 산출물을 그대로 썼다.

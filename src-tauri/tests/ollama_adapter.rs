@@ -365,9 +365,13 @@ fn the_default_address_lives_in_the_settings_and_not_in_the_adapter() {
 }
 
 #[test]
-fn only_one_file_in_the_repository_can_open_a_socket() {
+fn only_the_two_declared_files_in_the_repository_can_open_a_socket() {
     // §18: 자동 검증이 실제 서버에 닿지 않는다는 것은 "그런 테스트를 안 썼다"가 아니라
     // **네트워크에 닿을 수 있는 코드가 어디에 있는지**로 말한다.
+    //
+    // 둘인 것은 Phase 5가 Notion adapter를 더했기 때문이다 (`notion/network.rs`). 그 파일도
+    // 같은 규약 위에 있다 — Gate가 컴파일만 하고 테스트는 double을 쓴다
+    // (`tests/notion_adapter.rs`가 그 사실을 따로 확인한다). **목록은 이 둘로 닫혀 있다.**
     let mut users: Vec<String> = Vec::new();
 
     for path in rust_sources() {
@@ -377,11 +381,20 @@ fn only_one_file_in_the_repository_can_open_a_socket() {
         }
     }
 
-    assert_eq!(users.len(), 1, "네트워크에 닿는 파일이 하나가 아니다: {users:?}");
-    assert!(
-        users[0].ends_with("ai/ollama/network.rs"),
-        "네트워크에 닿는 파일이 예상 밖이다: {users:?}"
+    users.sort();
+    let expected = ["ai/ollama/network.rs", "notion/network.rs"];
+
+    assert_eq!(
+        users.len(),
+        expected.len(),
+        "네트워크에 닿는 파일이 선언된 둘이 아니다: {users:?}"
     );
+    for (found, declared) in users.iter().zip(expected) {
+        assert!(
+            found.ends_with(declared),
+            "네트워크에 닿는 파일이 예상 밖이다: {users:?}"
+        );
+    }
 }
 
 #[test]

@@ -1,0 +1,440 @@
+diff --git a/src-tauri/src/commands/mod.rs b/src-tauri/src/commands/mod.rs
+index 0e50ded..f111ff9 100644
+--- a/src-tauri/src/commands/mod.rs
++++ b/src-tauri/src/commands/mod.rs
+@@ -12,7 +12,9 @@
+ //! 고치거나 지우는 이름은 이 표면에 없다 (§7.1 · INV-2).
+ //! Phase 4가 **AI 노트** 다섯을 더한다 — provider 상태 조회 · 생성 시작 · 진행 상태 조회 ·
+ //! 저장된 노트 읽기 둘 ([`NoteGenerator`]). 여기서도 쓰기 이름은 늘지 않는다: 노트는 생성으로만
+-//! 늘고, 재생성은 대체가 아니라 추가다 (ADR-0008 §9.2). Notion을 위한 command는 Phase 5다.
++//! 늘고, 재생성은 대체가 아니라 추가다 (ADR-0008 §9.2).
++//! Phase 5가 **Markdown export** 하나를 더한다 ([`Exporter`]) — 저장소를 읽어 파일 하나를
++//! 만들 뿐, 저장된 것을 고치거나 지우지 않는다. Notion을 위한 command는 아직 없다.
+ //!
+ //! ## AI provider가 없는 것은 이 표면의 실패가 아니다 (INV-8)
+ //!
+@@ -52,6 +54,7 @@
+ //! 모든 command 응답으로 돌려준다. 초기화 경로에 `unwrap` · `expect` · `panic!`이 없는 이유가
+ //! 이것이다 — 여기서 죽으면 사용자는 아무 설명도 받지 못하고, 실패는 콘솔에만 남는다 (§13).
+ 
++pub mod export;
+ pub mod notes;
+ pub mod payload;
+ pub mod transcriber;
+@@ -76,12 +79,13 @@ use crate::platform::microphone::{
+     self, MicrophoneAccess, MicrophonePermission, SystemMicrophonePermission,
+ };
+ 
++pub use export::Exporter;
+ pub use notes::NoteGenerator;
+ pub use payload::{
+     AiNotePayload, AiNoteStatusPayload, AiProviderStatusPayload, CaptureReportPayload,
+-    InputDevicePayload, MissingAudioPayload, NewRecording, RecordingPayload, SessionStatusPayload,
+-    SettingsPayload, StoppedRecordingPayload, StructuredNotePayload, TranscriptPayload,
+-    TranscriptSegmentPayload, TranscriptionStatusPayload,
++    ExportedFilePayload, InputDevicePayload, MissingAudioPayload, NewRecording, RecordingPayload,
++    SessionStatusPayload, SettingsPayload, StoppedRecordingPayload, StructuredNotePayload,
++    TranscriptPayload, TranscriptSegmentPayload, TranscriptionStatusPayload,
+ };
+ pub use transcriber::Transcriber;
+ 
+@@ -755,9 +759,10 @@ fn validated(recording: NewRecording) -> Result<NewRecording, Failure> {
+ 
+ // --- Tauri command 표면 -------------------------------------------------------------
+ //
+-// 아래 스물한 개가 frontend가 부를 수 있는 전부다. 각 함수는 [`Storage`] · [`AudioDevices`] ·
+-// [`Recorder`] · [`Transcriber`] · [`NoteGenerator`]의 같은 이름 동작이나 [`finish_recording`]을
+-// 그대로 부른다 — 로직을 여기에 두지 않으므로, 실제 동작은 Tauri 없이 테스트할 수 있다.
++// 아래 스물두 개가 frontend가 부를 수 있는 전부다. 각 함수는 [`Storage`] · [`AudioDevices`] ·
++// [`Recorder`] · [`Transcriber`] · [`NoteGenerator`] · [`Exporter`]의 같은 이름 동작이나
++// [`finish_recording`]을 그대로 부른다 — 로직을 여기에 두지 않으므로, 실제 동작은 Tauri 없이
++// 테스트할 수 있다.
+ 
+ #[tauri::command]
+ pub fn list_recordings(storage: State<'_, Storage>) -> Result<Vec<RecordingPayload>, Failure> {
+@@ -955,3 +960,24 @@ pub fn get_ai_note(
+ ) -> Result<Option<AiNotePayload>, Failure> {
+     storage.ai_note(&ai_note_id)
+ }
++
++/// Recording 하나를 로컬 Markdown 파일로 내보내고 **쓰인 파일의 경로를 돌려준다** (§11).
++///
++/// 돌아온 값은 이미 만들어진 파일을 가리킨다 — 접수 사실이 아니다. 기다릴 모델도 서버도 없으므로
++/// 전사·노트 생성의 시작·상태 조회 규약을 쓰지 않는다 ([`Exporter`]).
++///
++/// **AI provider를 고르지 않았거나 AI Note가 하나도 없다는 이유로 거절하지 않는다** (INV-8).
++/// 그때는 Transcript와 메타데이터만으로 이루어진 유효한 문서가 나온다.
++///
++/// 같은 이름의 파일이 이미 있으면 **덮어쓰지 않고 번호를 붙인다** (ADR-0009 §4.3) — 앞서
++/// 내보낸 파일은 사용자의 문서이며, 이 command에는 그것을 지우거나 고치는 경로가 없다.
++///
++/// `async`인 이유는 디스크가 느릴 때 창이 함께 멈추지 않게 하기 위해서다
++/// ([`ai_provider_status`]와 같은 이유).
++#[tauri::command(async)]
++pub fn export_markdown(
++    exporter: State<'_, Exporter>,
++    recording_id: String,
++) -> Result<ExportedFilePayload, Failure> {
++    exporter.export(&recording_id)
++}
+diff --git a/src-tauri/src/commands/payload.rs b/src-tauri/src/commands/payload.rs
+index 360d8ad..52c776b 100644
+--- a/src-tauri/src/commands/payload.rs
++++ b/src-tauri/src/commands/payload.rs
+@@ -773,3 +773,38 @@ impl AiNotePayload {
+         })
+     }
+ }
++
++/// 방금 만들어진 Markdown 파일 하나 (§11 · ADR-0009 §4).
++///
++/// **경로가 이 값의 요점이다.** export 위치는 설정으로 노출되지 않으므로 (ADR-0009 §4.1),
++/// 화면이 사용자에게 "어디에 만들어졌는가"를 말해 주지 못하면 사용자는 파일을 찾을 수 없다.
++///
++/// `file_name`이 따로 있는 이유는 **요청한 이름과 다를 수 있기 때문이다** — 같은 이름이 이미
++/// 있으면 덮어쓰지 않고 번호가 붙는다 (ADR-0009 §4.3). 화면이 경로 문자열을 잘라 이름을
++/// 짐작하지 않도록 실제로 쓰인 이름을 함께 싣는다.
++///
++/// 내용은 싣지 않는다. 문서 본문은 파일에 있고, 그것을 IPC로 한 번 더 흘려보낼 이유가 없다.
++#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
++#[serde(rename_all = "camelCase")]
++pub struct ExportedFilePayload {
++    /// 내보낸 녹음. 화면이 어느 녹음의 결과인지 확인할 수 있게 함께 싣는다.
++    pub recording_id: String,
++    /// 만들어진 파일의 전체 경로. 사용자에게 그대로 보여줄 수 있는 값이다.
++    pub path: String,
++    /// 그 파일의 이름. `2026-09-01-3dgs-study-04-2.md`처럼 번호가 붙어 있을 수 있다.
++    pub file_name: String,
++}
++
++impl ExportedFilePayload {
++    /// 실제로 쓰인 파일 하나를 화면이 읽을 수 있는 모양으로 옮긴다.
++    ///
++    /// 경로는 [`std::path::Path::display`]로 옮긴다 — UTF-8이 아닌 경로에서도 값을 잃지 않고
++    /// 사람이 읽을 수 있는 문자열이 나가며, 여기서 실패를 만들지 않는다.
++    pub(super) fn new(recording_id: &str, written: crate::export::WrittenFile) -> Self {
++        Self {
++            recording_id: recording_id.to_string(),
++            path: written.path.display().to_string(),
++            file_name: written.name,
++        }
++    }
++}
+diff --git a/src-tauri/src/lib.rs b/src-tauri/src/lib.rs
+index 0eba1ac..39dfd55 100644
+--- a/src-tauri/src/lib.rs
++++ b/src-tauri/src/lib.rs
+@@ -3,12 +3,13 @@ pub mod audio;
+ pub mod commands;
+ pub mod db;
+ pub mod domain;
++pub mod export;
+ pub mod platform;
+ pub mod transcription;
+ 
+ use tauri::Manager;
+ 
+-use commands::{AudioDevices, NoteGenerator, Recorder, Storage, Transcriber};
++use commands::{AudioDevices, Exporter, NoteGenerator, Recorder, Storage, Transcriber};
+ use platform::app_data_dir::AppDataDirectory;
+ 
+ #[cfg_attr(mobile, tauri::mobile_entry_point)]
+@@ -56,6 +57,15 @@ pub fn run() {
+             // 열람은 그대로 동작한다 (INV-8).
+             app.manage(NoteGenerator::open_for(app));
+ 
++            // Markdown export도 앱 데이터 루트 하나에서 자리를 얻는다 (INV-10 · ADR-0009 §4.1).
++            // **여기서 디렉터리를 만들지 않는다** — 한 번도 내보내지 않은 사용자에게 빈
++            // `exports/`를 만들어 두지 않으려는 것이며, 자리는 실제로 내보낼 때 준비된다.
++            //
++            // 진행 중인 무언가를 들고 있지도 않다. export는 기다릴 모델도 서버도 없는 짧은
++            // 일이라 배경 스레드와 상태 조회 규약을 쓰지 않는다 (crate::commands::export).
++            // 경로를 얻지 못한 실패는 값으로 남아 내보내려 할 때 사용자에게 전달된다 (§13).
++            app.manage(Exporter::open_for(app));
++
+             // 저장된 녹음을 재생하려면 webview가 그 파일을 읽을 수 있어야 한다.
+             // 그 통로는 Tauri v2의 asset protocol이고(`protocol-asset` feature),
+             // **열어 주는 자리는 녹음 디렉터리 하나뿐이다** — 사용자의 홈도, 앱 데이터
+@@ -113,6 +123,10 @@ pub fn run() {
+             commands::ai_note_status,
+             commands::list_ai_notes,
+             commands::get_ai_note,
++            // Markdown export의 표면은 이 하나다 — Recording 하나를 파일 하나로 만든다.
++            // **AI가 없어도 부를 수 있고** (INV-8), 이미 있는 파일을 덮어쓰지 않으며
++            // (ADR-0009 §4.3), 저장된 것을 고치거나 지우는 이름은 여기에도 없다.
++            commands::export_markdown,
+         ])
+         .run(tauri::generate_context!());
+ 
+diff --git a/src-tauri/src/platform/app_data_dir.rs b/src-tauri/src/platform/app_data_dir.rs
+index 45555e7..e432a9f 100644
+--- a/src-tauri/src/platform/app_data_dir.rs
++++ b/src-tauri/src/platform/app_data_dir.rs
+@@ -27,6 +27,14 @@ const RECORDINGS_DIR_NAME: &str = "recordings";
+ /// 않는다 — 사용자가 두고 앱은 그 자리를 안다.
+ const MODELS_DIR_NAME: &str = "models";
+ 
++/// export된 Markdown 파일을 두는 하위 디렉터리 이름 (ADR-0009 §4.1).
++///
++/// **`Documents`나 `Downloads`가 아니다.** 그런 자리를 고르면 OS별 규약과 권한(특히 macOS의
++/// TCC)이 새 변수로 들어오지만, 앱 데이터 루트는 Tauri가 이미 답하고 있다. 그 대가로 사용자가
++/// 파일을 찾지 못하면 안 되므로 **export는 만들어진 파일의 전체 경로를 그대로 돌려준다**
++/// (`crate::export::run`).
++const EXPORTS_DIR_NAME: &str = "exports";
++
+ /// 앱이 자신의 데이터를 두는 디렉터리.
+ ///
+ /// 임의의 base path로 생성할 수 있으므로 테스트는 임시 디렉터리를 주입해
+@@ -109,6 +117,25 @@ impl AppDataDirectory {
+         create(&directory)?;
+         Ok(directory)
+     }
++
++    /// export된 Markdown 파일을 두는 디렉터리. 같은 루트면 항상 같은 값이다 (ADR-0009 §4.1).
++    ///
++    /// **export 코드는 플랫폼 경로를 스스로 만들지 않는다** — DB · 녹음 · 모델이 이미 이 루트
++    /// 하나에서 파생되며, export만 다른 방식으로 자리를 정하면 "이 앱이 파일을 어디에 두는가"를
++    /// 답하는 자리가 둘이 된다 (INV-10).
++    pub fn exports_dir(&self) -> PathBuf {
++        self.root.join(EXPORTS_DIR_NAME)
++    }
++
++    /// export 디렉터리가 없으면 만들고 그 경로를 돌려준다.
++    ///
++    /// [`Self::ensure_recordings_dir`]와 같이 **이미 있는 것을 지우거나 비우지 않는다.** 앞서
++    /// 내보낸 파일은 사용자의 문서이며, 다음 export가 그것을 정리하지 않는다 (ADR-0009 §4.3).
++    pub fn ensure_exports_dir(&self) -> Result<PathBuf, AppDataDirError> {
++        let directory = self.exports_dir();
++        create(&directory)?;
++        Ok(directory)
++    }
+ }
+ 
+ /// 디렉터리 하나를 만든다. 실패하면 어느 경로가 문제인지 함께 남긴다.
+@@ -319,6 +346,71 @@ mod tests {
+         );
+     }
+ 
++    #[test]
++    fn the_exports_directory_is_derived_from_the_same_root_as_everything_else() {
++        // export 파일의 자리도 다른 모든 경로와 같은 루트에서 나온다 (INV-10 · ADR-0009 §4.1).
++        // 녹음·모델 디렉터리와 같아지면 사용자가 내보낸 문서가 앱의 내부 파일과 섞인다.
++        let temp = TempRoot::new("exports-derived");
++        let root = temp.path().join("app-data");
++
++        let dir = AppDataDirectory::new(&root);
++
++        assert_eq!(dir.exports_dir(), root.join(EXPORTS_DIR_NAME));
++        assert_eq!(
++            dir.exports_dir(),
++            AppDataDirectory::new(&root).exports_dir(),
++            "같은 루트면 같은 경로가 나와야 한다"
++        );
++        assert_eq!(dir.exports_dir().parent(), Some(root.as_path()));
++        assert_ne!(dir.exports_dir(), dir.recordings_dir());
++        assert_ne!(dir.exports_dir(), dir.models_dir());
++        assert_ne!(dir.exports_dir(), dir.database_path());
++    }
++
++    #[test]
++    fn ensuring_the_exports_directory_keeps_the_documents_already_exported() {
++        // 내보낸 파일은 **사용자의 문서다.** 다음 export를 준비하는 일이 그것을 지우지 않는다
++        // (ADR-0009 §4.3 · INV-4의 태도).
++        let temp = TempRoot::new("exports-kept");
++        let dir = AppDataDirectory::new(temp.path().join("app-data"));
++
++        let created = dir
++            .ensure_exports_dir()
++            .expect("export 디렉터리를 만들 수 있어야 한다");
++        let existing = created.join("2026-09-01-earlier.md");
++        std::fs::write(&existing, "# 이전에 내보낸 문서").expect("사전 조건: 이전 문서를 둔다");
++
++        let again = dir
++            .ensure_exports_dir()
++            .expect("두 번째 호출도 성공해야 한다");
++
++        assert_eq!(again, created);
++        assert_eq!(
++            std::fs::read_to_string(&existing).expect("이전 문서가 남아 있어야 한다"),
++            "# 이전에 내보낸 문서"
++        );
++    }
++
++    #[test]
++    fn an_exports_directory_that_cannot_be_created_becomes_a_readable_failure() {
++        // 디렉터리가 있어야 할 자리에 파일이 있다 — ADR-0009 §4.3이 말하는 "보이는 실패"다.
++        let temp = TempRoot::new("exports-blocked");
++        let root = temp.path().join("app-data");
++        std::fs::create_dir_all(&root).expect("사전 조건: 루트를 만든다");
++        std::fs::write(root.join(EXPORTS_DIR_NAME), "디렉터리가 아니다")
++            .expect("사전 조건: 파일을 둔다");
++
++        let error = AppDataDirectory::new(&root)
++            .ensure_exports_dir()
++            .expect_err("파일 위에 디렉터리를 만들 수는 없다");
++        let failure = Failure::from(error);
++
++        assert_eq!(failure.kind, FailureKind::Storage);
++        assert!(failure.message.contains(EXPORTS_DIR_NAME));
++        assert!(failure.source_data_safe, "아무것도 쓰지 못했다 (INV-3)");
++        assert!(failure.retryable);
++    }
++
+     #[test]
+     fn ensuring_the_recordings_directory_keeps_what_is_already_there() {
+         let temp = TempRoot::new("recordings-kept");
+diff --git a/src/ipc/commands.ts b/src/ipc/commands.ts
+index f4f5ec6..e4d829b 100644
+--- a/src/ipc/commands.ts
++++ b/src/ipc/commands.ts
+@@ -1,7 +1,7 @@
+ /**
+  * 프론트엔드가 부를 수 있는 동작의 전부.
+  *
+- * `src-tauri/src/lib.rs`가 등록한 스물한 개 command와 1:1이며, 그 밖의 경로는 없다 —
++ * `src-tauri/src/lib.rs`가 등록한 스물두 개 command와 1:1이며, 그 밖의 경로는 없다 —
+  * **임의의 질의를 보낼 수단이 없다.** 저장소를 아는 코드는 Rust 안에만 있다
+  * (`docs/ADR-0001-local-persistence.md` · PRODUCT-SPEC §12).
+  *
+@@ -22,6 +22,7 @@ import type {
+   AiNote,
+   AiNoteStatus,
+   AiProviderStatus,
++  ExportedFile,
+   InputDevice,
+   MissingAudio,
+   NewRecording,
+@@ -43,6 +44,7 @@ export type {
+   AiProviderState,
+   AiProviderStatus,
+   CaptureReport,
++  ExportedFile,
+   InputDevice,
+   MeetingNote,
+   MissingAudio,
+@@ -307,3 +309,27 @@ export function listAiNotes(transcriptId: string): Promise<AiNote[]> {
+ export function getAiNote(aiNoteId: string): Promise<AiNote | null> {
+   return call<AiNote | null>('get_ai_note', { aiNoteId });
+ }
++
++/**
++ * 녹음 하나를 로컬 Markdown 파일로 내보낸다 (§11 · `phase-prompt/05` 요구 A-1).
++ *
++ * **돌아온 값은 이미 만들어진 파일을 가리킨다** — 접수 사실이 아니다. 기다릴 모델도 서버도
++ * 없으므로 전사·AI 노트처럼 시작하고 상태를 물어보는 규약을 쓰지 않는다.
++ *
++ * **AI provider를 고르지 않았거나 AI 노트가 하나도 없어도 성공한다** (INV-8). 그때는
++ * Transcript와 메타데이터만으로 이루어진 유효한 문서가 나오며, 없는 AI 섹션의 빈 껍데기가
++ * 남지 않는다.
++ *
++ * **이미 있는 파일을 덮어쓰지 않는다.** 같은 이름이 있으면 backend가 번호를 붙이므로
++ * ({@link ExportedFile.fileName}), 내보낸 파일을 사용자가 손댔더라도 그것이 사라지지 않는다
++ * (docs/ADR-0009-notion-and-export.md §4.3).
++ *
++ * 아직 전사가 없는 녹음이면 실패한다 — 제목과 길이만 담긴 빈 문서를 만드는 대신 무엇이
++ * 필요한지 말한다 (§13). 어떤 실패에서도 녹음 · 전사 · 노트는 그대로다 (INV-3).
++ *
++ * **어디에 만들어지는지는 화면이 정하지 않는다.** 자리를 아는 것은 backend 하나이며 (INV-10),
++ * 그래서 만들어진 파일의 전체 경로가 함께 온다 — 사용자가 파일을 찾지 못하는 상태로 두지 않는다.
++ */
++export function exportMarkdown(recordingId: string): Promise<ExportedFile> {
++  return call<ExportedFile>('export_markdown', { recordingId });
++}
+diff --git a/src/ipc/types.ts b/src/ipc/types.ts
+index 03a0fe7..9d6f534 100644
+--- a/src/ipc/types.ts
++++ b/src/ipc/types.ts
+@@ -461,3 +461,23 @@ export interface AiNote {
+   /** ISO-8601 UTC 텍스트. */
+   readonly generatedAt: string;
+ }
++
++/**
++ * 방금 만들어진 Markdown 파일 하나 (§11 · docs/ADR-0009-notion-and-export.md §4).
++ *
++ * **경로가 이 값의 요점이다.** export 위치는 설정으로 노출되지 않으므로 (§4.1), 화면이
++ * `path`를 보여주지 않으면 사용자는 방금 만든 파일을 찾을 수 없다.
++ *
++ * `fileName`이 따로 있는 이유는 **요청한 이름과 다를 수 있기 때문이다** — 같은 이름이 이미
++ * 있으면 backend가 덮어쓰지 않고 번호를 붙인다 (§4.3: `…-2.md` · `…-3.md`). 화면이 경로
++ * 문자열을 잘라 이름을 짐작하지 않도록 실제로 쓰인 이름이 함께 온다.
++ *
++ * 문서 본문은 오지 않는다 — 그것은 파일에 있고, IPC로 한 번 더 흘려보낼 이유가 없다.
++ */
++export interface ExportedFile {
++  readonly recordingId: string;
++  /** 만들어진 파일의 전체 경로. 사용자에게 그대로 보여줄 수 있는 값이다. */
++  readonly path: string;
++  /** 그 파일의 이름 (`2026-09-01-3dgs-study-04.md`). */
++  readonly fileName: string;
++}
+diff --git a/tests/ipc-boundary.test.ts b/tests/ipc-boundary.test.ts
+index 51e6083..8202c20 100644
+--- a/tests/ipc-boundary.test.ts
++++ b/tests/ipc-boundary.test.ts
+@@ -49,11 +49,16 @@ const payloadSource = readText('../src-tauri/src/commands/payload.rs');
+  * 쓰기 이름은 늘지 않았다**: Transcript는 immutable이고 (§7.1 · INV-2) 저장소가 내놓는 쓰기
+  * 경로도 추가 하나뿐이다.
+  *
+- * 마지막 다섯이 Phase 4의 AI 노트 표면이다 — **provider 상태 조회 · 생성 시작 · 진행 상태
++ * 그다음 다섯이 Phase 4의 AI 노트 표면이다 — **provider 상태 조회 · 생성 시작 · 진행 상태
+  * 조회 · 저장된 노트 읽기 둘**이다. 여기서도 쓰기 이름은 늘지 않는다: 노트는 생성으로만 늘고
+  * 재생성은 대체가 아니라 추가이므로 (docs/ADR-0008-note-ai-provider.md §9.2), 고치거나 지우는
+  * 이름이 만들어질 자리가 없다.
+  *
++ * 마지막 하나가 Phase 5의 **Markdown export**다 (docs/ADR-0009-notion-and-export.md §4).
++ * 저장된 것을 읽어 파일 하나를 더할 뿐이므로 여기서도 쓰기 이름은 늘지 않으며, 이미 있는
++ * 파일을 덮어쓰지 않는다 (§4.3). **Notion 전송의 이름은 아직 없다** — 그것은 이 Phase의 다음
++ * Task이며, 만들지 않은 것의 이름을 미리 두지 않는다.
++ *
+  * 이 목록에 없는 이름이 등록되면 그것은 Phase 범위가 넘쳤다는 뜻이다 — 그래서 이 검사는
+  * 부분집합이 아니라 **정확히 같은 집합**을 요구한다.
+  */
+@@ -79,6 +84,7 @@ const REGISTERED_COMMANDS = [
+   'ai_note_status',
+   'list_ai_notes',
+   'get_ai_note',
++  'export_markdown',
+ ];
+ 
+ /** lib.rs의 generate_handler![...]에 등록된 command 이름. */
+@@ -125,17 +131,22 @@ describe('command 표면', () => {
+   it('아직 만들지 않은 기능의 command가 등록되어 있지 않다', () => {
+     // 녹음 표면은 **capture 계열 네 동작과 상태 조회**까지다. 저장된 녹음의 재생은
+     // command로 하지 않는다 — 파일은 asset protocol로 흐르므로 이 표면에 이름이 생기지
+-    // 않는다 (docs/ADR-0006-audio-playback.md). Notion · export는 Phase 5다.
++    // 않는다 (docs/ADR-0006-audio-playback.md).
+     // 아래 정규식이 그 선을 지킨다 —
+     // `*_recording`은 Recording 레코드를 만드는 영속화 표면의 이름이므로,
+     // 녹음 동작이 그 이름으로 새로 생기는 것은 여전히 막는다.
+     // `queue`·`batch`·`schedule`은 여러 Recording 일괄 처리 큐의 이름이며 DEFERRED다 (§16).
+     //
++    // **export는 `export_markdown` 하나만 열렸다.** Phase 5가 실제로 만든 것이 그 하나이며
++    // (docs/ADR-0009-notion-and-export.md §4), PDF·DOCX 같은 다른 포맷과 일괄 export는 여전히
++    // 범위 밖이다 (phase-prompt/05의 Out of Scope). `notion`은 아직 만들지 않았으므로 그대로
++    // 막는다 — 만들어지는 Task에서 이 줄이 함께 바뀐다.
++    //
+     // **벤더 이름은 여전히 여기 있다** — AI 표면이 열린 뒤에도 command 이름은 벤더 중립이어야
+     // 한다 (INV-9). 어떤 provider를 쓰는지는 설정 값이고, 그것을 아는 코드는 adapter 안에만
+     // 있다. `ollama_*` 같은 이름이 등록되면 그 경계가 새어 나온 것이다.
+     const outOfScope =
+-      /(start|stop|pause|resume)_recording|play|whisper|ollama|llama|openai|anthropic|claude|gemini|notion|export|queue|batch|schedule/i;
++      /(start|stop|pause|resume)_recording|play|whisper|ollama|llama|openai|anthropic|claude|gemini|notion|export(?!_markdown\b)|pdf|docx|queue|batch|schedule/i;
+ 
+     for (const command of registeredCommands()) {
+       expect(command, `${command}는 아직 만들지 않은 기능의 command다`).not.toMatch(outOfScope);
+@@ -190,6 +201,14 @@ describe('command 표면', () => {
+     expect(mutating).toEqual([]);
+   });
+ 
++  it('Markdown export 표면은 파일 하나를 만드는 이름 하나뿐이다', () => {
++    // 일괄 export도, export한 것을 지우거나 다시 쓰는 이름도 이 Phase의 범위 밖이다
++    // (phase-prompt/05의 Out of Scope · §16 DEFERRED). 그것이 생기면 표면에 먼저 드러난다.
++    const exports = registeredCommands().filter((command) => /export/i.test(command));
++
++    expect(exports).toEqual(['export_markdown']);
++  });
++
+   it('frontend가 부르는 이름이 등록된 이름과 정확히 같다', () => {
+     const called = [...commandsSource.matchAll(/call<[^>]*>\(\s*'([\w]+)'/g)].map(
+       (matched) => matched[1],

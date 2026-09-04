@@ -1,0 +1,733 @@
+diff --git a/src-tauri/Cargo.toml b/src-tauri/Cargo.toml
+index eb7c087..3069000 100644
+--- a/src-tauri/Cargo.toml
++++ b/src-tauri/Cargo.toml
+@@ -56,11 +56,30 @@ rubato = "5"
+ # 호출 하나 때문에 async runtime을 들이지 않는다 (PRODUCT-SPEC §20.5).
+ # 쓰는 자리는 `ai::ollama::network` 하나이며, 그 위는 얇은 trait이라 교체 비용이 파일 하나다.
+ #
+-# `default-features = false`인 이유: 이 Phase는 사용자의 로컬 주소로만 나가므로 **TLS가 필요
+-# 없다.** 기본 feature는 rustls/ring을 함께 들여오고, 그것은 Phase 5(Notion·HTTPS)가 실제로
+-# 필요해질 때 켜는 것이 맞다 — 지금 켜 두면 미래 의존성 선입금이다 (ADR-0008 §12.2).
+-# 버전은 이 Run에서 cargo가 crates.io 인덱스로부터 실제로 해석한 값이다(3.4.0 ·
+-# `Cargo.lock`이 checksum까지 고정한다). MSRV는 확인하지 못했다 —
+-# `.loop/evidence/TASK-036/verification-log.md`.
+-ureq = { version = "3.4", default-features = false }
++# `default-features = false`를 **유지한다** (ADR-0009 §11.2-1) — 기본값을 다시 켜면 압축 ·
++# 쿠키 · 프록시처럼 이 앱이 쓰지 않는 것이 함께 들어온다. 필요한 것만 이름으로 켠다.
++#
++# ★ TLS — Phase 5는 HTTPS로 나간다 (Notion). 그래서 TLS 경로를 **명시적으로 하나 켠다.**
++#   켠 feature 이름:  `rustls`      (ADR-0009 §11.3의 1순위 — 순수 Rust TLS 구현)
++#   확인한 버전:      ureq 3.4.0    (`Cargo.lock`이 checksum까지 고정한다)
++#   루트 인증서 출처: `webpki-roots`(번들된 루트) — `Cargo.lock`이 실제로 무엇을 들여왔는지로
++#                     판정했다. OS 신뢰 저장소를 쓰는 구성이 아니다.
++#   판정 근거:        `.loop/evidence/TASK-047/ureq-tls-verification.md`
++#                     (ADR-0009 §11.4: "feature를 켰다고 적어 두고 lock이 그대로면 켜지지 않은
++#                      것이다" — before는 lock에 TLS crate가 하나도 없는 상태였다)
++# **인증서 검증을 끄는 구성은 없다** — 설정으로도 개발용 플래그로도 두지 않는다 (§11.2-3).
++# token이 실려 나가는 연결이다.
++#
++# MSRV는 확인하지 못했다 — `.loop/evidence/TASK-036/verification-log.md`.
++ureq = { version = "3.4", default-features = false, features = ["rustls"] }
++keyring = { version = "3", default-features = false, features = ["apple-native", "windows-native"] }
++# 보낸 문서의 지문(sha256 hex). ADR-0009 §8.4의 `content_fingerprint`가 쓰는 것이며,
++# **끝나지 않은 전송을 이어 붙여도 되는가**를 판정하는 유일한 근거다 (§8.2).
++#
++# 이것은 자격증명을 다루지 않는다 — 해시가 걸리는 값은 이미 사용자에게 보이는 markdown 문서
++# 하나이고, token은 여기에도 저장소에도 오지 않는다 (INV-7 · §10.5).
++#
++# 이미 이 저장소의 `Cargo.lock`에 들어와 있던 crate다(전이 의존성). 지문 하나 때문에 새 코드를
++# 손으로 쓰지 않으며, 쓰는 자리는 `sync::run::content_fingerprint` 하나다.
++sha2 = "0.10"
+ 
+diff --git a/src-tauri/src/commands/mod.rs b/src-tauri/src/commands/mod.rs
+index 0e50ded..f44dd10 100644
+--- a/src-tauri/src/commands/mod.rs
++++ b/src-tauri/src/commands/mod.rs
+@@ -12,7 +12,15 @@
+ //! 고치거나 지우는 이름은 이 표면에 없다 (§7.1 · INV-2).
+ //! Phase 4가 **AI 노트** 다섯을 더한다 — provider 상태 조회 · 생성 시작 · 진행 상태 조회 ·
+ //! 저장된 노트 읽기 둘 ([`NoteGenerator`]). 여기서도 쓰기 이름은 늘지 않는다: 노트는 생성으로만
+-//! 늘고, 재생성은 대체가 아니라 추가다 (ADR-0008 §9.2). Notion을 위한 command는 Phase 5다.
++//! 늘고, 재생성은 대체가 아니라 추가다 (ADR-0008 §9.2).
++//! Phase 5가 **Markdown export** 하나를 더한다 ([`Exporter`]) — 저장소를 읽어 파일 하나를
++//! 만들 뿐, 저장된 것을 고치거나 지우지 않는다.
++//!
++//! **Notion 전송의 소유자도 이 경계에 있다** ([`NotionSender`]) — 전사 · 노트 생성과 같은
++//! 규약이다 (`crate::commands::notion`). 그것을 부르는 Tauri command 이름은 아직 없다:
++//! 이 Task가 만든 것은 실행 순서와 그 소유자이며, frontend가 부르는 표면은 뒤이은 Task가
++//! 연다. 저장된 것을 고치거나 지우는 이름은 여기서도 늘지 않는다 — Notion 전송이 만지는 것은
++//! `notion_syncs` 행과 `recordings.notion_status`뿐이다 (INV-3 · ADR-0009 §8.5).
+ //!
+ //! ## AI provider가 없는 것은 이 표면의 실패가 아니다 (INV-8)
+ //!
+@@ -52,7 +60,9 @@
+ //! 모든 command 응답으로 돌려준다. 초기화 경로에 `unwrap` · `expect` · `panic!`이 없는 이유가
+ //! 이것이다 — 여기서 죽으면 사용자는 아무 설명도 받지 못하고, 실패는 콘솔에만 남는다 (§13).
+ 
++pub mod export;
+ pub mod notes;
++pub mod notion;
+ pub mod payload;
+ pub mod transcriber;
+ 
+@@ -76,12 +86,14 @@ use crate::platform::microphone::{
+     self, MicrophoneAccess, MicrophonePermission, SystemMicrophonePermission,
+ };
+ 
++pub use export::Exporter;
+ pub use notes::NoteGenerator;
++pub use notion::{NotionSendStatus, NotionSender};
+ pub use payload::{
+     AiNotePayload, AiNoteStatusPayload, AiProviderStatusPayload, CaptureReportPayload,
+-    InputDevicePayload, MissingAudioPayload, NewRecording, RecordingPayload, SessionStatusPayload,
+-    SettingsPayload, StoppedRecordingPayload, StructuredNotePayload, TranscriptPayload,
+-    TranscriptSegmentPayload, TranscriptionStatusPayload,
++    ExportedFilePayload, InputDevicePayload, MissingAudioPayload, NewRecording, RecordingPayload,
++    SessionStatusPayload, SettingsPayload, StoppedRecordingPayload, StructuredNotePayload,
++    TranscriptPayload, TranscriptSegmentPayload, TranscriptionStatusPayload,
+ };
+ pub use transcriber::Transcriber;
+ 
+@@ -755,9 +767,10 @@ fn validated(recording: NewRecording) -> Result<NewRecording, Failure> {
+ 
+ // --- Tauri command 표면 -------------------------------------------------------------
+ //
+-// 아래 스물한 개가 frontend가 부를 수 있는 전부다. 각 함수는 [`Storage`] · [`AudioDevices`] ·
+-// [`Recorder`] · [`Transcriber`] · [`NoteGenerator`]의 같은 이름 동작이나 [`finish_recording`]을
+-// 그대로 부른다 — 로직을 여기에 두지 않으므로, 실제 동작은 Tauri 없이 테스트할 수 있다.
++// 아래 스물두 개가 frontend가 부를 수 있는 전부다. 각 함수는 [`Storage`] · [`AudioDevices`] ·
++// [`Recorder`] · [`Transcriber`] · [`NoteGenerator`] · [`Exporter`]의 같은 이름 동작이나
++// [`finish_recording`]을 그대로 부른다 — 로직을 여기에 두지 않으므로, 실제 동작은 Tauri 없이
++// 테스트할 수 있다.
+ 
+ #[tauri::command]
+ pub fn list_recordings(storage: State<'_, Storage>) -> Result<Vec<RecordingPayload>, Failure> {
+@@ -955,3 +968,24 @@ pub fn get_ai_note(
+ ) -> Result<Option<AiNotePayload>, Failure> {
+     storage.ai_note(&ai_note_id)
+ }
++
++/// Recording 하나를 로컬 Markdown 파일로 내보내고 **쓰인 파일의 경로를 돌려준다** (§11).
++///
++/// 돌아온 값은 이미 만들어진 파일을 가리킨다 — 접수 사실이 아니다. 기다릴 모델도 서버도 없으므로
++/// 전사·노트 생성의 시작·상태 조회 규약을 쓰지 않는다 ([`Exporter`]).
++///
++/// **AI provider를 고르지 않았거나 AI Note가 하나도 없다는 이유로 거절하지 않는다** (INV-8).
++/// 그때는 Transcript와 메타데이터만으로 이루어진 유효한 문서가 나온다.
++///
++/// 같은 이름의 파일이 이미 있으면 **덮어쓰지 않고 번호를 붙인다** (ADR-0009 §4.3) — 앞서
++/// 내보낸 파일은 사용자의 문서이며, 이 command에는 그것을 지우거나 고치는 경로가 없다.
++///
++/// `async`인 이유는 디스크가 느릴 때 창이 함께 멈추지 않게 하기 위해서다
++/// ([`ai_provider_status`]와 같은 이유).
++#[tauri::command(async)]
++pub fn export_markdown(
++    exporter: State<'_, Exporter>,
++    recording_id: String,
++) -> Result<ExportedFilePayload, Failure> {
++    exporter.export(&recording_id)
++}
+diff --git a/src-tauri/src/db/migrations.rs b/src-tauri/src/db/migrations.rs
+index 418b507..3d20fb4 100644
+--- a/src-tauri/src/db/migrations.rs
++++ b/src-tauri/src/db/migrations.rs
+@@ -214,6 +214,55 @@ pub const MIGRATIONS: &[Migration] = &[
+               ALTER TABLE settings ADD COLUMN ai_base_url TEXT;
+               ALTER TABLE settings ADD COLUMN ai_model TEXT;",
+     },
++    // `docs/ADR-0009-notion-and-export.md` §8.4의 Notion destination 설정. 앞의 migration을
++    // 고치지 않고 **열을 더한다** — version 6까지 적용된 사용자 DB가 이미 있을 수 있고, 그 행의
++    // 값은 그대로 남아야 한다. 이미 있는 행의 새 열은 NULL, 즉 '아직 고르지 않음'으로 시작한다.
++    //
++    // 담는 값은 **어느 페이지 아래에 만드는가**다 (ADR-0009 §5.1의 `parent.page_id`).
++    // **secret이 아니다** — 어디에 쓰는지일 뿐이며, `ai_base_url`이 secret이 아닌 것과 같다.
++    //
++    // **NOT NULL도 DEFAULT도 두지 않는다.** 기본값 정책은 스키마가 아니라
++    // `domain::settings::Settings::DEFAULT`가 갖는다는 것이 이 테이블의 규약이다 (version 3의
++    // 주석). NULL은 '아직 고르지 않았다'는 **정상 상태**이며, 고르지 않은 것은 오류가 아니다 —
++    // 그 상태에서 녹음 · 전사 · 노트 · markdown export는 전부 그대로 동작한다 (INV-8).
++    //
++    // 저장된 페이지가 지금도 그 자리에 있는지, integration에 공유돼 있는지를 저장소는 묻지
++    // 않는다 — `default_microphone` · `transcription_model` · `ai_base_url`과 같은 이유이며,
++    // 아니라고 해서 저장된 선택을 조용히 지우거나 바꾸지 않는다.
++    //
++    // INV-7: 여기서도 secret 열은 만들지 않는다. Notion integration에 필요한 자격증명은
++    // **SQLite에 들어오지 않으며** OS 자격증명 저장소에만 있다
++    // (`crate::platform::secret_store` · ADR-0009 §10.5).
++    Migration {
++        version: 7,
++        name: "add_notion_settings",
++        sql: "ALTER TABLE settings ADD COLUMN notion_parent_page_id TEXT;",
++    },
++    // `docs/ADR-0009-notion-and-export.md` §8.4가 요구하는 **재시도가 기대는 상태**.
++    // version 2의 `notion_syncs`를 고치지 않고 **열을 더한다** — 그 스키마로 저장된 사용자 DB가
++    // 이미 있을 수 있고, 그 행의 값은 그대로 남아야 한다. 이미 있는 행의 새 열은 NULL이며,
++    // 그것은 '이 진행도를 기록하기 전에 만들어진 행'이라는 정상 상태다.
++    //
++    // 이 세 열이 있어야 부분 성공 뒤의 재시도가 **중복도 유실도 만들지 않는다** (§8.2 · §8.4).
++    //
++    // ```text
++    // sent_chunks          지금까지 **성공한** 요청 수. 실패한 요청은 세지 않는다 (§8.4-4)
++    // total_chunks         이 문서를 나눈 조각 수 — 부분 전송이 상태에서 드러나는 자리다
++    // content_fingerprint  그때 나눈 그 문서였는가 (sha256 hex). 다르면 이어 보내지 않는다 (§8.2)
++    // ```
++    //
++    // **NOT NULL도 DEFAULT도 두지 않는다** — version 3의 규약을 그대로 따른다. 진행도의 의미를
++    // 스키마가 아니라 실행 순서(`crate::sync::run`)가 갖는다.
++    //
++    // INV-7: 여기서도 secret 열은 만들지 않는다. 지문은 **보낸 문서의 해시**이지 자격증명이
++    // 아니며, token은 SQLite에 들어오지 않는다 (`crate::platform::secret_store` · §10.5).
++    Migration {
++        version: 8,
++        name: "add_notion_sync_progress",
++        sql: "ALTER TABLE notion_syncs ADD COLUMN sent_chunks         INTEGER;
++              ALTER TABLE notion_syncs ADD COLUMN total_chunks        INTEGER;
++              ALTER TABLE notion_syncs ADD COLUMN content_fingerprint TEXT;",
++    },
+ ];
+ 
+ /// 코드가 알고 있는 최신 스키마 버전. migration이 없으면 0이다.
+@@ -335,10 +384,29 @@ mod tests {
+                 (4, "add_default_microphone_to_settings"),
+                 (5, "add_transcription_settings"),
+                 (6, "add_ai_provider_settings"),
++                (7, "add_notion_settings"),
++                (8, "add_notion_sync_progress"),
+             ]
+         );
+     }
+ 
++    #[test]
++    fn a_new_notion_sync_column_is_added_by_a_new_migration_instead_of_editing_an_old_one() {
++        // `create_domain_tables`를 고쳐 열을 넣으면 version 2까지 적용된 DB에는 그 열이 영영
++        // 생기지 않는다 — migration은 다시 실행되지 않기 때문이다 (설정 테이블과 같은 규칙).
++        let create_domain_tables = MIGRATIONS
++            .iter()
++            .find(|migration| migration.name == "create_domain_tables")
++            .expect("domain 테이블을 만드는 migration이 있어야 한다");
++
++        for column in ["sent_chunks", "total_chunks", "content_fingerprint"] {
++            assert!(
++                !create_domain_tables.sql.contains(column),
++                "나중에 생긴 열 {column}이 이미 적용된 migration 안에 들어가 있다"
++            );
++        }
++    }
++
+     #[test]
+     fn a_new_settings_column_is_added_by_a_new_migration_instead_of_editing_an_old_one() {
+         // `create_settings`를 고쳐 열을 넣으면 version 3까지 적용된 DB에는 그 열이 영영 생기지
+@@ -356,6 +424,8 @@ mod tests {
+             "ai_provider",
+             "ai_base_url",
+             "ai_model",
++            // Phase 5가 더한 Notion destination 설정 (ADR-0009 §8.4).
++            "notion_parent_page_id",
+         ] {
+             assert!(
+                 !create_settings.sql.contains(column),
+diff --git a/src-tauri/src/db/store.rs b/src-tauri/src/db/store.rs
+index c092dfb..5e05b05 100644
+--- a/src-tauri/src/db/store.rs
++++ b/src-tauri/src/db/store.rs
+@@ -339,20 +339,29 @@ pub fn list_ai_notes_for_transcript(
+ }
+ 
+ /// Recording 하나의 Notion 전송 상태를 기록한다. 같은 Recording의 기록을 대체한다.
++///
++/// 진행도 세 열도 함께 쓴다 (ADR-0009 §8.4) — 그 셋이 없으면 부분 성공 뒤의 재시도가 어디서부터
++/// 이어갈지 알 수 없고, 그때의 다음 전송은 반드시 중복 페이지를 만든다.
+ pub fn save_notion_sync(connection: &Connection, sync: &NotionSync) -> Result<(), DatabaseError> {
+     connection
+         .execute(
+-            "INSERT INTO notion_syncs (recording_id, page_id, synced_at, status, error)
+-             VALUES (?1, ?2, ?3, ?4, ?5)
++            "INSERT INTO notion_syncs (recording_id, page_id, synced_at, status, error,
++                                       sent_chunks, total_chunks, content_fingerprint)
++             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+              ON CONFLICT (recording_id) DO UPDATE
+              SET page_id = excluded.page_id, synced_at = excluded.synced_at,
+-                 status = excluded.status, error = excluded.error",
++                 status = excluded.status, error = excluded.error,
++                 sent_chunks = excluded.sent_chunks, total_chunks = excluded.total_chunks,
++                 content_fingerprint = excluded.content_fingerprint",
+             rusqlite::params![
+                 sync.recording_id.as_str(),
+                 sync.page_id,
+                 sync.synced_at,
+                 sync.status.as_str(),
+                 sync.error,
++                sync.sent_chunks,
++                sync.total_chunks,
++                sync.content_fingerprint,
+             ],
+         )
+         .map_err(DatabaseError::Sql)?;
+@@ -365,7 +374,8 @@ pub fn load_notion_sync(
+     recording_id: &RecordingId,
+ ) -> Result<Option<NotionSync>, DatabaseError> {
+     let row = connection.query_row(
+-        "SELECT recording_id, page_id, synced_at, status, error
++        "SELECT recording_id, page_id, synced_at, status, error,
++                sent_chunks, total_chunks, content_fingerprint
+          FROM notion_syncs WHERE recording_id = ?1",
+         [recording_id.as_str()],
+         |row| {
+@@ -375,16 +385,31 @@ pub fn load_notion_sync(
+                 row.get::<_, Option<String>>(2)?,
+                 row.get::<_, String>(3)?,
+                 row.get::<_, Option<String>>(4)?,
++                row.get::<_, Option<i64>>(5)?,
++                row.get::<_, Option<i64>>(6)?,
++                row.get::<_, Option<String>>(7)?,
+             ))
+         },
+     );
+     match row {
+-        Ok((recording_id, page_id, synced_at, status, error)) => Ok(Some(NotionSync {
++        Ok((
++            recording_id,
++            page_id,
++            synced_at,
++            status,
++            error,
++            sent_chunks,
++            total_chunks,
++            content_fingerprint,
++        )) => Ok(Some(NotionSync {
+             recording_id: RecordingId::new(recording_id),
+             page_id,
+             synced_at,
+             status: status_or_error(status, "notion_syncs", "status")?,
+             error,
++            sent_chunks,
++            total_chunks,
++            content_fingerprint,
+         })),
+         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+         Err(source) => Err(DatabaseError::Sql(source)),
+diff --git a/src-tauri/src/domain/mod.rs b/src-tauri/src/domain/mod.rs
+index b41d67d..fc5c93c 100644
+--- a/src-tauri/src/domain/mod.rs
++++ b/src-tauri/src/domain/mod.rs
+@@ -255,7 +255,12 @@ pub struct AiNote {
+ 
+ /// Recording 하나의 Notion 전송 상태 (§7).
+ ///
+-/// 이 Task는 스키마와 저장/복원만 다룬다. 실제 전송은 이후 Phase가 구현한다.
++/// 앞의 다섯 필드가 §7이 요구하는 전부이고, 뒤의 셋은 **끝나지 않은 전송을 이어갈 수 있게
++/// 하는 진행도**다 (`docs/ADR-0009-notion-and-export.md` §8.4). 셋 다 `Option`인 것은 그 열이
++/// 나중에 생겼기 때문이며 (migration 8), `None`은 '그 진행도를 모른다'는 정상 상태다.
++///
++/// **여기에 secret은 없다** (INV-7). 이 값은 저장소에 그대로 들어가고, token은 저장소에 들어오지
++/// 않는다 — 이어가기에 필요한 것은 어디에 무엇을 어디까지 보냈는가뿐이다 (ADR-0009 §8.4).
+ #[derive(Debug, Clone, PartialEq, Eq)]
+ pub struct NotionSync {
+     pub recording_id: RecordingId,
+@@ -265,6 +270,14 @@ pub struct NotionSync {
+     pub status: ProcessingStatus,
+     /// 마지막 실패 사유. 실패한 적이 없으면 `None`이다.
+     pub error: Option<String>,
++    /// 이 페이지에 **성공적으로** 반영된 조각 수 (ADR-0009 §8.4-4).
++    ///
++    /// 실패한 요청은 세지 않는다 — 세면 재시도가 그 조각을 건너뛰고, 그것은 조용한 유실이다.
++    pub sent_chunks: Option<i64>,
++    /// 이 문서를 나눈 조각 수. `sent_chunks`와 함께 **부분 전송을 상태에서 드러내는** 값이다.
++    pub total_chunks: Option<i64>,
++    /// 그때 나눈 그 문서였는가 (sha256 hex). 다르면 이어 붙이지 않는다 (ADR-0009 §8.2).
++    pub content_fingerprint: Option<String>,
+ }
+ 
+ #[cfg(test)]
+diff --git a/src-tauri/src/lib.rs b/src-tauri/src/lib.rs
+index 0eba1ac..072bc11 100644
+--- a/src-tauri/src/lib.rs
++++ b/src-tauri/src/lib.rs
+@@ -3,12 +3,15 @@ pub mod audio;
+ pub mod commands;
+ pub mod db;
+ pub mod domain;
++pub mod export;
++pub mod notion;
+ pub mod platform;
++pub mod sync;
+ pub mod transcription;
+ 
+ use tauri::Manager;
+ 
+-use commands::{AudioDevices, NoteGenerator, Recorder, Storage, Transcriber};
++use commands::{AudioDevices, Exporter, NoteGenerator, Recorder, Storage, Transcriber};
+ use platform::app_data_dir::AppDataDirectory;
+ 
+ #[cfg_attr(mobile, tauri::mobile_entry_point)]
+@@ -56,6 +59,15 @@ pub fn run() {
+             // 열람은 그대로 동작한다 (INV-8).
+             app.manage(NoteGenerator::open_for(app));
+ 
++            // Markdown export도 앱 데이터 루트 하나에서 자리를 얻는다 (INV-10 · ADR-0009 §4.1).
++            // **여기서 디렉터리를 만들지 않는다** — 한 번도 내보내지 않은 사용자에게 빈
++            // `exports/`를 만들어 두지 않으려는 것이며, 자리는 실제로 내보낼 때 준비된다.
++            //
++            // 진행 중인 무언가를 들고 있지도 않다. export는 기다릴 모델도 서버도 없는 짧은
++            // 일이라 배경 스레드와 상태 조회 규약을 쓰지 않는다 (crate::commands::export).
++            // 경로를 얻지 못한 실패는 값으로 남아 내보내려 할 때 사용자에게 전달된다 (§13).
++            app.manage(Exporter::open_for(app));
++
+             // 저장된 녹음을 재생하려면 webview가 그 파일을 읽을 수 있어야 한다.
+             // 그 통로는 Tauri v2의 asset protocol이고(`protocol-asset` feature),
+             // **열어 주는 자리는 녹음 디렉터리 하나뿐이다** — 사용자의 홈도, 앱 데이터
+@@ -113,6 +125,10 @@ pub fn run() {
+             commands::ai_note_status,
+             commands::list_ai_notes,
+             commands::get_ai_note,
++            // Markdown export의 표면은 이 하나다 — Recording 하나를 파일 하나로 만든다.
++            // **AI가 없어도 부를 수 있고** (INV-8), 이미 있는 파일을 덮어쓰지 않으며
++            // (ADR-0009 §4.3), 저장된 것을 고치거나 지우는 이름은 여기에도 없다.
++            commands::export_markdown,
+         ])
+         .run(tauri::generate_context!());
+ 
+diff --git a/src-tauri/tests/domain_model.rs b/src-tauri/tests/domain_model.rs
+index eede2e8..0bf20ae 100644
+--- a/src-tauri/tests/domain_model.rs
++++ b/src-tauri/tests/domain_model.rs
+@@ -171,9 +171,21 @@ fn the_four_concepts_live_in_four_separate_tables_with_the_fields_section_7_list
+             "generated_at",
+         ]
+     );
++    // 앞의 다섯이 §7이 요구하는 전부이고, 뒤의 셋은 **끝나지 않은 전송을 이어갈 수 있게 하는
++    // 진행도**다 (`docs/ADR-0009-notion-and-export.md` §8.4 · migration 8). 셋 다 secret이
++    // 아니다 — 어디에 무엇을 어디까지 보냈는가일 뿐이며, token은 이 테이블에 오지 않는다 (INV-7).
+     assert_eq!(
+         columns_of(&connection, "notion_syncs"),
+-        ["recording_id", "page_id", "synced_at", "status", "error"]
++        [
++            "recording_id",
++            "page_id",
++            "synced_at",
++            "status",
++            "error",
++            "sent_chunks",
++            "total_chunks",
++            "content_fingerprint",
++        ]
+     );
+ 
+     // Transcript와 AINote는 서로 다른 테이블이다 — 하나가 다른 하나를 덮어쓸 자리가 없다 (INV-2).
+@@ -604,6 +616,11 @@ fn notion_sync_round_trips_including_the_failure_shape() {
+         synced_at: None,
+         status: ProcessingStatus::Failed,
+         error: Some("네트워크에 연결할 수 없다".to_string()),
++        // 진행도는 그 실패가 어디서 멈췄는지를 말한다 — 페이지가 만들어졌는지조차 확인하지
++        // 못한 자리다 (`docs/ADR-0009-notion-and-export.md` §8.5의 '결과를 모름').
++        sent_chunks: Some(0),
++        total_chunks: Some(3),
++        content_fingerprint: Some("a".repeat(64)),
+     };
+     store::save_notion_sync(&connection, &failed).expect("실패 기록을 저장할 수 있어야 한다");
+     assert_eq!(
+@@ -619,6 +636,10 @@ fn notion_sync_round_trips_including_the_failure_shape() {
+         synced_at: Some("2026-09-02T15:00:00Z".to_string()),
+         status: ProcessingStatus::Done,
+         error: None,
++        // 끝난 전송은 보낸 조각 수와 전체가 같다 (ADR-0009 §8.4-5).
++        sent_chunks: Some(3),
++        total_chunks: Some(3),
++        content_fingerprint: Some("a".repeat(64)),
+     };
+     store::save_notion_sync(&connection, &succeeded).expect("성공 기록을 저장할 수 있어야 한다");
+     assert_eq!(
+diff --git a/src-tauri/tests/settings_repository.rs b/src-tauri/tests/settings_repository.rs
+index b175c4f..999d6b5 100644
+--- a/src-tauri/tests/settings_repository.rs
++++ b/src-tauri/tests/settings_repository.rs
+@@ -18,6 +18,22 @@ const SETTINGS_DOMAIN_SOURCE: &str = include_str!("../src/domain/settings.rs");
+ 
+ static COUNTER: AtomicUsize = AtomicUsize::new(0);
+ 
++/// version 2가 만든 테이블 중, 뒤의 migration이 **열을 더하는** 것.
++///
++/// 아래의 "예전 스키마" fixture들은 설정 migration을 흉내 내는 것이 목적이라 `settings`만
++/// 세운다. 하지만 실제 version 3~6 사용자 DB에는 version 2의 테이블도 함께 있고, 그 사실이
++/// 빠져 있으면 domain 테이블에 열을 더하는 migration이 **이 fixture에서만** 실패한다
++/// (`docs/ADR-0009-notion-and-export.md` §8.4의 version 8). 값을 넣지 않으므로 이 파일이
++/// 판정하는 것 — 저장된 설정 값이 그대로 남는가 — 은 달라지지 않는다.
++const LEGACY_DOMAIN_TABLES: &str = "CREATE TABLE IF NOT EXISTS notion_syncs (
++         recording_id TEXT PRIMARY KEY,
++         page_id      TEXT,
++         synced_at    TEXT,
++         status       TEXT NOT NULL
++             CHECK (status IN ('none','pending','running','done','failed')),
++         error        TEXT
++     );";
++
+ /// 시스템 임시 디렉터리 아래의 빈 디렉터리. Drop 시 지운다.
+ struct TempDir(PathBuf);
+ 
+@@ -111,6 +127,10 @@ fn defaults_are_returned_when_nothing_has_been_saved() {
+         loaded.ai_model, None,
+         "모델의 기본값도 '아직 고르지 않음'이다"
+     );
++    assert_eq!(
++        loaded.notion_parent_page_id, None,
++        "Notion destination의 기본값도 '아직 고르지 않음'이다 — 어떤 페이지도 굳혀 두지 않는다"
++    );
+     close(connection);
+ }
+ 
+@@ -211,6 +231,7 @@ fn turning_automatic_transcription_on_does_not_touch_the_other_settings() {
+         ai_provider: Some("some-provider".to_string()),
+         ai_base_url: Some("http://127.0.0.1:9999".to_string()),
+         ai_model: Some("some-model".to_string()),
++        notion_parent_page_id: Some("some-parent-page".to_string()),
+     };
+ 
+     let connection = open(&dir);
+@@ -327,6 +348,8 @@ fn saved_values_survive_closing_and_reopening_the_database() {
+         ai_provider: Some("some-provider".to_string()),
+         ai_base_url: Some("http://127.0.0.1:9999".to_string()),
+         ai_model: Some("some-model".to_string()),
++        // ADR-0009 §8.4의 Notion destination도 마찬가지다.
++        notion_parent_page_id: Some("some-parent-page".to_string()),
+     };
+ 
+     let first = open(&dir);
+@@ -506,6 +529,9 @@ fn a_database_written_before_the_ai_settings_existed_keeps_its_values() {
+              PRAGMA user_version = 5;",
+         )
+         .expect("사전 조건: AI 설정이 없던 스키마를 만든다");
++    older
++        .execute_batch(LEGACY_DOMAIN_TABLES)
++        .expect("사전 조건: 그 시점의 domain 테이블도 함께 있다");
+     close(older);
+ 
+     // 여기서 새 migration이 적용된다.
+@@ -638,6 +664,9 @@ fn a_database_written_before_the_default_microphone_existed_keeps_its_values() {
+              PRAGMA user_version = 3;",
+         )
+         .expect("사전 조건: default microphone이 없던 스키마를 만든다");
++    older
++        .execute_batch(LEGACY_DOMAIN_TABLES)
++        .expect("사전 조건: 그 시점의 domain 테이블도 함께 있다");
+     close(older);
+ 
+     // 여기서 새 migration이 적용된다.
+@@ -687,6 +716,9 @@ fn a_database_written_before_the_transcription_settings_existed_keeps_its_values
+              PRAGMA user_version = 4;",
+         )
+         .expect("사전 조건: 전사 설정이 없던 스키마를 만든다");
++    older
++        .execute_batch(LEGACY_DOMAIN_TABLES)
++        .expect("사전 조건: 그 시점의 domain 테이블도 함께 있다");
+     close(older);
+ 
+     // 여기서 새 migration이 적용된다.
+@@ -805,6 +837,7 @@ fn saving_settings_does_not_disturb_other_stored_data() {
+             ai_provider: Some("some-provider".to_string()),
+             ai_base_url: Some("http://127.0.0.1:9999".to_string()),
+             ai_model: Some("some-model".to_string()),
++            notion_parent_page_id: Some("some-parent-page".to_string()),
+         },
+     )
+     .expect("설정을 저장할 수 있어야 한다");
+@@ -850,11 +883,14 @@ fn the_settings_schema_has_no_secret_columns() {
+             // Phase 3이 더한 두 값이다. 모델의 자리는 secret이 아니라 경로다 (ADR-0007 §8.2).
+             "automatic_transcription".to_string(),
+             "transcription_model".to_string(),
+-            // Phase 4가 더한 세 값이다 (ADR-0008 §11.1). **여기서 멈춘다** — API key를 담을
+-            // 자리도, 언젠가 쓸지 모르는 빈 열도 없다 (INV-7 · ADR-0008 §11.3).
++            // Phase 4가 더한 세 값이다 (ADR-0008 §11.1).
+             "ai_provider".to_string(),
+             "ai_base_url".to_string(),
+-            "ai_model".to_string()
++            "ai_model".to_string(),
++            // Phase 5가 더한 값 하나다 (ADR-0009 §8.4). 어느 페이지 아래에 만드는가일 뿐이며
++            // **여기서 멈춘다** — Notion integration 자격증명을 담을 자리도, 언젠가 쓸지 모르는
++            // 빈 열도 없다 (INV-7 · ADR-0009 §10.5).
++            "notion_parent_page_id".to_string()
+         ],
+         "설정 테이블에는 지금까지의 Phase가 다루는 값만 있어야 한다"
+     );
+@@ -894,3 +930,181 @@ fn the_settings_api_does_not_accept_or_store_secrets() {
+         }
+     }
+ }
++
++// --- Notion destination (version 7 · ADR-0009 §8.4) ---------------------------------
++
++#[test]
++fn a_database_written_before_the_notion_settings_existed_keeps_its_values() {
++    // version 6까지만 적용된 DB에 값이 이미 있는 상황이다 — Notion 설정이 생기기 전이다.
++    // 새 migration은 그 행을 지우거나 다시 만들지 않고 **열만 더한다** (INV-4의 정신).
++    let dir = TempDir::new("before-notion");
++
++    let older = Connection::open(dir.database_path()).expect("빈 DB를 만들 수 있어야 한다");
++    older
++        .execute_batch(
++            "CREATE TABLE schema_migrations (
++                 version    INTEGER PRIMARY KEY,
++                 name       TEXT NOT NULL,
++                 applied_at TEXT NOT NULL
++             );
++             INSERT INTO schema_migrations (version, name, applied_at)
++             VALUES (3, 'create_settings', datetime('now')),
++                    (4, 'add_default_microphone_to_settings', datetime('now')),
++                    (5, 'add_transcription_settings', datetime('now')),
++                    (6, 'add_ai_provider_settings', datetime('now'));
++             CREATE TABLE settings (
++                 id                      INTEGER PRIMARY KEY CHECK (id = 1),
++                 recordings_directory    TEXT,
++                 automatic_processing    INTEGER NOT NULL
++                     CHECK (automatic_processing IN (0, 1)),
++                 default_microphone      TEXT,
++                 automatic_transcription INTEGER CHECK (automatic_transcription IN (0, 1)),
++                 transcription_model     TEXT,
++                 ai_provider             TEXT,
++                 ai_base_url             TEXT,
++                 ai_model                TEXT
++             );
++             INSERT INTO settings (id, recordings_directory, automatic_processing,
++                                   default_microphone, automatic_transcription,
++                                   transcription_model, ai_provider, ai_base_url, ai_model)
++             VALUES (1, '/tmp/before-notion', 1, '0:Studio Mic', 1, 'ggml-base.bin',
++                     'some-provider', 'http://127.0.0.1:9999', 'some-model');
++             PRAGMA user_version = 6;",
++        )
++        .expect("사전 조건: Notion 설정이 없던 스키마를 만든다");
++    older
++        .execute_batch(LEGACY_DOMAIN_TABLES)
++        .expect("사전 조건: 그 시점의 domain 테이블도 함께 있다");
++    close(older);
++
++    // 여기서 version 7이 적용된다.
++    let upgraded = open(&dir);
++    let loaded = settings::load(&upgraded).expect("올린 뒤에도 설정을 읽을 수 있어야 한다");
++
++    assert_eq!(
++        loaded.recordings_directory,
++        Some("/tmp/before-notion".to_string()),
++        "이미 저장돼 있던 값이 그대로여야 한다"
++    );
++    assert!(loaded.automatic_processing);
++    assert!(loaded.automatic_transcription);
++    assert_eq!(loaded.transcription_model, Some("ggml-base.bin".to_string()));
++    assert_eq!(loaded.default_microphone, Some("0:Studio Mic".to_string()));
++    assert_eq!(loaded.ai_provider, Some("some-provider".to_string()));
++    assert_eq!(loaded.ai_base_url, Some("http://127.0.0.1:9999".to_string()));
++    assert_eq!(loaded.ai_model, Some("some-model".to_string()));
++    assert_eq!(
++        loaded.notion_parent_page_id, None,
++        "새로 생긴 열은 '아직 고르지 않음'으로 시작한다 — 다른 값에서 채워지지 않는다"
++    );
++    assert_eq!(rows(&upgraded), 1, "행이 늘거나 다시 만들어지지 않았다");
++
++    // 그리고 그 행은 이제 새 값도 담을 수 있다 — 올린 스키마가 반쪽이 아니다.
++    settings::save(
++        &upgraded,
++        &Settings {
++            notion_parent_page_id: Some("some-parent-page".to_string()),
++            ..loaded
++        },
++    )
++    .expect("올린 뒤에는 새 값도 저장할 수 있어야 한다");
++    let again = settings::load(&upgraded).expect("다시 읽을 수 있어야 한다");
++    assert_eq!(
++        again.notion_parent_page_id,
++        Some("some-parent-page".to_string())
++    );
++    assert_eq!(
++        again.ai_model,
++        Some("some-model".to_string()),
++        "새 값을 저장하는 것이 예전 값을 지우지 않는다"
++    );
++    close(upgraded);
++}
++
++#[test]
++fn a_chosen_notion_destination_survives_closing_and_reopening_the_database() {
++    let dir = TempDir::new("notion-destination");
++
++    let connection = open(&dir);
++    settings::save(
++        &connection,
++        &Settings {
++            notion_parent_page_id: Some("some-parent-page".to_string()),
++            ..Settings::DEFAULT
++        },
++    )
++    .expect("저장할 수 있어야 한다");
++    close(connection);
++
++    let reopened = open(&dir);
++    let loaded = settings::load(&reopened).expect("다시 읽을 수 있어야 한다");
++
++    assert_eq!(
++        loaded.notion_parent_page_id,
++        Some("some-parent-page".to_string()),
++        "고른 destination이 재시작 뒤에도 남아야 한다"
++    );
++    assert_eq!(
++        loaded.ai_provider, None,
++        "destination을 고른 것이 다른 설정을 채우지 않는다"
++    );
++    close(reopened);
++}
++
++#[test]
++fn a_notion_destination_that_is_no_longer_reachable_is_still_the_saved_choice() {
++    // 저장소는 그 페이지가 지금도 있는지, integration에 공유돼 있는지 묻지 않는다.
++    // `transcription_model` · `ai_model`과 같은 이유이며, 아니라고 해서 조용히 지우지 않는다.
++    let dir = TempDir::new("notion-destination-gone");
++
++    let connection = open(&dir);
++    settings::save(
++        &connection,
++        &Settings {
++            notion_parent_page_id: Some("없어진-페이지".to_string()),
++            ..Settings::DEFAULT
++        },
++    )
++    .expect("저장할 수 있어야 한다");
++
++    assert_eq!(
++        settings::load(&connection)
++            .expect("읽을 수 있어야 한다")
++            .notion_parent_page_id,
++        Some("없어진-페이지".to_string()),
++        "닿지 못한다는 것이 이 값이 틀렸다는 뜻은 아니다"
++    );
++    close(connection);
++}
++
++#[test]
++fn clearing_the_notion_destination_is_remembered_as_not_chosen() {
++    let dir = TempDir::new("notion-destination-cleared");
++
++    let connection = open(&dir);
++    settings::save(
++        &connection,
++        &Settings {
++            notion_parent_page_id: Some("some-parent-page".to_string()),
++            ..Settings::DEFAULT
++        },
++    )
++    .expect("저장할 수 있어야 한다");
++    settings::save(
++        &connection,
++        &Settings {
++            notion_parent_page_id: None,
++            ..Settings::DEFAULT
++        },
++    )
++    .expect("지운 상태도 저장할 수 있어야 한다");
++
++    assert_eq!(
++        settings::load(&connection)
++            .expect("읽을 수 있어야 한다")
++            .notion_parent_page_id,
++        None
++    );
++    assert_eq!(rows(&connection), 1, "행이 늘지 않는다");
++    close(connection);
++}

@@ -339,20 +339,29 @@ pub fn list_ai_notes_for_transcript(
 }
 
 /// Recording 하나의 Notion 전송 상태를 기록한다. 같은 Recording의 기록을 대체한다.
+///
+/// 진행도 세 열도 함께 쓴다 (ADR-0009 §8.4) — 그 셋이 없으면 부분 성공 뒤의 재시도가 어디서부터
+/// 이어갈지 알 수 없고, 그때의 다음 전송은 반드시 중복 페이지를 만든다.
 pub fn save_notion_sync(connection: &Connection, sync: &NotionSync) -> Result<(), DatabaseError> {
     connection
         .execute(
-            "INSERT INTO notion_syncs (recording_id, page_id, synced_at, status, error)
-             VALUES (?1, ?2, ?3, ?4, ?5)
+            "INSERT INTO notion_syncs (recording_id, page_id, synced_at, status, error,
+                                       sent_chunks, total_chunks, content_fingerprint)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
              ON CONFLICT (recording_id) DO UPDATE
              SET page_id = excluded.page_id, synced_at = excluded.synced_at,
-                 status = excluded.status, error = excluded.error",
+                 status = excluded.status, error = excluded.error,
+                 sent_chunks = excluded.sent_chunks, total_chunks = excluded.total_chunks,
+                 content_fingerprint = excluded.content_fingerprint",
             rusqlite::params![
                 sync.recording_id.as_str(),
                 sync.page_id,
                 sync.synced_at,
                 sync.status.as_str(),
                 sync.error,
+                sync.sent_chunks,
+                sync.total_chunks,
+                sync.content_fingerprint,
             ],
         )
         .map_err(DatabaseError::Sql)?;
@@ -365,7 +374,8 @@ pub fn load_notion_sync(
     recording_id: &RecordingId,
 ) -> Result<Option<NotionSync>, DatabaseError> {
     let row = connection.query_row(
-        "SELECT recording_id, page_id, synced_at, status, error
+        "SELECT recording_id, page_id, synced_at, status, error,
+                sent_chunks, total_chunks, content_fingerprint
          FROM notion_syncs WHERE recording_id = ?1",
         [recording_id.as_str()],
         |row| {
@@ -375,16 +385,31 @@ pub fn load_notion_sync(
                 row.get::<_, Option<String>>(2)?,
                 row.get::<_, String>(3)?,
                 row.get::<_, Option<String>>(4)?,
+                row.get::<_, Option<i64>>(5)?,
+                row.get::<_, Option<i64>>(6)?,
+                row.get::<_, Option<String>>(7)?,
             ))
         },
     );
     match row {
-        Ok((recording_id, page_id, synced_at, status, error)) => Ok(Some(NotionSync {
+        Ok((
+            recording_id,
+            page_id,
+            synced_at,
+            status,
+            error,
+            sent_chunks,
+            total_chunks,
+            content_fingerprint,
+        )) => Ok(Some(NotionSync {
             recording_id: RecordingId::new(recording_id),
             page_id,
             synced_at,
             status: status_or_error(status, "notion_syncs", "status")?,
             error,
+            sent_chunks,
+            total_chunks,
+            content_fingerprint,
         })),
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
         Err(source) => Err(DatabaseError::Sql(source)),

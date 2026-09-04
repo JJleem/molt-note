@@ -1,0 +1,73 @@
+ M src-tauri/Cargo.lock
+ M src-tauri/Cargo.toml
+ M src-tauri/src/commands/mod.rs
+ M src-tauri/src/commands/payload.rs
+ M src-tauri/src/db/migrations.rs
+ M src-tauri/src/db/settings.rs
+ M src-tauri/src/db/store.rs
+ M src-tauri/src/domain/failure.rs
+ M src-tauri/src/domain/mod.rs
+ M src-tauri/src/domain/settings.rs
+ M src-tauri/src/lib.rs
+ M src-tauri/src/platform/app_data_dir.rs
+ M src-tauri/src/platform/mod.rs
+ M src-tauri/tests/command_boundary.rs
+ M src-tauri/tests/domain_model.rs
+ M src-tauri/tests/ollama_adapter.rs
+ M src-tauri/tests/settings_repository.rs
+ M src/App.css
+ M src/ipc/commands.ts
+ M src/ipc/failure.ts
+ M src/ipc/types.ts
+ M src/screens/RecordingDetailScreen.tsx
+ M src/screens/SettingsScreen.tsx
+ M src/screens/aiProviderSettings.test.ts
+ M src/screens/recordingsView.ts
+ M src/screens/settingsView.test.ts
+ M src/screens/settingsView.ts
+ M tests/ipc-boundary.test.ts
+ M tests/screen-boundary.test.ts
+?? .loop/evidence/TASK-043/
+?? .loop/evidence/TASK-044/
+?? .loop/evidence/TASK-045/
+?? .loop/evidence/TASK-046/
+?? .loop/evidence/TASK-047/
+?? .loop/evidence/TASK-048/
+?? .loop/evidence/TASK-049/
+?? .loop/evidence/TASK-050/
+?? .loop/evidence/TASK-051/
+?? .loop/evidence/TASK-052/
+?? .loop/evidence/TASK-053/
+?? .loop/evidence/TASK-054/
+?? .loop/tasks/TASK-043.yaml
+?? .loop/tasks/TASK-044.yaml
+?? .loop/tasks/TASK-045.yaml
+?? .loop/tasks/TASK-046.yaml
+?? .loop/tasks/TASK-047.yaml
+?? .loop/tasks/TASK-048.yaml
+?? .loop/tasks/TASK-049.yaml
+?? .loop/tasks/TASK-050.yaml
+?? .loop/tasks/TASK-051.yaml
+?? .loop/tasks/TASK-052.yaml
+?? .loop/tasks/TASK-053.yaml
+?? .loop/tasks/TASK-054.yaml
+?? docs/ADR-0009-notion-and-export.md
+?? docs/PHASE-5-NOTION-SMOKE-TEST.md
+?? src-tauri/src/commands/export.rs
+?? src-tauri/src/commands/notion.rs
+?? src-tauri/src/export/
+?? src-tauri/src/notion/
+?? src-tauri/src/platform/secret_store.rs
+?? src-tauri/src/sync/
+?? src-tauri/tests/markdown_export.rs
+?? src-tauri/tests/notion_adapter.rs
+?? src-tauri/tests/notion_and_export_invariants.rs
+?? src-tauri/tests/notion_chunking.rs
+?? src-tauri/tests/notion_sync.rs
+?? src-tauri/tests/secret_store.rs
+?? src/screens/exportView.test.ts
+?? src/screens/exportView.ts
+?? src/screens/notionSettings.test.ts
+?? src/screens/notionSettings.ts
+?? src/screens/notionSyncView.test.ts
+?? src/screens/notionSyncView.ts

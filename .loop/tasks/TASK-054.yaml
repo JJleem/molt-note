@@ -1,0 +1,53 @@
+# ADR-0009 확정과 운영자 smoke test 절차
+# Runtime이 PLAN-20260904T025945Z 승인 시점에 생성했다 (proposal P12). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-054
+status: DONE
+
+request: |-
+  **문서만 바꾸는 Task다 — 소스 · 설정 · 의존성 · 테스트를 건드리지 않는다.** (1) `docs/ADR-0009-notion-and-export.md`를 실제 구현 결과로 확정한다: 최종적으로 고른 chunk 예산과 그것이 앱이 고른 값이라는 표시, `allow_async` 사용 여부의 결과, 실제로 켠 `ureq` TLS feature 이름과 확인한 버전, 고른 자격증명 crate와 그 플랫폼 feature 구성, 계획과 달라진 결정과 그 이유, 그리고 여전히 **UNVERIFIED로 남은 항목**(특히 markdown 엔드포인트 전용 본문 크기 상한). 확인하지 못한 것을 확인한 것처럼 적지 않는다. (2) **중복 sync 정책**의 최종 문구를 문서에 확정하고, 구현된 실제 동작과 일치하는지 대조해 적는다 (§10). (3) `docs/PHASE-5-NOTION-SMOKE-TEST.md`를 만든다 — 운영자가 실제 Notion으로 확인할 절차이며 Human Review 항목을 그대로 담는다: 실제 integration token과 부모 페이지를 준비하는 방법, connection test, 짧은 Recording 전송, **1시간 분량 transcript 전송 후 Notion에서 내용이 온전한지 확인하는 방법**, 생성된 페이지가 §10의 섹션 구성을 갖는지, export된 Markdown을 Obsidian / NotebookLM에서 열었을 때 쓸 만한지, 그리고 실패 시 local data가 온전한지 확인하는 방법. **문서에 실제 token을 적지 않는다는 규칙**과 증거 파일에 token을 남기지 않는 규칙을 명시한다. `docs/SYSTEM-MAP.md`는 이 Task가 고치지 않는다 — Phase 완료 후 운영자의 일이다.
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-053
+
+stop_condition:
+  gates: []
+  requires_verifier: true
+  max_consecutive_failures: 2
+
+acceptance_criteria:
+  - id: P12-AC1
+    description: |-
+      문서만 바뀌었다 — `src/` · `src-tauri/` · `Cargo.toml` · `package.json` · 테스트에 변경이 없다.
+    verification:
+      type: verifier
+  - id: P12-AC2
+    description: |-
+      ADR-0009가 실제 구현 결과(고른 예산 · allow_async · ureq TLS feature와 버전 · 자격증명 crate)로 확정되어 있고, 계획과 달라진 결정에 이유가 적혀 있다.
+    verification:
+      type: verifier
+      instruction: |-
+        문서의 값이 저장소의 실제 코드·Cargo.toml과 일치하는지 대조한다.
+  - id: P12-AC3
+    description: |-
+      중복 sync 정책이 문서화되어 있고 구현된 실제 동작과 일치한다 (§10).
+    verification:
+      type: verifier
+  - id: P12-AC4
+    description: |-
+      `docs/PHASE-5-NOTION-SMOKE-TEST.md`가 Human Review 세 항목(실제 페이지 생성 · 페이지 구조 · 1시간 transcript 온전성)과 Obsidian/NotebookLM 확인 절차를 담고, token을 문서·evidence에 남기지 않는 규칙을 명시한다.
+    verification:
+      type: verifier
+  - id: P12-AC5
+    description: |-
+      UNVERIFIED로 남은 외부 사실이 그대로 UNVERIFIED로 표시되어 있다 — 특히 markdown 엔드포인트 전용 본문 크기 상한.
+    verification:
+      type: verifier
+
+evidence: []
+
+failure_memo: []

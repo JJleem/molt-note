@@ -1,0 +1,61 @@
+# Settings — Notion 구역과 connection test
+# Runtime이 PLAN-20260904T025945Z 승인 시점에 생성했다 (proposal P10). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-052
+status: DONE
+
+request: |-
+  `src/screens/SettingsScreen.tsx`에 Notion 구역을 만든다 (§5-D). 담을 것: integration token 입력과 저장 · 저장된 token 삭제 · destination(부모 페이지 identifier) 입력과 저장 · **connection test 실행과 그 결과 표시**(성공이면 어느 워크스페이스/사용자에 연결됐는지, 실패면 §13의 인증 실패 · 권한 없는 destination · 네트워크 없음이 구분되어 보인다). **token은 화면 상태에 남기지 않고 어디에도 영속화하지 않는다** — 입력값은 저장 command로 넘긴 뒤 비우고, `localStorage`/`sessionStorage`/URL/전역 상태에 쓰지 않으며, 저장된 값을 다시 읽어와 입력란을 채우지 않는다(화면은 '저장됨' 여부만 안다). 저장된 token이 없는 것은 오류가 아니라 정상 상태로 담담히 표시한다. 표시 로직은 기존 관례대로 순수 view 모듈에 두고 테스트한다 — 어떤 테스트도 실제 Notion이나 실제 자격증명 저장소에 닿지 않는다. Phase 4의 AI provider 구역과 나란히 놓되 그 구역의 동작을 바꾸지 않는다.
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-050
+
+stop_condition:
+  gates: [build, lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 3
+
+acceptance_criteria:
+  - id: P10-AC1
+    description: |-
+      build Gate가 통과한다.
+    verification:
+      type: gate
+      ref: build
+  - id: P10-AC2
+    description: |-
+      lint Gate가 통과한다.
+    verification:
+      type: gate
+      ref: lint
+  - id: P10-AC3
+    description: |-
+      test Gate가 통과한다.
+    verification:
+      type: gate
+      ref: test
+  - id: P10-AC4
+    description: |-
+      connection test가 화면에서 실행되고 성공 · 인증 실패 · 권한 없는 destination · 네트워크 없음이 구분되어 보인다 (§5-D · §13).
+    verification:
+      type: verifier
+  - id: P10-AC5
+    description: |-
+      token이 frontend 상태나 브라우저 저장소에 영속화되지 않고, 저장된 token을 되읽어 입력란을 채우지 않는다 (INV-7).
+    verification:
+      type: verifier
+      instruction: |-
+        localStorage/sessionStorage 사용 여부와, token을 돌려주는 조회 경로가 없다는 것을 확인한다.
+  - id: P10-AC6
+    description: |-
+      테스트가 실제 Notion 워크스페이스와 실제 OS 자격증명 저장소를 건드리지 않는다.
+    verification:
+      type: verifier
+
+evidence: []
+
+failure_memo: []

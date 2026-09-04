@@ -18,6 +18,22 @@ const SETTINGS_DOMAIN_SOURCE: &str = include_str!("../src/domain/settings.rs");
 
 static COUNTER: AtomicUsize = AtomicUsize::new(0);
 
+/// version 2가 만든 테이블 중, 뒤의 migration이 **열을 더하는** 것.
+///
+/// 아래의 "예전 스키마" fixture들은 설정 migration을 흉내 내는 것이 목적이라 `settings`만
+/// 세운다. 하지만 실제 version 3~6 사용자 DB에는 version 2의 테이블도 함께 있고, 그 사실이
+/// 빠져 있으면 domain 테이블에 열을 더하는 migration이 **이 fixture에서만** 실패한다
+/// (`docs/ADR-0009-notion-and-export.md` §8.4의 version 8). 값을 넣지 않으므로 이 파일이
+/// 판정하는 것 — 저장된 설정 값이 그대로 남는가 — 은 달라지지 않는다.
+const LEGACY_DOMAIN_TABLES: &str = "CREATE TABLE IF NOT EXISTS notion_syncs (
+         recording_id TEXT PRIMARY KEY,
+         page_id      TEXT,
+         synced_at    TEXT,
+         status       TEXT NOT NULL
+             CHECK (status IN ('none','pending','running','done','failed')),
+         error        TEXT
+     );";
+
 /// 시스템 임시 디렉터리 아래의 빈 디렉터리. Drop 시 지운다.
 struct TempDir(PathBuf);
 
@@ -110,6 +126,10 @@ fn defaults_are_returned_when_nothing_has_been_saved() {
     assert_eq!(
         loaded.ai_model, None,
         "모델의 기본값도 '아직 고르지 않음'이다"
+    );
+    assert_eq!(
+        loaded.notion_parent_page_id, None,
+        "Notion destination의 기본값도 '아직 고르지 않음'이다 — 어떤 페이지도 굳혀 두지 않는다"
     );
     close(connection);
 }
@@ -211,6 +231,7 @@ fn turning_automatic_transcription_on_does_not_touch_the_other_settings() {
         ai_provider: Some("some-provider".to_string()),
         ai_base_url: Some("http://127.0.0.1:9999".to_string()),
         ai_model: Some("some-model".to_string()),
+        notion_parent_page_id: Some("some-parent-page".to_string()),
     };
 
     let connection = open(&dir);
@@ -327,6 +348,8 @@ fn saved_values_survive_closing_and_reopening_the_database() {
         ai_provider: Some("some-provider".to_string()),
         ai_base_url: Some("http://127.0.0.1:9999".to_string()),
         ai_model: Some("some-model".to_string()),
+        // ADR-0009 §8.4의 Notion destination도 마찬가지다.
+        notion_parent_page_id: Some("some-parent-page".to_string()),
     };
 
     let first = open(&dir);
@@ -506,6 +529,9 @@ fn a_database_written_before_the_ai_settings_existed_keeps_its_values() {
              PRAGMA user_version = 5;",
         )
         .expect("사전 조건: AI 설정이 없던 스키마를 만든다");
+    older
+        .execute_batch(LEGACY_DOMAIN_TABLES)
+        .expect("사전 조건: 그 시점의 domain 테이블도 함께 있다");
     close(older);
 
     // 여기서 새 migration이 적용된다.
@@ -638,6 +664,9 @@ fn a_database_written_before_the_default_microphone_existed_keeps_its_values() {
              PRAGMA user_version = 3;",
         )
         .expect("사전 조건: default microphone이 없던 스키마를 만든다");
+    older
+        .execute_batch(LEGACY_DOMAIN_TABLES)
+        .expect("사전 조건: 그 시점의 domain 테이블도 함께 있다");
     close(older);
 
     // 여기서 새 migration이 적용된다.
@@ -687,6 +716,9 @@ fn a_database_written_before_the_transcription_settings_existed_keeps_its_values
              PRAGMA user_version = 4;",
         )
         .expect("사전 조건: 전사 설정이 없던 스키마를 만든다");
+    older
+        .execute_batch(LEGACY_DOMAIN_TABLES)
+        .expect("사전 조건: 그 시점의 domain 테이블도 함께 있다");
     close(older);
 
     // 여기서 새 migration이 적용된다.
@@ -805,6 +837,7 @@ fn saving_settings_does_not_disturb_other_stored_data() {
             ai_provider: Some("some-provider".to_string()),
             ai_base_url: Some("http://127.0.0.1:9999".to_string()),
             ai_model: Some("some-model".to_string()),
+            notion_parent_page_id: Some("some-parent-page".to_string()),
         },
     )
     .expect("설정을 저장할 수 있어야 한다");
@@ -850,11 +883,14 @@ fn the_settings_schema_has_no_secret_columns() {
             // Phase 3이 더한 두 값이다. 모델의 자리는 secret이 아니라 경로다 (ADR-0007 §8.2).
             "automatic_transcription".to_string(),
             "transcription_model".to_string(),
-            // Phase 4가 더한 세 값이다 (ADR-0008 §11.1). **여기서 멈춘다** — API key를 담을
-            // 자리도, 언젠가 쓸지 모르는 빈 열도 없다 (INV-7 · ADR-0008 §11.3).
+            // Phase 4가 더한 세 값이다 (ADR-0008 §11.1).
             "ai_provider".to_string(),
             "ai_base_url".to_string(),
-            "ai_model".to_string()
+            "ai_model".to_string(),
+            // Phase 5가 더한 값 하나다 (ADR-0009 §8.4). 어느 페이지 아래에 만드는가일 뿐이며
+            // **여기서 멈춘다** — Notion integration 자격증명을 담을 자리도, 언젠가 쓸지 모르는
+            // 빈 열도 없다 (INV-7 · ADR-0009 §10.5).
+            "notion_parent_page_id".to_string()
         ],
         "설정 테이블에는 지금까지의 Phase가 다루는 값만 있어야 한다"
     );
@@ -893,4 +929,182 @@ fn the_settings_api_does_not_accept_or_store_secrets() {
             }
         }
     }
+}
+
+// --- Notion destination (version 7 · ADR-0009 §8.4) ---------------------------------
+
+#[test]
+fn a_database_written_before_the_notion_settings_existed_keeps_its_values() {
+    // version 6까지만 적용된 DB에 값이 이미 있는 상황이다 — Notion 설정이 생기기 전이다.
+    // 새 migration은 그 행을 지우거나 다시 만들지 않고 **열만 더한다** (INV-4의 정신).
+    let dir = TempDir::new("before-notion");
+
+    let older = Connection::open(dir.database_path()).expect("빈 DB를 만들 수 있어야 한다");
+    older
+        .execute_batch(
+            "CREATE TABLE schema_migrations (
+                 version    INTEGER PRIMARY KEY,
+                 name       TEXT NOT NULL,
+                 applied_at TEXT NOT NULL
+             );
+             INSERT INTO schema_migrations (version, name, applied_at)
+             VALUES (3, 'create_settings', datetime('now')),
+                    (4, 'add_default_microphone_to_settings', datetime('now')),
+                    (5, 'add_transcription_settings', datetime('now')),
+                    (6, 'add_ai_provider_settings', datetime('now'));
+             CREATE TABLE settings (
+                 id                      INTEGER PRIMARY KEY CHECK (id = 1),
+                 recordings_directory    TEXT,
+                 automatic_processing    INTEGER NOT NULL
+                     CHECK (automatic_processing IN (0, 1)),
+                 default_microphone      TEXT,
+                 automatic_transcription INTEGER CHECK (automatic_transcription IN (0, 1)),
+                 transcription_model     TEXT,
+                 ai_provider             TEXT,
+                 ai_base_url             TEXT,
+                 ai_model                TEXT
+             );
+             INSERT INTO settings (id, recordings_directory, automatic_processing,
+                                   default_microphone, automatic_transcription,
+                                   transcription_model, ai_provider, ai_base_url, ai_model)
+             VALUES (1, '/tmp/before-notion', 1, '0:Studio Mic', 1, 'ggml-base.bin',
+                     'some-provider', 'http://127.0.0.1:9999', 'some-model');
+             PRAGMA user_version = 6;",
+        )
+        .expect("사전 조건: Notion 설정이 없던 스키마를 만든다");
+    older
+        .execute_batch(LEGACY_DOMAIN_TABLES)
+        .expect("사전 조건: 그 시점의 domain 테이블도 함께 있다");
+    close(older);
+
+    // 여기서 version 7이 적용된다.
+    let upgraded = open(&dir);
+    let loaded = settings::load(&upgraded).expect("올린 뒤에도 설정을 읽을 수 있어야 한다");
+
+    assert_eq!(
+        loaded.recordings_directory,
+        Some("/tmp/before-notion".to_string()),
+        "이미 저장돼 있던 값이 그대로여야 한다"
+    );
+    assert!(loaded.automatic_processing);
+    assert!(loaded.automatic_transcription);
+    assert_eq!(loaded.transcription_model, Some("ggml-base.bin".to_string()));
+    assert_eq!(loaded.default_microphone, Some("0:Studio Mic".to_string()));
+    assert_eq!(loaded.ai_provider, Some("some-provider".to_string()));
+    assert_eq!(loaded.ai_base_url, Some("http://127.0.0.1:9999".to_string()));
+    assert_eq!(loaded.ai_model, Some("some-model".to_string()));
+    assert_eq!(
+        loaded.notion_parent_page_id, None,
+        "새로 생긴 열은 '아직 고르지 않음'으로 시작한다 — 다른 값에서 채워지지 않는다"
+    );
+    assert_eq!(rows(&upgraded), 1, "행이 늘거나 다시 만들어지지 않았다");
+
+    // 그리고 그 행은 이제 새 값도 담을 수 있다 — 올린 스키마가 반쪽이 아니다.
+    settings::save(
+        &upgraded,
+        &Settings {
+            notion_parent_page_id: Some("some-parent-page".to_string()),
+            ..loaded
+        },
+    )
+    .expect("올린 뒤에는 새 값도 저장할 수 있어야 한다");
+    let again = settings::load(&upgraded).expect("다시 읽을 수 있어야 한다");
+    assert_eq!(
+        again.notion_parent_page_id,
+        Some("some-parent-page".to_string())
+    );
+    assert_eq!(
+        again.ai_model,
+        Some("some-model".to_string()),
+        "새 값을 저장하는 것이 예전 값을 지우지 않는다"
+    );
+    close(upgraded);
+}
+
+#[test]
+fn a_chosen_notion_destination_survives_closing_and_reopening_the_database() {
+    let dir = TempDir::new("notion-destination");
+
+    let connection = open(&dir);
+    settings::save(
+        &connection,
+        &Settings {
+            notion_parent_page_id: Some("some-parent-page".to_string()),
+            ..Settings::DEFAULT
+        },
+    )
+    .expect("저장할 수 있어야 한다");
+    close(connection);
+
+    let reopened = open(&dir);
+    let loaded = settings::load(&reopened).expect("다시 읽을 수 있어야 한다");
+
+    assert_eq!(
+        loaded.notion_parent_page_id,
+        Some("some-parent-page".to_string()),
+        "고른 destination이 재시작 뒤에도 남아야 한다"
+    );
+    assert_eq!(
+        loaded.ai_provider, None,
+        "destination을 고른 것이 다른 설정을 채우지 않는다"
+    );
+    close(reopened);
+}
+
+#[test]
+fn a_notion_destination_that_is_no_longer_reachable_is_still_the_saved_choice() {
+    // 저장소는 그 페이지가 지금도 있는지, integration에 공유돼 있는지 묻지 않는다.
+    // `transcription_model` · `ai_model`과 같은 이유이며, 아니라고 해서 조용히 지우지 않는다.
+    let dir = TempDir::new("notion-destination-gone");
+
+    let connection = open(&dir);
+    settings::save(
+        &connection,
+        &Settings {
+            notion_parent_page_id: Some("없어진-페이지".to_string()),
+            ..Settings::DEFAULT
+        },
+    )
+    .expect("저장할 수 있어야 한다");
+
+    assert_eq!(
+        settings::load(&connection)
+            .expect("읽을 수 있어야 한다")
+            .notion_parent_page_id,
+        Some("없어진-페이지".to_string()),
+        "닿지 못한다는 것이 이 값이 틀렸다는 뜻은 아니다"
+    );
+    close(connection);
+}
+
+#[test]
+fn clearing_the_notion_destination_is_remembered_as_not_chosen() {
+    let dir = TempDir::new("notion-destination-cleared");
+
+    let connection = open(&dir);
+    settings::save(
+        &connection,
+        &Settings {
+            notion_parent_page_id: Some("some-parent-page".to_string()),
+            ..Settings::DEFAULT
+        },
+    )
+    .expect("저장할 수 있어야 한다");
+    settings::save(
+        &connection,
+        &Settings {
+            notion_parent_page_id: None,
+            ..Settings::DEFAULT
+        },
+    )
+    .expect("지운 상태도 저장할 수 있어야 한다");
+
+    assert_eq!(
+        settings::load(&connection)
+            .expect("읽을 수 있어야 한다")
+            .notion_parent_page_id,
+        None
+    );
+    assert_eq!(rows(&connection), 1, "행이 늘지 않는다");
+    close(connection);
 }

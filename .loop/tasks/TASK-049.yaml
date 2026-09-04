@@ -1,0 +1,66 @@
+# Notion sync 실행 순서와 NotionSync 영속화
+# Runtime이 PLAN-20260904T025945Z 승인 시점에 생성했다 (proposal P7). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-049
+status: DONE
+
+request: |-
+  Recording 하나를 Notion 페이지로 보내는 실행 순서를 만들고, 그 결과를 §7의 `NotionSync`(`recordingId` · `pageId` · `syncedAt` · `status` · `error`)로 영속화한다. 순서는 이렇다: current Transcript(§7.2)와 있으면 최신 AI Note를 읽고 → P2의 렌더러로 §10 구조를 가진 markdown을 만들고 → P6으로 나누고 → 첫 chunk로 페이지를 생성하고(제목은 첫 `# h1`이 쓰인다) → 나머지 chunk를 **순서대로** 이어붙이고 → 상태를 저장한다. **AI Note가 하나도 없어도 Transcript만으로 전송된다** (INV-8). **페이지가 생긴 직후 `pageId`를 영속화해**, 부분 성공 뒤 재시도가 ADR-0009의 중복 sync 정책대로 동작하고 **조용히 중복 페이지를 만들지 않게** 한다 — 이어갈 수 있을 만큼의 비-secret 상태만 남기며 token은 저장하지 않는다. `429`/`529`를 만나면 `Retry-After`(정수 초)를 존중한다. 실패하면 `status`와 `error`가 남고 `recordings.notion_status`가 갱신되며, **오디오 · Transcript · AI Note는 그대로다** (INV-3). 부분 전송 후 실패한 경우 그 사실이 상태에서 드러나야 한다. **오디오는 어떤 형태로도 전송하지 않는다** (INV-6). 오래 걸리는 실행은 이미 있는 규약을 따른다 — `Transcriber` · `NoteGenerator`처럼 배경 스레드에서 돌고 상태 조회가 그것을 기다리지 않으며, 새 실행 방식을 만들지 않는다. 자동 테스트는 stub transport와 임시 저장소로 (a) AI Note 없는 전송, (b) 여러 chunk의 순차 전송, (c) 두 번째 chunk에서 실패한 뒤의 재시도가 중복 페이지를 만들지 않는 것, (d) 실패 후 local data가 온전한 것을 고정한다.
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-044
+  - TASK-046
+  - TASK-047
+  - TASK-048
+
+stop_condition:
+  gates: [lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 3
+
+acceptance_criteria:
+  - id: P7-AC1
+    description: |-
+      lint Gate가 통과한다.
+    verification:
+      type: gate
+      ref: lint
+  - id: P7-AC2
+    description: |-
+      test Gate가 통과한다.
+    verification:
+      type: gate
+      ref: test
+  - id: P7-AC3
+    description: |-
+      AI Note가 없는 Recording이 Transcript만으로 전송되는 경로에 테스트가 있다 (INV-8).
+    verification:
+      type: verifier
+  - id: P7-AC4
+    description: |-
+      여러 chunk가 순서대로 전송되고, 두 번째 이후 chunk에서 실패한 뒤의 재시도가 중복 페이지를 만들지 않는다는 것이 테스트로 고정돼 있다 (P-5 · ADR-0009의 중복 sync 정책과 실제 동작이 일치한다).
+    verification:
+      type: verifier
+  - id: P7-AC5
+    description: |-
+      실패 후 recording · transcript · ai_note가 그대로이고 `NotionSync.status`/`error`가 남는다는 것이 테스트로 확인된다 (INV-3 · §7).
+    verification:
+      type: verifier
+  - id: P7-AC6
+    description: |-
+      오디오 바이트도 오디오 경로도 Notion 요청에 실리지 않는다 (INV-6).
+    verification:
+      type: verifier
+  - id: P7-AC7
+    description: |-
+      실행이 배경 스레드 규약을 따르고 상태 조회가 전송을 기다리지 않는다 — 기존 `Transcriber`/`NoteGenerator`와 같은 방식이며 새 실행 방식을 만들지 않았다.
+    verification:
+      type: verifier
+
+evidence: []
+
+failure_memo: []

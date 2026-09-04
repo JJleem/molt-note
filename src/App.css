@@ -329,6 +329,86 @@ input {
   word-break: break-all;
 }
 
+/* 기록을 밖으로 꺼내는 두 문 (§10 · §11 · phase-prompt/05 요구 9 · 13) */
+
+.share {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+  max-width: 640px;
+  margin: 16px 0;
+}
+
+.share__panel {
+  flex: 1 1 260px;
+}
+
+.share__title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+}
+
+/* 이 녹음의 Notion 상태 (§7). 목록의 상태 표시와 같은 문자열이다. */
+
+.share__status {
+  font-weight: 400;
+  color: var(--text);
+}
+
+.share__done {
+  margin-bottom: 8px;
+}
+
+.share__confirm {
+  margin-bottom: 8px;
+}
+
+.share__headline {
+  margin: 0 0 4px;
+}
+
+.share__file {
+  margin: 0;
+}
+
+/* 만들어진 파일의 전체 경로 · 만들어진 페이지의 식별자. 잘라 보이지 않는다 (§4.1). */
+
+.share__path {
+  margin: 0 0 4px;
+  font-size: 13px;
+  color: var(--text-muted);
+  word-break: break-all;
+}
+
+/* 무엇이 나가는가 (INV-5 · INV-6). 본문이 어느 상태든 같은 자리에 있다. */
+
+.share__contents {
+  margin-top: 12px;
+}
+
+.share__contents-title {
+  margin: 0 0 4px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.share__items {
+  margin: 0 0 4px;
+  padding-left: 20px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.share__item {
+  padding: 1px 0;
+}
+
 .tabs {
   display: flex;
   gap: 16px;

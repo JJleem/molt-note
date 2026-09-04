@@ -21,13 +21,13 @@ use serde::Serialize;
 
 /// 실패가 어느 종류인지.
 ///
-/// **지금 실제로 만들어지는 것만 있다.** Notion의 실패 종류는 §13에 이미 적혀 있지만, 그
-/// 기능이 존재하는 Phase가 그때 함께 추가한다 — 만들지 않은 실패의 자리를 미리 만들어 두지
+/// **지금 실제로 만들어지는 것만 있다** — 만들지 않은 실패의 자리를 미리 만들어 두지
 /// 않는다 (§20.6). 전사 실패 네 종류는 **전사가 실재하는 Phase 3에서** 그 규칙대로 추가됐고
 /// (`crate::transcription::engine`), AI provider 실패 다섯 종류는 **provider 계약이 실재하는
 /// Phase 4에서** 같은 규칙으로 추가됐다 (`crate::ai::provider`). 여섯 번째인
 /// [`Self::AiInputTooLarge`]는 그보다 늦다 — **요청 전에 크기를 판정하는 실행 순서가 실재하는
-/// 자리에서** 추가됐다 (`crate::ai::run`).
+/// 자리에서** 추가됐다 (`crate::ai::run`). Notion 실패 다섯 종류도 같은 규칙으로 **Notion과
+/// 실제로 말하는 adapter가 실재하는 Phase 5에서** 추가됐다 (`crate::notion::client`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum FailureKind {
@@ -94,6 +94,44 @@ pub enum FailureKind {
     /// **provider가 만드는 실패가 아니다.** 만드는 쪽은 요청 전에 크기를 판정하는 실행 순서이며
     /// (`crate::ai::run`), 그래서 `crate::ai::provider::AI_PROVIDER_FAILURE_KINDS`에 없다.
     AiInputTooLarge,
+    /// Notion이 이 앱의 자격증명을 받아들이지 않았다 (§13 `authentication failure` ·
+    /// `docs/ADR-0009-notion-and-export.md` §9.3).
+    ///
+    /// **아래 다섯 Notion 실패도 서로 다른 종류로 남는다.** 전사 실패 넷 · AI 실패 여섯과 같은
+    /// 이유다 — 사용자가 할 수 있는 일이 전부 다르다: token을 다시 넣는 것 · 부모 페이지를
+    /// integration에 공유하는 것 · 잠시 기다리는 것 · 다시 시도하는 것 · Notion에서 무엇이
+    /// 만들어졌는지 확인하는 것.
+    ///
+    /// **다섯뿐인 것도 같은 규칙이다** (§20.6). Notion 설정이 없는 상태 · 전송이 진행 중인
+    /// 상태처럼 아직 만들어지지 않은 실패의 자리를 미리 만들지 않았다 — 다섯 전부
+    /// `crate::notion::client`가 실제로 만드는 것이며, 그 사실을 `NOTION_FAILURE_KINDS`와
+    /// 그 테스트가 고정한다.
+    NotionAuthFailed,
+    /// 보내려는 자리에 닿을 수 없다 — 부모 페이지가 없거나 integration에 공유되지 않았다
+    /// (§13 `sync failure` 중 `권한 없는 destination` · `phase-prompt/05` 요구 12).
+    ///
+    /// 인증 실패와 나누는 이유는 사용자가 할 일이 다르기 때문이다. token은 멀쩡한데 페이지를
+    /// 공유하지 않은 상황이 이 제품에서 가장 흔한 첫 실패이며, "token을 다시 넣어라"는 안내는
+    /// 그 사용자를 엉뚱한 곳으로 보낸다.
+    NotionDestinationUnavailable,
+    /// Notion이 요청 속도를 제한하고 있다 (§13 `rate limit` · ADR-0009 §9).
+    ///
+    /// **다시 보내면 되는 실패다.** 언제 보내면 되는지는 `crate::notion::RetryAfter`가 값으로
+    /// 함께 나온다 — 그 값을 `Failure`에 담지 않는 이유는 벤더 하나 때문에 domain 계약이
+    /// 넓어지지 않게 하기 위해서다.
+    NotionRateLimited,
+    /// Notion에 보낸 요청이 실패했다 (§13 `sync failure` — 연결 불가 · 타임아웃 · 거절된 요청 ·
+    /// 서버 쪽 오류).
+    ///
+    /// 재시도 가치는 원인에 따라 갈리지만 사용자가 보는 종류는 하나다 — 어느 쪽이든 할 수 있는
+    /// 일은 "다시 시도한다"뿐이다.
+    NotionRequestFailed,
+    /// Notion이 응답했지만 만들어진 페이지를 확인할 수 없다 (ADR-0009 §7.3 · §8.5의 '결과를 모름').
+    ///
+    /// **"모른다"를 "실패했다"로도 "성공했다"로도 바꿔 적지 않는다.** 페이지가 만들어졌을 수
+    /// 있으므로 그대로 다시 보내면 사용자가 모르는 사이에 페이지가 둘이 된다. 그래서 이 실패는
+    /// 재시도 가능으로 표시되지 않고, 사용자가 Notion을 확인한 뒤 다시 고르는 자리로 남는다.
+    NotionResponseUnusable,
 }
 
 impl FailureKind {
@@ -116,6 +154,11 @@ impl FailureKind {
             Self::AiRequestFailed => "aiRequestFailed",
             Self::AiResponseUnusable => "aiResponseUnusable",
             Self::AiInputTooLarge => "aiInputTooLarge",
+            Self::NotionAuthFailed => "notionAuthFailed",
+            Self::NotionDestinationUnavailable => "notionDestinationUnavailable",
+            Self::NotionRateLimited => "notionRateLimited",
+            Self::NotionRequestFailed => "notionRequestFailed",
+            Self::NotionResponseUnusable => "notionResponseUnusable",
         }
     }
 }
@@ -283,6 +326,17 @@ mod tests {
         assert_eq!(FailureKind::AiRequestFailed.as_str(), "aiRequestFailed");
         assert_eq!(FailureKind::AiResponseUnusable.as_str(), "aiResponseUnusable");
         assert_eq!(FailureKind::AiInputTooLarge.as_str(), "aiInputTooLarge");
+        assert_eq!(FailureKind::NotionAuthFailed.as_str(), "notionAuthFailed");
+        assert_eq!(
+            FailureKind::NotionDestinationUnavailable.as_str(),
+            "notionDestinationUnavailable"
+        );
+        assert_eq!(FailureKind::NotionRateLimited.as_str(), "notionRateLimited");
+        assert_eq!(FailureKind::NotionRequestFailed.as_str(), "notionRequestFailed");
+        assert_eq!(
+            FailureKind::NotionResponseUnusable.as_str(),
+            "notionResponseUnusable"
+        );
 
         // 이 문자열들은 `src/ipc/failure.ts`의 union과 1:1이다. 겹치면 화면이 두 실패를
         // 구분하지 못한다.
@@ -301,6 +355,11 @@ mod tests {
             FailureKind::AiRequestFailed,
             FailureKind::AiResponseUnusable,
             FailureKind::AiInputTooLarge,
+            FailureKind::NotionAuthFailed,
+            FailureKind::NotionDestinationUnavailable,
+            FailureKind::NotionRateLimited,
+            FailureKind::NotionRequestFailed,
+            FailureKind::NotionResponseUnusable,
         ];
         let mut seen = Vec::new();
         for kind in kinds {

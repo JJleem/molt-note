@@ -34,6 +34,16 @@
  * `aiInputTooLarge`는 **요청을 보내지 않았다**는 뜻이다. 전사를 잘라서 보내는 대신 그 사실을
  * 상태로 보이며, 사용자가 할 수 있는 일은 context 크기를 키우거나 더 짧은 녹음을 고르는
  * 것이다 (ADR-0008 §8.2).
+ *
+ * `notion*` 다섯도 같은 이유로 서로 따로 있다 (§13 · Rust의 `notion::client` ·
+ * `docs/ADR-0009-notion-and-export.md` §9.3). token을 다시 넣는 것 · 부모 페이지를
+ * integration에 공유하는 것 · 잠시 기다렸다 다시 보내는 것 · 다시 시도하는 것은 전부 다른
+ * 상황이다.
+ *
+ * `notionResponseUnusable`은 **결과를 모른다**는 뜻이다 (ADR-0009 §7.3 · §8.5). Notion이
+ * 응답했지만 만들어진 페이지를 확인하지 못했으므로, 그대로 다시 보내면 사용자가 모르는 사이에
+ * 페이지가 둘이 될 수 있다. 화면은 "실패했다"도 "성공했다"도 아닌 그 사실을 그대로 말하고,
+ * 사용자가 Notion을 확인한 뒤 고르게 한다.
  */
 export type FailureKind =
   | 'storage'
@@ -50,6 +60,11 @@ export type FailureKind =
   | 'aiRequestFailed'
   | 'aiResponseUnusable'
   | 'aiInputTooLarge'
+  | 'notionAuthFailed'
+  | 'notionDestinationUnavailable'
+  | 'notionRateLimited'
+  | 'notionRequestFailed'
+  | 'notionResponseUnusable'
   | 'unexpected';
 
 export interface Failure {

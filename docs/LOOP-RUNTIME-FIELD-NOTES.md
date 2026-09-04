@@ -2191,6 +2191,278 @@ OBS-003 이후 필드 노트는 per-Task worktree isolation을 후보로 적어 
 
 `OBSERVED`
 
+### 추가 증거 — Phase 5 (2026-09-04) · 재현 2건
+
+같은 성질이 Phase 5에서 **두 번 더** 재현됐다. 새 observation을 만들지 않고 여기에 붙인다.
+
+| Task | Run | 중단 시점까지 Worker가 쓴 제품 파일 | worker-result | 재시도 결과 |
+| --- | --- | --- | --- | --- |
+| TASK-048 | RUN-20260904T044650Z | `notion/chunk.rs` · `notion/mod.rs` · `tests/notion_chunking.rs` (3개) | 없음 | **7.6분 · $6.05** — 다른 Task 평균(약 20분)의 3분의 1 |
+| TASK-052 | RUN-20260904T063452Z | `commands/notion.rs` · `notion/{client,mod,wire}.rs` · `screens/notionSettings.*` · `SettingsScreen.tsx` 등 **12개** | 없음 | 첫 시도 통과 |
+
+두 Run 모두 `context.md` · `manifest.json`만 남고 `runtime-envelope.json` ·
+`worker-result.json` · Gate · Verifier 산출물이 **전부 없었다.** Runtime 회계상 "산출물 없음"
+이지만 **제품 코드는 공유 트리에 있었다.**
+
+TASK-048의 재시도가 7.6분에 끝난 것이 이 성질을 수치로 보여준다 — 재시도 Worker는 이미
+완성된 `chunk.rs`를 다시 만들 필요가 없었고, Gate(lint · test)와 Verifier가 그 파일들을
+그대로 PASS로 판정했다. **잃은 것은 작업이 아니라 "작업했다는 기록" 하나였다** (CI-011).
+
+Phase 4 TASK-038까지 합쳐 **근거 3건**이 됐다. 공유 트리가 매번 복구 수단으로 작동했다는
+사실은 worktree isolation(OBS-003)을 도입할 때 **잘린 시도의 산출물 인계**를 함께 설계해야
+한다는 근거도 그만큼 강해졌다는 뜻이다.
+
+---
+
+## OBS-024 — 살아 있는 Worker가 STALE로 표시된다 (heartbeat가 Worker 단계에서 갱신되지 않는다)
+
+**Date:** 2026-09-04
+
+**Project phase / Goal:** Molt Note Phase 5 — Notion & Markdown Export
+
+**Plan / Task / Run / Execution:**
+- PLAN-20260904T025945Z · TASK-045 (관측) · TASK-050 (재현)
+- EXEC-20260904T034150Z-TASK-045 · EXEC-20260904T055314Z-TASK-050
+
+**Runtime stage:** 활성 실행 표식 / `status`
+
+### What happened
+
+Phase 5 실행 도중 진행 상황을 보려고 `loopctl status`를 읽었다. Runtime은 이렇게 말했다.
+
+```text
+ACTIVE EXECUTION
+  TASK-045             STALE
+      execution STALE: EXEC-20260904T034150Z-TASK-045  (no heartbeat for 512s (limit 300s))
+      the runtime stopped updating this marker; `loopctl execute TASK-045` will reclaim it
+  (liveness comes from the runtime's own heartbeat, not from process liveness)
+```
+
+**그러나 모든 것이 살아 있었다.** 프로세스 목록으로 직접 확인했다.
+
+```text
+PID 16818  node .../loopctl.mjs execute-plan PLAN-20260904T025945Z   40분 14초 경과 · 생존
+PID 24666  claude --print ...                                        9분 11초 경과 · CPU 1.3% · 생존
+           └ 시스템 프롬프트에 "RUN-20260904T034150Z-TASK-045"가 박혀 있어 이 Task의 Worker임이 확정
+PID 16821  caffeinate -ims                                           생존
+```
+
+원인은 활성 표식 자체에 있었다.
+
+```json
+{ "task_id": "TASK-045", "pid": 16818,
+  "started_at":   "2026-09-04T03:41:50.249Z",
+  "heartbeat_at": "2026-09-04T03:41:50.249Z",   ← 시작 이후 한 번도 갱신되지 않았다
+  "stage": "starting", "run_id": null, "attempt": null }
+```
+
+`heartbeat_at`이 `started_at`과 **정확히 같고**, `stage`는 여전히 `"starting"`이며
+`run_id`는 `null`이다. Worker가 9분째 돌고 있는데도 그렇다.
+
+TASK-050에서도 같은 값으로 재현됐다(`stage=starting` · `run=None`).
+
+### Expected
+
+**Worker 단계가 300초를 넘기는 Task는 살아 있어도 예외 없이 STALE로 표시된다.**
+이 저장소의 Task는 Phase 4·5에서 평균 15~26분이 걸렸으므로, 사실상 **거의 모든 Task가
+실행 중에 STALE로 보인다.**
+
+이것이 위험한 이유는 표시가 틀렸다는 것에 그치지 않는다. **Runtime이 그 상태에서
+회수 명령을 제안한다.**
+
+```text
+`loopctl execute TASK-045` will reclaim it
+```
+
+그 제안을 따랐다면 **살아 있는 Worker와 경쟁하게 된다.** OBS-020이 "Runtime 입장에서
+'Worker가 죽었다'와 '아직 돌고 있다'는 구분되지 않는다"며 `RECOVERY_AMBIGUOUS` 거부를
+옳다고 평가했는데, 여기서는 Runtime이 스스로 그 위험한 행동을 **권한다.**
+
+이번에는 운영자가 프로세스 목록을 직접 확인해서 오탐임을 알아냈다. 그 확인 수단이 없었다면
+멀쩡히 돌고 있는 $15짜리 Worker를 회수하려 했을 것이다.
+
+### ⚠️ CI-008에 대한 반대 증거
+
+CI-008은 이렇게 적혀 있다.
+
+```text
+CI-008 | Run 시작 시 execution 레코드 선기록 + PID/heartbeat → status에 RUNNING/STALE 표시
+        | OBS-006 | Medium | IMPLEMENTED (V0.1 §4 — 기존 executions/active/ 표식을 heartbeat 기반으로)
+```
+
+**표식과 PID 기록은 실제로 구현됐다.** 관측된 marker에 `pid: 16818`이 그대로 들어 있다.
+구현되지 않은 것은 **그 두 가지를 실제로 쓰는 부분**이다.
+
+```text
+구현됨    Run 시작 시 표식 선기록 · pid 기록 · heartbeat 필드 · STALE 판정 로직
+안 됨     Worker 단계 동안 heartbeat 갱신 · 기록된 pid로 프로세스 생존 확인
+```
+
+OBS-020은 이 설계를 "프로세스 생존이 아니라 자체 heartbeat로 판단한다"며 긍정적으로
+평가했다. 그 평가는 **Worker가 죽은 경우에 대해서만 옳았다.** heartbeat가 갱신되지 않으면
+그 신호는 "죽었다"와 "일하고 있다"를 구분하지 못한다 — OBS-020이 피하려던 바로 그 모호성이
+표시 계층으로 옮겨온 것이다.
+
+**CI-008을 IMPLEMENTED에서 되돌리지 않는다** — 표식·PID·판정 로직은 실제로 들어갔다.
+대신 그 위에 남은 구멍을 CI-015로 새로 세운다. 기록을 나중에 고쳐 쓰지 않는다.
+
+### Current workaround
+
+운영자가 `ps`로 직접 확인한다.
+
+```bash
+pgrep -f "loopctl.mjs execute"   # 오케스트레이터 생존
+pgrep -f "claude --print"        # Worker 생존
+ps -o command= -p <pid> | grep -o 'RUN-[0-9TZ]*-TASK-[0-9]*'   # 어느 Run의 Worker인가
+```
+
+세 번째 명령이 결정적이다 — Worker의 시스템 프롬프트에 `run_id`가 들어 있어 **어느 Task의
+Worker인지 확실히 알 수 있다.** Runtime이 이미 자기가 만든 정보다.
+
+### Impact
+
+**Medium-High.** 비용은 0이지만 **잘못된 행동을 유도한다.**
+
+- 실행 중 `status`가 사실상 항상 STALE을 보여주므로 **진짜 STALE과 구분되지 않는다.**
+  이번 Phase에서 실제로 두 번의 진짜 중단(TASK-048 · TASK-052)이 있었고, 그때의 표시가
+  살아 있을 때의 표시와 **글자 그대로 같았다.**
+- 표시를 믿고 회수하면 살아 있는 Worker와 경쟁한다.
+- 자동화된 운영(밤새 실행 · 원격 모니터링)에서 이 신호는 쓸 수 없다.
+
+### Possible Runtime improvement
+
+- **Worker 단계 동안 heartbeat를 갱신한다.** 최소한 Run 시작 · 각 단계 진입 · 주기적 tick.
+  `stage`와 `run_id`도 함께 채우면 `stage=starting` · `run_id=null`이 9분간 유지되는
+  현상이 사라진다.
+- **기록된 `pid`로 프로세스 생존을 확인한 뒤 STALE을 말한다.** marker에 이미 pid가 있다.
+  heartbeat가 낡았어도 그 pid가 살아 있으면 STALE이 아니라 "heartbeat 지연"이다.
+- **살아 있을 가능성이 있는 실행에는 회수 명령을 제안하지 않는다.** 지금은 조건 없이 권한다.
+- Worker의 시스템 프롬프트에 `run_id`가 들어가는 점을 활용해, `status`가 실제로 어느 Worker
+  프로세스가 어느 Run에 속하는지 보여줄 수 있다.
+
+### Evidence
+
+```text
+.loop-local/executions/active/TASK-045.json   heartbeat_at == started_at · stage=starting · run_id=null · pid=16818
+.loop-local/executions/active/TASK-050.json   같은 형태로 재현
+ps -o command= -p 24666                        시스템 프롬프트에 RUN-20260904T034150Z-TASK-045
+./loopctl status                               "STALE ... will reclaim it" (Worker 생존 중)
+EXEC-20260904T034150Z-TASK-045                 이후 정상 DONE — 오탐이었음이 결과로 확인됨
+EXEC-20260904T055314Z-TASK-050                 이후 정상 DONE
+```
+
+### Status
+
+`OBSERVED`
+
+---
+
+## OBS-025 — 대화형 harness의 background 실행이 약 90분 시점에 두 번 외부 종료됐다 (원인 미확정)
+
+**Date:** 2026-09-04
+
+**Project phase / Goal:** Molt Note Phase 5 — Notion & Markdown Export
+
+**Plan / Task:** PLAN-20260904T025945Z · TASK-048 · TASK-052
+
+**Runtime stage:** 오케스트레이터 프로세스 수명 (Runtime 밖의 문제일 수 있다)
+
+### What happened
+
+`execute-plan`을 대화형 세션의 background 명령으로 띄웠고, **두 번 모두 프로세스 그룹 전체가
+외부에서 종료됐다.**
+
+| 회차 | 시작 | 종료 시점의 Task | 그때까지 DONE | 경과 |
+| --- | --- | --- | --- | --- |
+| 1 | 12:10 | TASK-048 (시작 직후) | 5개 | 약 96분 |
+| 2 | 14:19 | TASK-052 (시작 직후) | 4개 더 | 약 89분 |
+
+두 번 다 **함께** 죽었다.
+
+```text
+node loopctl.mjs execute-plan   죽음
+claude --print (Worker)          죽음
+caffeinate -ims (래퍼)           죽음
+```
+
+**Runtime의 자체 진단은 남지 않았다** — `diagnosis.json` · `failure-memo.json` ·
+`execution-report.json`이 전부 없다. Runtime이 진단 단계에 닿기 전에 프로세스가 사라졌다.
+남은 것은 `context.md` · `manifest.json`과 stale 표식뿐이었다(OBS-020과 같은 형태).
+
+### 이것이 무엇의 증거가 **아닌지** 먼저 적는다
+
+- **macOS sleep의 증거가 아니다.** 별도 터미널의 `caffeinate -dimsu`(PID 67148)는 두 번 다
+  살아남았다. sleep이었다면 그것도 함께 멈췄을 이유가 없고, 무엇보다 **다른 프로세스는
+  멀쩡했다.**
+- **Runtime timeout의 증거가 아니다.** `worker_timeout_seconds`는 1800이고 두 Worker 모두
+  그보다 훨씬 짧게 살았다(각각 약 12분 · 약 14분). timeout 집행이라면 SIGKILL과 함께
+  envelope이 남았을 것이다 — OBS-023의 TASK-038이 그랬다.
+- **Runtime 결함의 증거가 아니다.** Runtime은 자기가 죽는 것을 관측하거나 기록할 위치에
+  있지 않았다.
+
+**[관측된 사실]** 두 번, 약 90분 간격으로, 프로세스 그룹 전체가 진단 없이 사라졌다.
+**[미확정]** 무엇이 종료시켰는지. 대화형 harness의 background 실행 수명 제한일 가능성이
+있으나 **이 Run의 산출물로 확인하지 못했다.**
+
+### 결정적인 대조 증거
+
+이후 운영자가 **일반 터미널에서 직접** 같은 명령을 실행했다.
+
+```bash
+./loopctl execute-plan PLAN-20260904T025945Z
+```
+
+남은 3개 Task가 **38분 25초 동안 중단 없이 정상 완료**됐다. 같은 Runtime · 같은 Plan ·
+같은 기기 · 같은 시간대다. **달라진 것은 실행을 감싼 프로세스 환경뿐이다.**
+
+이것은 원인이 Runtime이 아니라 **실행을 감싼 쪽에 있다**는 것을 강하게 시사한다 —
+다만 그 쪽이 정확히 무엇인지는 여전히 미확정이다.
+
+### Impact
+
+**Low (Runtime 관점).** Runtime은 두 번 다 **정확하게 복구 가능한 상태로 남았다.**
+stale 표식 → `execute` 회수 → `RECOVERY_AMBIGUOUS` → 사람의 `transition` → 재개.
+비용 손실은 회수 시도 2회 × $0.00이며, 중단된 Worker의 산출물은 공유 트리에 남아
+재시도가 오히려 빨랐다(OBS-023 추가 증거).
+
+**운영 관점에서는 Medium.** 장시간 Plan을 대화형 세션의 background로 돌리는 운용은
+이 프로젝트에서 **두 번 다 실패했다.**
+
+### Current workaround
+
+**장시간 `execute-plan`은 지속되는 별도 터미널에서 직접 실행한다.**
+`caffeinate ... execute-plan` 래퍼는 실행 harness와 함께 죽으므로 그것만 믿지 않는다.
+sleep 방지가 필요하면 `caffeinate -dimsu`를 **독립 터미널 세션에서** 따로 띄운다.
+
+### Possible Runtime improvement
+
+Runtime 쪽에 고칠 것이 있는지는 **아직 분명하지 않다.** 다만 두 가지는 값이 있다.
+
+- 오케스트레이터가 SIGTERM/SIGHUP을 받았을 때 **최소한의 종료 기록**(어느 단계에서 무엇을
+  하다 멈췄는지)을 남기면, 이번 같은 외부 종료가 "진단 없음"이 아니라 "외부 종료됨"으로
+  구분된다. 지금은 OBS-020의 깨끗한 중단과 구별되지 않는다.
+- OBS-024가 고쳐지면 이런 중단의 판별이 훨씬 쉬워진다 — 표식의 pid로 "정말 죽었는지"를
+  Runtime이 스스로 답할 수 있다.
+
+**Field-Test Principle에 따라 지금은 Runtime을 고치지 않는다.** 근거 2건이며 원인이
+Runtime 밖일 가능성이 크다. 같은 현상이 **독립 터미널 실행에서도** 재현되면 그때 다시 본다.
+
+### Evidence
+
+```text
+.loop-local/runs/RUN-20260904T044650Z-TASK-048/   context.md · manifest.json 뿐
+.loop-local/runs/RUN-20260904T063452Z-TASK-052/   context.md · manifest.json 뿐
+   두 Run 모두 runtime-envelope.json · worker-result.json · recovery/ 없음
+.loop-local/executions/active/TASK-048.json · TASK-052.json   stale 표식 (pid는 죽은 프로세스)
+EXEC-20260904T051855Z-TASK-048   RECOVERY_AMBIGUOUS · attempts 0 · LLM 0 · $0.00
+EXEC-20260904T065048Z-TASK-052   RECOVERY_AMBIGUOUS · attempts 0 · LLM 0 · $0.00
+독립 터미널 재실행                 남은 3 Task · 38분 25초 · 중단 없음
+```
+
+### Status
+
+`OBSERVED` — 원인 미확정. Runtime 밖일 가능성이 크다.
+
 ---
 
 
@@ -2214,6 +2486,8 @@ OBS-003 이후 필드 노트는 per-Task worktree isolation을 후보로 적어 
 | CI-012 | timeout 집행이 monotonic clock 기준인지 확인하고, envelope에 초과분을 명시 기록 | OBS-016, **OBS-023 (1800s 설정 / 8619s 실행 · 4.8배)** | Medium | CANDIDATE |
 | CI-013 | `status`의 정지 표시가 **다음 명령**을 함께 말한다 (`PAUSE_ACTIVE` + 진단 있음 → PAUSE 해제 후 `execute`) | OBS-019, OBS-020, **OBS-022** | Medium | CANDIDATE |
 | CI-014 | `loopctl pause` / `loopctl resume`를 CLI에 노출 (현재는 파일을 직접 만들고 지우며 `help`에 없다) | OBS-022 | Low | CANDIDATE |
+| CI-015 | **Worker 단계 동안 heartbeat를 갱신하고, STALE을 말하기 전에 표식의 `pid`로 프로세스 생존을 확인한다.** 살아 있을 수 있는 실행에는 회수 명령을 제안하지 않는다 | **OBS-024 (CI-008이 남긴 구멍 — 표식·pid·판정 로직은 들어갔으나 갱신과 생존 확인이 없다)** | **High** | CANDIDATE |
+| CI-016 | 오케스트레이터가 SIGTERM/SIGHUP에서 최소한의 종료 기록을 남겨 **외부 종료**를 깨끗한 중단과 구별한다 | OBS-025 (근거 2건 · 원인 미확정) | Low | CANDIDATE |
 
 권장 Status:
 
