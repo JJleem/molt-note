@@ -2,9 +2,11 @@
 //!
 //! ```text
 //! markdown.rs   Recording + Transcript + (선택) Structured Note → 결정론적 Markdown 문자열
+//! ai_request.rs 같은 입력 + mode → 사람이 자기 AI 채팅으로 가져가는 산출물 셋 (ADR-0010)
 //! filename.rs   Recording의 created_at + title → 결정론적이고 안전한 파일 이름 하나
 //! file.rs       (디렉터리 · 이름 · 문자열) → 실제로 쓰인 파일 하나 (덮어쓰지 않는다)
-//! run.rs        저장소에서 읽어 위 셋을 잇는 실행 순서
+//! run.rs        저장소에서 읽어 Markdown export를 잇는 실행 순서
+//! handoff.rs    같은 방식으로 ai_request.rs를 잇는 실행 순서 (ADR-0010 §8)
 //! ```
 //!
 //! **파일이 있는 자리는 [`file`] 하나다.** [`markdown`]과 [`filename`]은 값에서 값을 만들 뿐이라
@@ -29,16 +31,20 @@
 //!
 //! [`StructuredNote`]: crate::ai::note::StructuredNote
 
+pub mod ai_request;
 pub mod file;
 pub mod filename;
+pub mod handoff;
 pub mod markdown;
 pub mod run;
 
+pub use ai_request::AiRequest;
 pub use file::{write_new, WrittenFile};
 pub use run::export;
 
 pub use filename::{
-    export_file_name, slug, MARKDOWN_EXTENSION, MAX_SLUG_BYTES, UNKNOWN_DATE, UNTITLED_SLUG,
+    ai_request_file_name, export_file_name, slug, AI_REQUEST_MARKER, MARKDOWN_EXTENSION,
+    MAX_SLUG_BYTES, UNKNOWN_DATE, UNTITLED_SLUG,
 };
 pub use markdown::{
     format_timestamp_ms, render, ExportDocument, MEETING_SECTIONS, STUDY_SECTIONS,

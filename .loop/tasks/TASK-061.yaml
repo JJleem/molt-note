@@ -1,0 +1,55 @@
+# UI 기반 — 타입 · 여백 · accent · 상태 · focus 토큰과 최소 primitive
+# Runtime이 PLAN-20260904T075433Z 승인 시점에 생성했다 (proposal P7). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-061
+status: DONE
+
+request: |-
+  `src/App.css`에 **작은 내부 UI 기반**을 만든다. 큰 서드파티 디자인 시스템을 들이지 않고, 이미 있는 것을 규칙으로 끌어올린다. 더할 것은 다섯이다 — (1) **타이포그래피 스케일**: `page title · section title · body · secondary · caption` 위계를 토큰으로 정의한다. (2) **여백 스케일**: 작고 일관된 값 집합(예: 4 · 8 · 12 · 16 · 24 · 32, 정확한 값은 구현 결정)을 토큰으로 정의한다. (3) **accent와 상태색**: `accent · success · warning · danger` 토큰. accent는 주 동작 · 활성 네비게이션 · 의미 있는 상태 강조에만 쓴다. (4) **보이는 focus 상태**: 지금 저장소에 `:focus` 스타일이 0곳이다 — 키보드로 이동할 때 어디에 있는지 보이게 한다. (5) **컨트롤과 상태의 시각 규칙**: 버튼 `Primary · Secondary · Ghost/Text` + 정말 필요한 곳의 `Danger`, text input · select · toggle · 검증/오류 표현, `idle · working · success · warning · error · disabled` 상태, 빈 상태와 로딩 표시. **이미 있는 것을 깨뜨리지 않는다** — 색 토큰 6개와 `prefers-color-scheme` dark 블록은 그대로 두고, **새로 더하는 토큰은 dark 블록에도 함께 정의한다**. `border-radius`는 이미 5px 하나로 통일돼 있으므로 바꿀 이유가 없으면 그대로 둔다. gradient · glassmorphism · 과한 그림자 · 장식적 애니메이션을 넣지 않는다. 애니메이션은 상태 전이를 분명하게 할 때만 쓴다. 이 Task는 CSS 기반을 만드는 일이며 화면 마크업을 바꾸는 것은 다음 Task다 — 다만 기존 화면이 그대로 렌더되도록 기존 클래스를 깨뜨리지 않는다.
+
+execution:
+  role: impl
+
+stop_condition:
+  gates: [build, lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 2
+
+acceptance_criteria:
+  - id: AC-1
+    description: |-
+      build Gate가 통과한다.
+    verification:
+      type: gate
+      ref: build
+  - id: AC-2
+    description: |-
+      lint Gate가 통과한다.
+    verification:
+      type: gate
+      ref: lint
+  - id: AC-3
+    description: |-
+      test Gate가 통과하고 기존 테스트가 하나도 깨지지 않았다.
+    verification:
+      type: gate
+      ref: test
+  - id: AC-4
+    description: |-
+      타입 스케일 · 여백 스케일 · accent · 상태색(success · warning · danger) 토큰이 정의돼 있고, 새로 더한 색 토큰이 dark 블록에도 정의돼 있어 기존 dark mode 장치가 깨지지 않았다.
+    verification:
+      type: verifier
+  - id: AC-5
+    description: |-
+      보이는 focus 상태가 존재하고, 버튼 3종(+필요한 Danger) · 입력 · 상태 · 빈 상태 · 로딩의 시각 규칙이 정의돼 있다.
+    verification:
+      type: verifier
+  - id: AC-6
+    description: |-
+      gradient · glassmorphism · 과한 그림자 · 장식적 애니메이션이 들어가지 않았고, border-radius 5px 통일과 기존 색 토큰 6개가 유지된다.
+    verification:
+      type: verifier
+
+evidence: []
+
+failure_memo: []

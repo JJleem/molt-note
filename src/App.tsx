@@ -46,7 +46,7 @@ function App() {
       <main className="main">
         <header className="header">
           {canGoBack(nav) && (
-            <button type="button" className="header__back" onClick={back}>
+            <button type="button" className="btn btn--ghost header__back" onClick={back}>
               Back
             </button>
           )}

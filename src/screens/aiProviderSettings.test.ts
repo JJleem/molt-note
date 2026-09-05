@@ -12,18 +12,24 @@ import type { AiProviderStatus, Settings } from '../ipc/types';
 import {
   AI_BASE_URL_NOTICE,
   AI_CHECK_FAILED_TEXT,
+  AI_IS_OPTIONAL_TEXT,
   AI_NOT_CHECKED_TEXT,
+  AI_SECTION_TITLE,
   AI_PROVIDER_HAS_NO_MODELS_TEXT,
   AI_PROVIDER_NOT_RUNNING_TEXT,
   AI_PROVIDER_RUNNING_TEXT,
   AI_SETTINGS_UNAFFECTED_NOTICE,
+  AI_WITHOUT_A_PROVIDER_TEXT,
   AUDIO_IS_NEVER_SENT,
+  CONNECTED_PROVIDER_TEXT,
+  CONNECTED_PROVIDER_TITLE,
   MISSING_AI_MODEL_NOTICE,
   MISSING_AI_MODEL_SUFFIX,
   NO_AI_MODEL,
   NO_AI_MODEL_CHOSEN_NOTICE,
   NO_AI_PROVIDER,
   NO_AI_PROVIDER_TEXT,
+  OPTIONAL_TITLE_SUFFIX,
   UNKNOWN_AI_PROVIDER_LABEL,
   aiModelNotice,
   aiModelOptions,
@@ -35,6 +41,7 @@ import {
   checkedAiProvider,
   confirmedAiModels,
   failedAiCheck,
+  localProviderSetups,
   type AiConnection,
 } from './aiProviderSettings';
 import {
@@ -141,6 +148,106 @@ describe('provider 선택지', () => {
 
     expect(ollama?.locality).toBe('local');
     expect(ollama?.label).toContain('runs on this device');
+  });
+});
+
+describe('구역의 두 부분 (요구 7 · ADR-0010 §4.3)', () => {
+  /** 이 앱이 고르게 하지 않는 벤더들. 재배치가 새 provider를 데려오지 않았다는 것을 본다. */
+  const OTHER_VENDORS = /openai|gpt|anthropic|claude|gemini|codex|groq|mistral|huggingface/i;
+
+  it('스스로 세우는 provider의 이름과 로컬 표시가 provider 목록에서 나온다 (INV-9 · INV-5)', () => {
+    // 벤더 이름을 두 번째로 적는 자리를 만들지 않는다. 제목은 선택지 label 그대로에
+    // '선택'이라는 표시만 붙은 것이어야 한다.
+    const setups = localProviderSetups(NO_AI_PROVIDER);
+
+    expect(setups.length).toBeGreaterThan(0);
+    for (const setup of setups) {
+      const choice = aiProviderChoices(NO_AI_PROVIDER).find((one) => one.value === setup.id);
+
+      expect(choice, '목록에 없는 provider가 이 부분에 있다').toBeDefined();
+      expect(choice?.locality).toBe('local');
+      expect(setup.title).toBe(`${choice?.label}${OPTIONAL_TITLE_SUFFIX}`);
+      expect(setup.title).toContain('runs on this device');
+    }
+  });
+
+  it('재배치가 새 provider를 데려오지 않았다 (요구 8)', () => {
+    const values = aiProviderChoices(NO_AI_PROVIDER).map((choice) => choice.value);
+    const setups = localProviderSetups(NO_AI_PROVIDER);
+
+    // 고를 수 있는 것은 그대로다 — 이 부분은 목록에서 걸러 오기만 한다.
+    for (const setup of setups) {
+      expect(values).toContain(setup.id);
+    }
+    // 그리고 어느 문장도 다른 벤더를 부르지 않는다 (MH-6).
+    for (const setup of setups) {
+      for (const sentence of [
+        setup.title,
+        setup.standing,
+        setup.text,
+        setup.statusText,
+        setup.howToTurnOn,
+      ]) {
+        expect(sentence).not.toMatch(OTHER_VENDORS);
+      }
+    }
+  });
+
+  it('선택이고 고급이라는 것이 자리가 아니라 문장으로 있다 (요구 7)', () => {
+    const [setup] = localProviderSetups(NO_AI_PROVIDER);
+
+    expect(setup.standing).toMatch(/optional/i);
+    expect(setup.standing).toMatch(/advanced/i);
+    // 설치와 실행의 주체가 사용자이고, 앱이 그것을 필요로 하지 않는다는 사실.
+    expect(setup.text).toMatch(/yourself/i);
+    expect(setup.text).toMatch(/does not need it/i);
+    // 켜라는 요구가 아니라 켜는 방법이다.
+    expect(setup.howToTurnOn).toMatch(/to use it/i);
+  });
+
+  it('고르지 않은 상태가 결함이 아니라 정상으로 적힌다 (INV-8)', () => {
+    const [notChosen] = localProviderSetups(NO_AI_PROVIDER);
+    const [chosen] = localProviderSetups('ollama');
+
+    expect(notChosen.chosen).toBe(false);
+    expect(chosen.chosen).toBe(true);
+    // 두 상태의 문장이 다르다 — 화면이 둘을 같은 말로 뭉치지 않는다.
+    expect(notChosen.statusText).not.toBe(chosen.statusText);
+    // 그리고 고르지 않은 쪽이 오류의 언어를 쓰지 않는다.
+    expect(notChosen.statusText).not.toMatch(/error|failed|must|required|missing/i);
+    expect(notChosen.statusText).toMatch(/nothing in the app is waiting/i);
+  });
+
+  it('고른 값이 무엇이든 이 부분이 값을 바꾸지 않는다', () => {
+    // 여기에는 편집할 값도 누를 버튼도 없다 — 고른 provider가 바뀌면 달라지는 것은
+    // '지금 고른 것인가'와 그 문장뿐이다 (MH-8).
+    const notChosen = localProviderSetups(NO_AI_PROVIDER)[0];
+    const chosen = localProviderSetups('ollama')[0];
+    const unknown = localProviderSetups('어떤-다른-provider')[0];
+
+    expect(unknown.chosen).toBe(false);
+    for (const other of [chosen, unknown]) {
+      expect(other.id).toBe(notChosen.id);
+      expect(other.title).toBe(notChosen.title);
+      expect(other.standing).toBe(notChosen.standing);
+      expect(other.text).toBe(notChosen.text);
+      expect(other.howToTurnOn).toBe(notChosen.howToTurnOn);
+    }
+  });
+
+  it('구역 전체가 선택이라는 사실이 먼저 오고, provider 없이도 쓸 길이 있다고 말한다', () => {
+    // 구역의 이름은 특정 provider의 이름이 아니다.
+    expect(AI_SECTION_TITLE).not.toMatch(/ollama/i);
+    expect(AI_SECTION_TITLE).not.toMatch(OTHER_VENDORS);
+
+    expect(AI_IS_OPTIONAL_TEXT).toMatch(/optional/i);
+    // 첫 부분은 '연결된 provider'이고, 고르지 않은 것이 고칠 일이 아니라고 적혀 있다.
+    expect(CONNECTED_PROVIDER_TITLE).toMatch(/connected provider/i);
+    expect(CONNECTED_PROVIDER_TEXT).toMatch(/normal state/i);
+    // provider가 없어도 AI를 쓸 길이 있다는 사실. 벤더를 부르지 않는다 (MH-1 · MH-2 · MH-6).
+    expect(AI_WITHOUT_A_PROVIDER_TEXT).toMatch(/ai chat you already use/i);
+    expect(AI_WITHOUT_A_PROVIDER_TEXT).not.toMatch(OTHER_VENDORS);
+    expect(AI_WITHOUT_A_PROVIDER_TEXT).not.toMatch(/ollama/i);
   });
 });
 

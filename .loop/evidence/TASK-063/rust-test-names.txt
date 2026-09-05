@@ -1,0 +1,19 @@
+
+
+running 15 tests
+test mh1_mh2_the_command_boundary_cannot_read_a_provider_or_the_ai_settings ... ok
+test mh3_no_code_on_the_copy_and_export_path_can_reach_the_network ... ok
+test mh5_no_code_on_this_path_can_pick_a_transcript_version_by_itself ... ok
+test mh6_no_vendor_name_or_vendor_schema_is_in_the_domain_and_payload_types ... ok
+test mh4_the_types_on_this_path_have_no_place_to_carry_audio ... ok
+test mh7_the_command_boundary_has_no_way_to_write_to_the_repository ... ok
+test the_source_checks_actually_read_the_code_they_claim_to_read ... ok
+test mh4_no_audio_path_and_no_audio_format_reaches_the_outputs_or_the_written_file ... ok
+test mh7_a_place_that_cannot_be_written_changes_nothing_either ... ok
+test mh6_no_vendor_name_reaches_the_outputs_or_the_written_file ... ok
+test mh1_mh2_a_configured_but_absent_provider_changes_none_of_the_three ... ok
+test mh1_mh2_all_three_outputs_are_produced_with_no_ai_provider_configured ... ok
+test mh8_the_connected_provider_path_still_makes_notes_next_to_the_manual_path ... ok
+test mh5_the_three_outputs_follow_the_current_pointer_and_nothing_else ... ok
+test mh7_four_failures_leave_the_database_bytes_and_the_exported_files_untouched ... ok
+

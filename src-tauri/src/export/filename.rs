@@ -76,6 +76,34 @@ pub fn export_file_name(created_at: &str, title: &str) -> String {
     format!("{date}{SEPARATOR}{}.{MARKDOWN_EXTENSION}", slug(title))
 }
 
+/// AI-ready 문서의 이름에만 들어가는 **고정 표식** (ADR-0010 §5.6).
+///
+/// 같은 Recording의 Markdown export와 이름이 같으면 서로 다른 두 문서가 `-2` 접미사로만
+/// 구분되고, 그 상태에서는 파일 목록만 보고 무엇이 무엇인지 알 수 없다.
+pub const AI_REQUEST_MARKER: &str = "-ai-request";
+
+/// 같은 Recording의 **AI-ready 문서**가 가질 파일 이름 —
+/// `2026-09-01-3dgs-study-04-ai-request.md` (ADR-0010 §5.6).
+///
+/// **두 번째 이름 규칙을 만들지 않는다.** 날짜 · 슬러그 · `unknown-date` · Windows 예약 이름 ·
+/// 80바이트 상한은 전부 [`export_file_name`] 한 자리에 그대로 있고, 여기서 더하는 것은 확장자
+/// 앞의 [`AI_REQUEST_MARKER`] 하나뿐이다. 표식 11바이트는 ADR-0009 §4.2가 남겨 둔 여유 안에
+/// 들어간다 [A].
+///
+/// 같은 이름이 이미 쓰이고 있는지는 여기서 알 수 없다 — 그 판단은
+/// [`super::file::write_new`]의 몫이며, 덮어쓰지 않고 번호를 붙인다 (ADR-0009 §4.3).
+pub fn ai_request_file_name(created_at: &str, title: &str) -> String {
+    let name = export_file_name(created_at, title);
+    let extension = format!(".{MARKDOWN_EXTENSION}");
+
+    match name.strip_suffix(&extension) {
+        Some(stem) => format!("{stem}{AI_REQUEST_MARKER}{extension}"),
+        // [`export_file_name`]은 언제나 확장자를 붙이므로 여기 오지 않는다. 그래도 이름을
+        // 만들지 못하는 대신 표식을 붙인 이름을 낸다 — 파일 이름 하나 때문에 앱이 멈추지 않는다.
+        None => format!("{name}{AI_REQUEST_MARKER}"),
+    }
+}
+
 /// 제목을 파일 이름에 쓸 수 있는 조각으로 정규화한다 (ADR-0009 §4.2의 슬러그 규칙).
 ///
 /// 결과는 **언제나 비어 있지 않고**, 유니코드 문자/숫자와 `-`만으로 이루어진다. 그래서
@@ -168,6 +196,56 @@ mod tests {
         assert_eq!(
             export_file_name("2026-09-01T10:00:00.000Z", "///"),
             "2026-09-01-untitled.md"
+        );
+    }
+
+    // ── AI-ready 문서의 이름 (ADR-0010 §5.6) ─────────────────────────────────────
+
+    #[test]
+    fn the_ai_request_name_is_the_export_name_with_one_marker_before_the_extension() {
+        assert_eq!(
+            ai_request_file_name("2026-09-01T10:00:00.000Z", "3DGS Study #04"),
+            "2026-09-01-3dgs-study-04-ai-request.md"
+        );
+        // 같은 Recording의 두 문서가 **이름에서** 구분된다 — `-2` 접미사에 기대지 않는다.
+        assert_ne!(
+            ai_request_file_name("2026-09-01T10:00:00.000Z", "3DGS Study #04"),
+            export_file_name("2026-09-01T10:00:00.000Z", "3DGS Study #04")
+        );
+    }
+
+    #[test]
+    fn the_ai_request_name_inherits_every_rule_of_the_export_name() {
+        for (created_at, title) in [
+            ("2026-09-01T10:00:00.000Z", "회의: 로드맵 / Q4 🎯"),
+            ("2026-09-01T10:00:00.000Z", "///"),
+            ("어제", "con"),
+            ("", "../../etc/passwd"),
+            ("2026-09-01", &"가".repeat(200)),
+        ] {
+            let name = ai_request_file_name(created_at, title);
+            let exported = export_file_name(created_at, title);
+
+            assert_is_a_safe_file_name(&name);
+            assert_eq!(
+                name,
+                format!(
+                    "{}{AI_REQUEST_MARKER}.{MARKDOWN_EXTENSION}",
+                    exported
+                        .strip_suffix(".md")
+                        .expect("export 이름은 언제나 .md로 끝난다")
+                ),
+                "표식 하나만 더한다: {title}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_same_recording_always_gets_the_same_ai_request_name() {
+        // 시계도 난수도 파일시스템도 보지 않는다 — export 이름과 같은 성질이다.
+        assert_eq!(
+            ai_request_file_name("2026-09-01T10:00:00.000Z", "3DGS Study #04"),
+            ai_request_file_name("2026-09-01T10:00:00.000Z", "3DGS Study #04")
         );
     }
 

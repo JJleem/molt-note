@@ -3,7 +3,9 @@
 이 문서는 프로젝트의 **최상위 지도**다. 상세 구현 문서가 아니라 진입점이다.
 상세는 §8의 문서로 넘긴다.
 
-> **현재 상태: Phase 5 완료 (2026-09-04).** 앱 셸 · 로컬 영속성 · §7 데이터 모델 ·
+> **현재 상태: Phase 5.5 완료 (2026-09-06) — engineering DONE · Human Review 미실행.**
+> (직전 상태: Phase 5 완료 · 2026-09-04. 아래 서술은 그 위에 쌓인다.)
+> 앱 셸 · 로컬 영속성 · §7 데이터 모델 ·
 > 네 화면 navigation에 더해, **녹음 lifecycle(Record/Pause/Resume/Stop) · 파일 확정 ·
 > Recording 영속화 · 재생**이 구현되고 자동 검증을 통과했다.
 >
@@ -15,11 +17,26 @@
 > 여기에 **나가는 문**이 더해졌다 — `export::Document` 하나에서 갈라지는 **Markdown 파일
 > export**와 **Notion sync**(Markdown Content API · 무손실 분할 · SecretStore).
 >
-> ⚠️ **그러나 실제 하드웨어/추론/추론서버/워크스페이스에서 확인된 적이 없다.**
+> 그리고 그 문에서 **세 번째 갈래**가 났다 — **Manual AI Handoff**(Phase 5.5).
+> AI Provider가 하나도 없어도 사람이 Transcript를 자기 AI 채팅으로 가져갈 수 있다
+> (Copy AI Prompt · Copy Transcript · Export for AI). 같은 Phase에서 화면이 딛고 설
+> **UI 기반**(타입·여백 스케일 · accent/상태색 · 보이는 focus · 빈 상태 · 로딩)이 생겼고,
+> 로컬 Ollama provider는 **삭제가 아니라 '선택적 · 로컬 · 고급'으로 재배치**됐다.
+>
+> ⚠️ **그러나 실제 하드웨어/추론서버/워크스페이스/AI 채팅에서 확인된 적이 거의 없다.**
 > 미확정 전제가 **넷**이다 — `A-REC-001`(실제 마이크 미검증) ·
-> `A-TRANS-001`(실제 Whisper 추론 미실행) · `A-AI-001`(실제 Ollama 미호출) ·
+> `A-TRANS-001`(실제 Whisper 추론이 **제품 경로에서 쓸 수 있게 동작한 적이 없다** — 아래) ·
+> `A-AI-001`(실제 Ollama 미호출) ·
 > `A-NOTION-001`(**실제 Notion 워크스페이스로 요청이 나간 적이 없다**).
 > 넷 다 Final Integration의 hard human gate로 연기됐다.
+> Phase 5.5는 여기에 **`A-` 가정을 더하지 않았다**(D-4) — 대신 자동으로 판정할 수 없는
+> **Human Review 항목 셋**을 남겼다 (`docs/PHASE-5.5-HUMAN-REVIEW.md`. 기록표는 **비어 있다**).
+>
+> ⚠️ **2026-09-05에 운영자가 처음으로 앱을 실행해 실제 전사를 돌렸다** (72분 한국어 회의).
+> 엔진 경로 자체는 지났으나(segments · timestamp · 재시작 생존) **언어가 설정되지 않아
+> 한국어가 영어로 강제 디코딩됐고 결과는 사용할 수 없었다.** `A-TRANS-001`은 해소되지
+> **않았다.** 기록은 `docs/PHASE-3-TRANSCRIPTION-SMOKE-TEST.md` 부록, 수정은 Phase 5.6
+> (`phase-prompt/05.6-transcription-correctness-and-reach.md` · PLANNED)이 맡는다.
 >
 > 갱신 이력:
 > - 2026-09-01 Bootstrap — 개발 baseline과 Gate 확보
@@ -28,6 +45,9 @@
 > - **2026-09-02 Phase 1 DONE** — §1 ~ §9를 실제 구현 기준으로 갱신
 > - **2026-09-04 Phase 4 DONE** — §1 · §3 · §4 · §5 · §6 · §7 · §8 · §9에 AI Provider 경계 반영
 > - **2026-09-04 Phase 5 DONE** — Markdown export · Notion sync · SecretStore 경계 반영
+> - **2026-09-06 Phase 5.5 DONE** — Manual AI Handoff 경계 · clipboard 경계 · UI 기반 ·
+>   Ollama 재배치 반영 (§1 · §2 · §3 · §5 · §6 · §7 · §8 · §9). Phase 5.5는 **로드맵에 없던
+>   삽입**이며(운영자 결정 2026-09-04) `PRODUCT-SPEC.md` §9.7 · §14.5.1 · §21이 함께 갱신됐다
 
 ---
 
@@ -69,7 +89,9 @@ Linux와 모바일은 범위 밖이다 (`PRODUCT-SPEC.md` §3).
 | **⚠️ 구현됐으나 실제 추론 미실행** | 전사 경로 전체. `whisper-rs`가 링크돼 있고 자동 검증을 지나지만 **실제 모델로 추론한 적이 없다** (`A-TRANS-001`) |
 | **⚠️ 구현됐으나 실제 호출 미실행** | AI Note 경로 전체. 계약 · adapter · 화면이 자동 검증을 지나지만 **실제 Ollama에 요청을 보낸 적이 한 번도 없다** (`A-AI-001` · `docs/PHASE-4-AI-NOTE-REVIEW.md` §10.2) |
 | **⚠️ 구현됐으나 실제 전송 미실행** | Notion sync 경로 전체. adapter · 분할 · SecretStore · 화면이 자동 검증을 지나지만 **실제 Notion 워크스페이스로 요청을 보낸 적이 없다** (`A-NOTION-001` · `docs/PHASE-5-NOTION-SMOKE-TEST.md` §10.1) |
-| **다음 단계 (PLANNED)** | Phase 6 — Cross-platform Validation & Hardening (Windows) |
+| **지금 동작한다 (DONE · 자동 검증 기준) — Phase 5.5** | **AI Provider를 하나도 설정하지 않아도** Recording Detail에서 Manual 프롬프트와 Transcript 텍스트를 복사하고, AI-ready 문서를 `exports/`에 파일로 꺼낼 수 있다. 세 산출물은 결정론적 순수 함수의 결과이며 파일 쓰기까지 임시 디렉터리에서 실제로 검증된다. 화면은 타입·여백 스케일 · accent/상태색 · 보이는 focus · 공통 빈 상태 · 로딩 위에 선다 |
+| **⚠️ 구현됐으나 실물 미확인 — Phase 5.5** | **clipboard 쓰기가 실제 webview에서 동작하는지 확인된 적이 없다** (ADR-0010 §7.4 · §12.4 — 여섯 항목 전부 UNVERIFIED). 자동 테스트는 언제나 test double을 쓴다. **사람이 산출물을 실제 외부 AI 채팅에 붙여 넣은 적도 없다.** clipboard가 거절돼도 Export for AI가 대체 경로로 남도록 설계돼 있다 (ADR-0010 §7.5) |
+| **다음 단계 (PLANNED)** | Phase 5.6 — 전사 정확도 결함 수정(언어 미설정 · Metal) → Phase 6 — Cross-platform Validation & Hardening (Windows) |
 | **미룬 것 (DEFERRED)** | **Cloud AI Providers (Claude · Gemini · Groq)** · search · tags · processing queue · menu bar (`PRODUCT-SPEC.md` §16) |
 | **후보 (CANDIDATE)** | recording engine (§4) · whisper 통합 방식 (§4) · persistence crate (§4) |
 
@@ -117,15 +139,38 @@ Send to Notion (명시적 opt-in · INV-5)
   ↓  긴 문서는 안전한 경계에서 나뉘어 순서대로 전송되고, 조용히 잘리지 않는다
   ↓  429/529는 Retry-After를 존중한다. 부분 실패 뒤 재시도는 같은 페이지에서 이어간다
 NotionSync (recordingId · pageId · syncedAt · status · error) — Recording 1개 ↔ 페이지 1개
+
+━━━━━━━━━ Manual AI Handoff — provider가 하나도 없어도 여기는 열려 있다 (Phase 5.5) ━━━━━━━━━
+
+AI Note 탭 (두 줄)
+  ├─ 자동으로 만들기 : 연결된 provider로 생성            ← 위의 경로. 선택이다
+  └─ 내 AI로 하기    : provider를 보지 않는다 (MH-1 · MH-2)
+        ↓
+   current Transcript (§7.2) ─→ export::ai_request (순수) ─┬─→ Manual 프롬프트 문자열
+        ↑ 고르는 규칙은 export::run::current_input 하나     ├─→ Transcript 텍스트
+                                                            └─→ AI-ready Markdown 문서
+        ↓                                                          ↓
+   platform/clipboard.ts (프론트 경계 하나)              export::file::write_new
+        ↓  실패는 값으로 돌아온다 — 능력 없음 / 거절이 갈린다     ↓
+   "복사됨" 또는 무엇이 실패했는지 + 재시도 + Export for AI   exports/…-ai-request.md
+        ↓
+   (사람이) 자기 AI 채팅에 붙여 넣거나 파일을 첨부한다   ← 앱은 여기서 아무것도 보내지 않는다 (MH-3)
 ```
 
-**아직 없는 것(PLANNED):** Windows 실동작 검증 (Phase 6).
+**이 갈래가 저장소에 쓰는 것은 없다** — `ai_notes` 행도 `promptVersion`도 만들지 않는다
+(MH-7 · ADR-0010 §6.4). 파일시스템에 닿는 자리는 `write_new` 하나이며 기존 파일을 덮어쓰지
+않는다. 채팅에서 받은 답을 앱으로 되돌리는 import 경로는 **없다.**
 
-⚠️ 위 흐름 중 **전사 · AI 생성 · Notion 전송은 실제로 실행된 적이 없다** —
-`whisper` 추론(`A-TRANS-001`) · Ollama 호출(`A-AI-001`) · Notion 요청(`A-NOTION-001`)
-모두 자동 검증에서는 fixture와 stub으로만 지나간다.
-**Markdown 파일 export는 실제 파일 쓰기까지 자동 검증이 지나간다** — 임시 디렉터리에서
-실물 파일을 만들고 내용을 확인한다. 이 경로에는 외부 의존이 없다.
+**아직 없는 것(PLANNED):** 전사 정확도 수정 (Phase 5.6) · Windows 실동작 검증 (Phase 6).
+
+⚠️ 위 흐름 중 **AI 생성 · Notion 전송은 실제로 실행된 적이 없다** —
+Ollama 호출(`A-AI-001`) · Notion 요청(`A-NOTION-001`)은 자동 검증에서 fixture와 stub으로만
+지나간다. **전사는 2026-09-05에 한 번 실제로 실행됐으나 제품 경로가 쓸 수 있는 결과를 내지
+못했다**(언어 미설정 · 위 상태 블록) — `A-TRANS-001`은 여전히 열려 있다.
+**Markdown 파일 export와 Manual AI Handoff의 Export for AI는 실제 파일 쓰기까지 자동 검증이
+지나간다** — 임시 디렉터리에서 실물 파일을 만들고 내용을 확인한다. 이 두 경로에는 외부
+의존이 없다. **다만 clipboard 쓰기는 그렇지 않다** — 자동 테스트는 언제나 test double을 쓰며,
+실제 webview에서의 동작은 UNVERIFIED다 (ADR-0010 §12.4).
 
 전체 목표 흐름은 `docs/PRODUCT-SPEC.md` §4에 있다.
 
@@ -162,6 +207,12 @@ NotionSync (recordingId · pageId · syncedAt · status · error) — Recording 
 | **`platform/secret_store.rs`** | **SecretStore 경계 하나** — 닫힌 `SecretKey` · 재현되지 않는 `Secret` 타입. macOS 구현 · Windows 구현 자리 · 메모리 test double. token은 SQLite에도 frontend에도 없다 (INV-7 · INV-10) | **DONE** (⚠️ Windows 검증은 Phase 6) |
 | **`commands/notion.rs`** | `start` · `status` · `check_connection` · `save_token` · `delete_token`. **저장된 token을 돌려주는 command가 없다** | **DONE** |
 | **Detail의 Export/Send · 목록의 sync 상태 · Settings의 Notion 구역** | Markdown export · Send to Notion · sync 상태 표시 · connection test · destination 설정 | **DONE** (⚠️ 실행 화면 미확인) |
+| **`export/ai_request.rs`** | **Manual AI Handoff의 순수 렌더러** — Manual 프롬프트 · Transcript 텍스트 · AI-ready 문서 셋을 만든다. 파일도 clipboard도 네트워크도 저장소도 시계도 없다. 프롬프트 상수는 **읽기만** 하고(치환 두 번), transcript·메타데이터 렌더링은 `markdown.rs`의 함수를 부른다 — 두 번째 렌더링 규칙이 없다 | **DONE** |
+| **`export/handoff.rs`** | 그 셋을 저장소·파일시스템과 잇는 실행 순서. `current_transcript_id`가 가리키는 Transcript만 읽고(MH-5), 저장소에 쓰지 않으며, 파일은 `write_new` 하나로만 만든다 | **DONE** |
+| **`commands/export.rs`의 세 이름** | `get_ai_prompt` · `get_transcript_text` · `export_ai_request`. 등록 command 28 → **31**. **`transcriptId`를 받지 않는다** — 옛 version을 고를 수단이 wire에 없다 (ADR-0010 §8.2) | **DONE** |
+| **`src/platform/clipboard.ts`** | **webview의 clipboard 쓰기를 아는 유일한 자리** (INV-10). 새 의존성 · 새 command · 새 `FailureKind` 없이 `navigator.clipboard`를 한 줄에서 집는다. 실패는 던지지 않고 값으로 돌아오며 `unavailable`/`rejected`가 갈린다 | **DONE** (⚠️ 실제 webview 동작 UNVERIFIED · ADR-0010 §12.4) |
+| **`screens/copyView.ts` · `screens/aiHandoffView.ts`** | 복사 한 번의 상태·표시와 AI Note 탭의 **두 줄**(자동으로 만들기 / 내 AI로 하기)을 정하는 순수 모듈. **입력 타입에 provider를 담을 자리가 없다** — provider 부재로 아래 줄이 막힐 수단 자체가 없다 (MH-1 · INV-8) | **DONE** |
+| **UI 기반 (`src/App.css` · `EmptyState` · `Loading`)** | 타입 스케일 다섯 위계 · 여백 스케일 여섯 · accent/상태색 · 보이는 `:focus` · 공통 빈 상태와 로딩. 새 색 토큰은 dark 블록에도 정의된다. **radius(5px)는 이미 통일돼 있어 그대로 뒀다.** gradient · glassmorphism · 과한 그림자 · 장식 애니메이션은 테스트가 막는다 | **DONE** (⚠️ 실행 화면의 체감은 사람이 판정 · `docs/PHASE-5.5-HUMAN-REVIEW.md`) |
 | Windows 지원 검증 | §3.1 핵심 기능의 Windows 실동작 | **PLANNED** (Phase 6) |
 
 ---
@@ -204,6 +255,14 @@ NotionSync (recordingId · pageId · syncedAt · status · error) — Recording 
 
 **Notion integration token은 저장소에 없다** — `platform/secret_store.rs`의 경계를 통해 OS
 자격증명 저장소에만 담기고, SQLite에는 secret이 아닌 `notion_parent_page_id`만 있다 (INV-7).
+
+**Phase 5.5는 의존성을 하나도 더하지 않았다** — `package.json`도 `Cargo.toml`도 바뀌지
+않았고, 새 Tauri 권한 항목도 없다. clipboard는 **플랫폼 능력**이지 라이브러리가 아니며,
+webview가 이미 갖고 있(을 것으로 기대되)는 것을 경계 하나 뒤에서 부른다. Tauri clipboard
+플러그인은 **확인하지 못한 세 값**(crate/npm 이름 · 호환 버전 · permission 식별자) 위에
+의존성을 얹는 선택이라 탈락했다 — 필요가 증명되면 그때 얹는다 (ADR-0010 §7.3).
+**Manual AI Handoff는 새 외부 경계를 만들지 않는다** — 나가는 행위의 주체가 사람이므로
+§12의 세 단계 구분(완전 로컬 · 로컬 AI · 외부)이 그대로다.
 
 ---
 
@@ -505,6 +564,73 @@ markdown 엔드포인트 전용 본문 크기 상한             ← UNVERIFIED
 
 Runtime 관찰은 `LOOP-RUNTIME-FIELD-NOTES.md` OBS-022 · OBS-023 · OBS-024.
 
+### Phase 5.5 — Manual AI Handoff + UI Foundation · 2026-09-06 · **engineering DONE · Human Review 미실행**
+
+**로드맵에 없던 삽입이다** (운영자 결정 · 2026-09-04). Phase 5와 Phase 6 사이에 들어갔고,
+**두 가지 제품 방향 변경**을 담는다 — Manual AI Handoff를 정식 제품 기능으로 **추가**하고,
+로컬 Ollama provider를 '첫 provider · 기본 AI 경험'에서 '선택적 · 로컬 · 고급'으로
+**재배치**한다. **재배치는 삭제가 아니다** — Phase 4가 만든 provider 추상화 · adapter ·
+설정 · 연결 확인 · 모델 선택은 **그대로 있다** (MH-8).
+
+Task 11개(TASK-055 ~ TASK-065).
+
+| Task | 결과물 |
+| --- | --- |
+| TASK-055 | `ADR-0010` — 두 방향 변경의 기록 · 산출물 형식 · 프롬프트 재사용 · clipboard 경계 · command 이름과 개수 · MH-1~MH-8의 판정 수단 |
+| TASK-056 | AI-ready 산출물과 Manual 프롬프트를 만드는 **순수 모듈** (`export/ai_request.rs`) |
+| TASK-057 | 세 command 경계와 IPC 계약 (`export/handoff.rs` · `commands/export.rs`) |
+| TASK-058 | clipboard capability 경계 하나와 복사 상태의 순수 판정 (`src/platform/clipboard.ts` · `copyView.ts`) |
+| TASK-059 | AI Note 탭의 위계 변경 — 자동 생성과 Manual Handoff **두 줄** (`aiHandoffView.ts`) |
+| TASK-060 | Settings에서 로컬 provider를 '선택적 · 로컬 · 고급'으로 재배치 |
+| TASK-061 | UI 기반 — 타입 · 여백 · accent · 상태 · focus 토큰과 최소 primitive |
+| TASK-062 | 네 주요 화면을 그 기반 위에 올림 |
+| TASK-063 | MH-1~MH-8 전용 자동 테스트 |
+| TASK-064 | UI 기반 불변 전용 자동 테스트 |
+| TASK-065 | Spec 방향 변경 반영 · ADR 확정 · SYSTEM-MAP · Human Review 절차 문서 |
+
+핵심 성질:
+
+```text
+provider를 담을 자리가 없다  — Manual 경로의 Rust 모듈에도 순수 view 모듈의 입력 타입에도
+                               provider가 없다. 거절할 수단 자체가 없다 (MH-1 · MH-2 · INV-8)
+프롬프트 상수를 고치지 않았다 — 상수 원문에 치환 두 번만 적용한다. PROMPT_VERSION_* 선언값
+                               셋이 그대로이고 이미 저장된 provenance가 거짓이 되지 않는다
+렌더링 규칙이 한 벌이다      — transcript 본문 · 메타데이터 블록 · 제목 한 줄은 markdown.rs
+                               한 자리에 있고, `render`가 내는 바이트는 바뀌지 않았다
+clipboard를 부르는 자리가 하나 — src/platform/clipboard.ts. 새 의존성 · 새 command ·
+                               새 FailureKind 없이. 실패는 값으로 돌아온다
+파일은 덮어쓰지 않는다        — exports/…-ai-request.md. 이름이 겹치면 -2가 붙는다
+저장소에 쓰지 않는다          — ai_notes 행도 promptVersion도 만들지 않는다 (MH-7)
+```
+
+검증: build/lint/test Gate green · **자동 테스트 1,238개** (vitest 494 · Rust 744).
+Phase 종료 Gate는 **저장소 전체**에 세 개를 모두 돌렸다 (2026-09-04 운영자 결정).
+
+**⚠️ IMPLEMENTED / VERIFIED로 기록하지 않는 것:**
+
+```text
+실제 webview에서 clipboard 쓰기가 동작한다        ← NOT RUN (ADR-0010 §7.4의 여섯 항목 전부)
+거절될 때 어떤 예외/값이 오는가                    ← UNVERIFIED
+사람이 산출물을 실제 외부 AI 채팅에 붙여 넣었다    ← NOT RUN
+받아 온 답이 실제로 쓸 만한가                      ← NOT RUN
+화면이 실제로 차분하고 읽기 쉬운가                 ← 사람이 판정한다
+로컬 provider가 '선택적 · 고급'으로 읽히는가       ← 사람이 판정한다
+Windows에서의 clipboard · 화면                     ← Phase 6
+```
+
+절차와 **빈 기록표**는 `docs/PHASE-5.5-HUMAN-REVIEW.md`.
+**`A-` deferred assumption은 더하지 않았다** (D-4) — 위 셋은 주관적 Human Review 항목이지
+`A-REC-001` 계열의 hard 가정이 아니다. 구현 대조는 `ADR-0010` §12.
+
+이 Phase의 입력도 전부 fixture였다 — `A-TRANS-001` · `A-AI-001`이 여전히 유효하기 때문이다.
+
+### Phase 5.6 — Transcription Correctness & Reach · **PLANNED**
+
+2026-09-05 운영자의 첫 실제 전사 실행이 드러낸 결함(언어 미설정 · Metal 미사용)을 메운다.
+새 제품 방향이 아니라 **이미 Spec에 있던 것이 구현되지 않은 자리**다. Goal은
+`phase-prompt/05.6-transcription-correctness-and-reach.md`, 실측 기록은
+`docs/PHASE-3-TRANSCRIPTION-SMOKE-TEST.md` 부록.
+
 ### Phase 6 — Cross-platform Validation & Hardening · **PLANNED**
 ---
 
@@ -512,8 +638,8 @@ Runtime 관찰은 `LOOP-RUNTIME-FIELD-NOTES.md` OBS-022 · OBS-023 · OBS-024.
 
 | | 무엇을 보장하는가 | 수단 |
 | --- | --- | --- |
-| **Automated validation** | 위의 전부 + **Markdown 렌더링 결정성 · 파일명 정규화 · 무손실 분할과 재조립 · Notion 요청 조립과 실패 변환 · `Retry-After` 준수 · 중복 페이지 없는 재시도 · SecretStore 경계** — **자동 테스트 1,081개** (web `vitest` 384 · Rust `cargo test` 697) | `build` · `lint` · `test` Gate + 독립 Verifier<br>Task별 Gate는 최소·관련 범위로 좁힐 수 있으나 **Phase 종료 시에는 저장소 전체에 세 Gate를 모두 돌린다** (2026-09-04 운영자 결정) |
-| **Human validation / witness** | 실제 마이크 음질 · 재생 음질 · **실제 Whisper 추론(`A-TRANS-001`)** · **실제 Ollama 호출과 AI Note의 유용성(`A-AI-001`)** · **실제 Notion 전송과 페이지 품질 · 1시간 transcript 온전성(`A-NOTION-001`)** · export Markdown의 외부 도구 호환성 · **화면의 시각적 완성도** · **Windows 실동작** · **연기된 recording 장치 검증(ADR-0003 §12)** | 사람이 직접 확인 |
+| **Automated validation** | 위의 전부 + **Markdown 렌더링 결정성 · 파일명 정규화 · 무손실 분할과 재조립 · Notion 요청 조립과 실패 변환 · `Retry-After` 준수 · 중복 페이지 없는 재시도 · SecretStore 경계** + **Manual AI Handoff 산출물 셋의 결정성과 기대 문자열 · 프롬프트 상수 불변 · MH-1~MH-8 · clipboard 실패의 값 · UI 기반 다섯 검사** — **자동 테스트 1,238개** (web `vitest` 494 · Rust `cargo test` 744) | `build` · `lint` · `test` Gate + 독립 Verifier<br>Task별 Gate는 최소·관련 범위로 좁힐 수 있으나 **Phase 종료 시에는 저장소 전체에 세 Gate를 모두 돌린다** (2026-09-04 운영자 결정) |
+| **Human validation / witness** | 실제 마이크 음질 · 재생 음질 · **실제 Whisper 추론(`A-TRANS-001`)** · **실제 Ollama 호출과 AI Note의 유용성(`A-AI-001`)** · **실제 Notion 전송과 페이지 품질 · 1시간 transcript 온전성(`A-NOTION-001`)** · export Markdown의 외부 도구 호환성 · **화면의 시각적 완성도** · **Windows 실동작** · **연기된 recording 장치 검증(ADR-0003 §12)** + **실제 webview에서의 clipboard 동작 · Manual AI Handoff 산출물이 실제 외부 AI 채팅에서 쓸 만한가 · 로컬 provider가 '선택적 · 고급'으로 읽히는가** (`docs/PHASE-5.5-HUMAN-REVIEW.md` — **기록표는 비어 있다**) | 사람이 직접 확인 |
 
 > Phase 1에서 사람이 확인한 것: 번들 `.app`의 Info.plist 병합(확인됨) ·
 > 권한 문구(확인됨) · 화면 레이아웃(**소스 수준 검토만 — 실행 화면 확인은 사용자 몫**).
@@ -561,6 +687,28 @@ Runtime 관찰은 `LOOP-RUNTIME-FIELD-NOTES.md` OBS-022 · OBS-023 · OBS-024.
   분할 예산은 그래서 **이 앱이 고른 보수적 값**이지 확인된 API 한도가 아니다.
   절차는 `docs/PHASE-5-NOTION-SMOKE-TEST.md`, 확정은 `phase-prompt/Goal.md`의 hard human
   gate에서만 일어난다.
+- ~~**AI Note를 얻으려면 로컬 추론 서버를 설치해야 한다**~~ — Phase 5.5에서 **완화됐다.**
+  AI Provider가 하나도 없어도 Manual AI Handoff로 같은 값을 얻을 수 있고, 로컬 provider는
+  '선택적 · 로컬 · 고급'으로 재배치됐다 (`PRODUCT-SPEC` §9.7 · §14.5.1).
+  **삭제가 아니다** — 연결된 provider 경로는 그대로 있다 (MH-8).
+- **⚠️ clipboard 쓰기가 실제 환경에서 확인되지 않았다** — `src/platform/clipboard.ts`가
+  `navigator.clipboard`를 부르지만, **Tauri v2 webview(WKWebView · WebView2)에서 이 앱의
+  origin에 그 능력이 실제로 있는지, 어떤 조건을 요구하는지, 거절할 때 어떤 값이 오는지는
+  확인된 적이 없다** (ADR-0010 §7.4의 여섯 항목 · §12.4 — **여섯 전부 여전히 UNVERIFIED**).
+  자동 테스트는 언제나 test double을 쓴다. 그래서 이 경계는 "동작한다"가 아니라 **"동작하지
+  않을 수 있다"를 전제로** 설계됐다 — 실패가 보이는 값이 되고, 그때에도 **Export for AI가
+  대체 경로로 남는다.** 확인은 `docs/PHASE-5.5-HUMAN-REVIEW.md`에서 사람이 한다.
+  `A-` 가정으로 올리지 않은 이유는 D-4다 — 이것이 최악으로 판명돼도 Phase 5.5의 성공 기준은
+  무너지지 않고, 복구는 모듈 하나를 갈아 끼우는 일이다 (ADR-0010 §7.5).
+- **⚠️ Manual AI Handoff의 산출물이 실제 AI 채팅에서 쓸 만한지 확인되지 않았다** —
+  프롬프트가 요구하는 출력 모양이 `markdown::render`가 이미 만드는 모양과 같다는 것은
+  테스트가 지키지만, **받아 온 답의 유용성은 자동으로 판정할 수 없다.** 앱에 파서가 없으므로
+  모델이 계약을 어겨도 깨지는 것은 없다 — 그것은 실패가 아니라 **품질 문제**이며 Human
+  Review 항목이다 (ADR-0010 §6.5).
+- **⚠️ 전사가 실제 실행에서 쓸 수 없는 결과를 냈다** (2026-09-05) — 엔진 경로는 지났으나
+  `whisper.rs`가 언어를 설정하지 않아 한국어가 영어로 강제 디코딩됐다. Metal도 꺼져 있다.
+  **`A-TRANS-001`은 해소되지 않았다.** 실측 기록은
+  `docs/PHASE-3-TRANSCRIPTION-SMOKE-TEST.md` 부록, 수정은 Phase 5.6.
 - **⚠️ AI Note 경로가 실제 추론 서버에서 검증되지 않았다** — 계약 · adapter · 화면이
   컴파일되고 자동 검증을 지나지만, **실제 Ollama에 요청이 나간 적이 한 번도 없다**
   (`ASSUMPTION A-AI-001`). §14.5의 엔드포인트·파라미터 이름은 2026-09-01 기록이며 이 Phase가
@@ -586,6 +734,9 @@ Runtime 관찰은 `LOOP-RUNTIME-FIELD-NOTES.md` OBS-022 · OBS-023 · OBS-024.
 | `docs/PHASE-4-AI-NOTE-REVIEW.md` | **실제 Ollama Human Review 절차와 빈 기록표.** §10.2가 이 Phase가 확인하지 **않은** 것의 정본이다 (`A-AI-001`) |
 | `docs/ADR-0009-notion-and-export.md` | Markdown 구조 · 파일명/충돌 정책 · Notion Markdown Content API 경로 · 분할 예산의 성격 · **중복 sync 정책** · SecretStore 경계 · 실패 변환 · `ureq` TLS |
 | `docs/PHASE-5-NOTION-SMOKE-TEST.md` | **실제 Notion smoke test 절차와 빈 기록표.** §10.1이 `A-NOTION-001`의 정본이고 §12가 확인되지 **않은** 것의 목록이다 |
+| `docs/ADR-0010-manual-ai-handoff.md` | **Manual AI Handoff 결정** — 두 제품 방향 변경의 기록 · AI-ready 산출물의 형식과 순서 · `export::markdown` 재사용 · `ai::prompt` 상수를 고치지 않는 재사용 · clipboard 경계의 자리와 탈락 후보 · command 이름 셋 · MH-1~MH-8의 판정 수단 · **§12 구현 대조와 남은 UNVERIFIED** |
+| `docs/PHASE-5.5-HUMAN-REVIEW.md` | **자동으로 판정할 수 없는 셋(화면 · Manual AI Handoff의 유용성 · 로컬 provider의 위치)의 Human Review 절차와 빈 기록표.** §6이 이 Phase가 확인하지 **않은** 것의 정본이다 |
+| `phase-prompt/05.6-transcription-correctness-and-reach.md` | 2026-09-05 실제 전사 실행이 드러낸 결함의 Goal (PLANNED) |
 | `docs/GIT-WORKFLOW.md` | Git/GitHub 운영 정책 — Phase 단위 commit · public 저장소 안전 규칙 |
 | `docs/LOOP-RUNTIME-FIELD-NOTES.md` | Runtime 운용 관찰 기록 |
 | `CLAUDE.local.md` | 대화형 세션 운영 지침 |
@@ -627,6 +778,14 @@ Runtime 관찰은 `LOOP-RUNTIME-FIELD-NOTES.md` OBS-022 · OBS-023 · OBS-024.
 | 2026-09-04 (운영자) | **Task별 Gate는 최소·관련 범위로. Phase 종료 시에는 저장소 전체에 세 Gate** | Rust 전용 Task에 frontend 전용 `npm run build`를 거는 것은 Task-local 근거를 더하지 못한다. 다만 Phase 완료 판정은 좁힌 Gate 집합에 기대지 않는다 | 채택 (Phase 5 Human Review) |
 | 2026-09-04 (운영자) | **실제 Notion smoke test를 Final Integration으로 연기** | `A-REC-001` · `A-TRANS-001` · `A-AI-001`과 같은 판단이다. 위험을 명시적으로 수용한다 — 가정이 틀리면 adapter와 분할 정책에 rework | 채택 · 위험 수용 (`A-NOTION-001`) |
 | 2026-09-04 (운영자) | **실제 Ollama Human Review를 Final Integration으로 연기** | `A-REC-001` · `A-TRANS-001`과 같은 판단이다. 개발 흐름을 유지하고 위험을 명시적으로 수용한다 — 가정이 틀리면 adapter와 프롬프트에 rework | 채택 · 위험 수용 (`A-AI-001` · `docs/PHASE-4-AI-NOTE-REVIEW.md` §10.2) |
+| 2026-09-04 (운영자 · D-1) | **Manual AI Handoff를 정식 제품 기능으로 추가하고, Phase 5.5를 로드맵에 삽입한다** | Phase 6과 Final Integration에서 사람이 앱을 처음 실제로 쓴다. 그때 AI Note로 가는 유일한 길이 "로컬 추론 서버를 설치하세요"이면 검증되는 것은 제품이 아니라 설치 안내다. §11(Markdown interoperability)의 연장이며 늘어나는 것은 **가져가는 형태 하나**다 | 채택 (`ADR-0010` §4.2 · `PRODUCT-SPEC` §9.7 · §21) |
+| 2026-09-04 (운영자 · D-2) | **로컬 Ollama provider를 '첫 provider · 기본 AI 경험'에서 '선택적 · 로컬 · 고급'으로 재배치한다. 삭제가 아니다** | Phase 4가 만든 것은 "이 벤더의 기능"이 아니라 provider 추상화이며, Manual Handoff가 생겨도 유효하다. 지우면 DEFERRED cloud provider가 돌아올 자리도 사라진다. 유지 비용도 재배치 비용도 낮다 — **적극적으로 해로운 경우가 아니면 삭제하지 않는다** | 채택 (`ADR-0010` §4.3 · `PRODUCT-SPEC` §14.5.1) |
+| 2026-09-04 (운영자 · D-3) | **§21 로드맵의 상태 열을 실제 구현 상태로 정정한다** | rev 8까지 Phase 1~5가 `PLANNED`로 남아 표가 저장소와 어긋나 있었다. 과거를 다시 쓰지 않고 **오늘의 상태만** 적으며, 각 Phase가 남긴 이력은 이 문서 §5에 그대로 있다 | 채택 (`PRODUCT-SPEC` §21) |
+| 2026-09-04 (운영자 · D-4) | **`A-HANDOFF-001`을 만들지 않는다** | Manual AI Handoff는 외부 provider 없이 자동 검증되므로 `A-REC-001` 계열의 hard deferred assumption이 아니다. 자동으로 판정할 수 없는 셋은 **주관적 Human Review 항목**으로 남긴다 | 채택 (`docs/PHASE-5.5-HUMAN-REVIEW.md`) |
+| 2026-09-04 (운영자 · D-5) | **Open ChatGPT / Open Claude(브라우저 열기)를 구현하지 않는다** | 본질은 딥링크 자동화가 아니라 **가져갈 수 있는 AI-ready 내용**이다. 특정 채팅을 이름으로 아는 순간 그 채팅이 바뀔 때 흔들리는 것이 adapter 하나가 아니라 산출물 자체가 된다 (INV-9) | 채택 (`ADR-0010` §10 · §11) |
+| 2026-09-06 (Phase 5.5) | **clipboard 경계를 프론트엔드 platform 모듈 하나로 둔다.** Rust command도 Tauri 플러그인도 쓰지 않는다 | 복사할 문자열은 이미 webview 안에 있어 Rust로 되돌려 보낼 이유가 없고, 플러그인은 **확인하지 못한 세 값**(crate/npm 이름 · 호환 버전 · permission 식별자) 위에 의존성을 얹는 선택이다. A가 플랫폼에서 막히면 그때 B/C로 **모듈 하나를 갈아 끼운다** | 채택 · **플랫폼 능력은 UNVERIFIED** (`ADR-0010` §7 · §12.4) |
+| 2026-09-06 (Phase 5.5) | **기존 프롬프트 상수를 고치지 않고 치환 두 번으로 재사용한다.** 두 번째 프롬프트 세트를 만들지 않는다 | 상수를 고치면 `PROMPT_VERSION_*`의 선언값과 계산값이 어긋나 테스트가 깨지고, 선언값을 따라 올리면 **이미 저장된 `ai_notes.prompt_version`이 가리키는 프롬프트가 저장소 어디에도 없게 된다** — 저장된 provenance가 거짓이 된다 | 채택 (`ADR-0010` §6) |
+| 2026-09-06 (Phase 5.5) | **UI 기반은 "처음부터 만들기"가 아니라 "이미 있는 것을 규칙으로 끌어올리기"다.** 서드파티 디자인 시스템을 들이지 않는다 | 색 토큰 여섯과 dark 장치, radius 5px는 이미 있었다. 비어 있던 것은 타입·여백 스케일 · accent/상태색 · focus다. 값은 대부분 이미 쓰이던 것을 토큰으로 올린 것이며 새 크기를 발명하지 않았다 | 채택 (`phase-prompt/05.5` R-1 · `tests/ui-foundation.test.ts`) |
 
 ---
 

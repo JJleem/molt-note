@@ -12,6 +12,13 @@
 > - 2026-09-01 (rev 2) Requirements Delta 반영 — Windows를 지원 대상 플랫폼으로 추가,
 >   AI를 vendor 중립 Provider 추상화로 전환하고 core requirement에서 제외,
 >   §14.7의 근거 없는 VERIFIED 표기 정정
+> - 2026-09-06 (rev 9) Phase 5.5 반영 — **Manual AI Handoff를 제품 기능으로 추가**(§9.7) ·
+>   Ollama의 제품상 위치를 '첫 provider · 기본 AI 경험'에서 '선택적 · 로컬 · 고급'으로
+>   **재배치**(§14.5.1) · §21 로드맵에 **Phase 5.5를 삽입**하고 상태 열을 실제 구현 상태로 정정.
+>   두 방향 변경은 **2026-09-04 운영자 Human Review에서 승인됐고**(D-1 · D-2 ·
+>   `docs/ADR-0010-manual-ai-handoff.md` §4), 구현은 Phase 5.5(TASK-055 ~ TASK-065)가 했다.
+>   **소급해서 지우지 않았다** — §9.4와 §14.5의 본문은 그대로 두고, 무엇이 언제 왜 바뀌었는지를
+>   그 뒤에 덧붙였다. Ollama는 **삭제가 아니라 재배치**다
 > - 2026-09-03 (rev 8) Phase 3 smoke test 연기 · `A-TRANS-001` 기록 (§14.4.4)
 > - 2026-09-03 (rev 7) 운영자 결정 반영 — 통합 방식 선택 정책(§14.4.2) ·
 >   Phase 3 실제 추론 smoke test 요구(§14.4.3) · cmake 설치로 §14.1 갱신
@@ -522,6 +529,12 @@ Provider → Structured Note → UI renderer
 
 ### 9.4 Provider Strategy
 
+> ⚠️ **아래 `Primary local provider` 표기는 rev 8까지의 서술이며 그대로 남겨 둔다.**
+> 2026-09-04 운영자 결정(D-2)으로 이 provider의 **제품상 위치가 '선택적 · 로컬 · 고급'으로
+> 재배치**됐다 — **삭제가 아니라 재배치다.** 오늘의 서술은 §14.5.1과 §9.7이며, 둘이 어긋나
+> 보이면 날짜가 늦은 쪽이 오늘의 서술이다. 계약 · adapter · 설정 · 연결 확인 · 모델 선택은
+> 전부 그대로 있다.
+
 **Primary local provider — Ollama.**
 
 ```text
@@ -558,6 +571,53 @@ Provider abstraction을 실제로 검증하는 데 필요한 최소 범위만 �
   만들어졌는지" 알 수 있어야 한다.
 - Audio는 전송하지 않는다 (INV-6). 전송되는 것은 transcript 텍스트뿐이다.
 - **Provider 부재·미설정·실패가 core pipeline을 막지 않는다 (INV-8).**
+
+### 9.7 Manual AI Handoff — 사람이 자기 AI 채팅으로 가져간다 (추가 · 2026-09-04 결정)
+
+> **이 절은 rev 9에서 추가됐다.** §9.1~§9.6(Provider 경로)은 **그대로 유효하며 아무것도
+> 지워지지 않았다.** 여기서 늘어나는 것은 **두 번째 경로 하나**이고, 두 경로는 공존한다.
+
+**언제 왜 추가됐는가.**
+
+| | |
+| --- | --- |
+| 날짜 | 결정 **2026-09-04** (운영자 Human Review · D-1 **APPROVED**) · 본문 반영 **2026-09-06** (rev 9) |
+| 무엇이 바뀌는가 | Transcript를 외부 AI 채팅에 **사람이 직접 넘기는 경로**가 정식 제품 기능이 된다 |
+| 왜 | INV-8은 "AI가 없어도 제품이 동작한다"를 요구한다. 그러나 지금 이 제품에서 AI Note를 얻는 유일한 길은 **사용자가 로컬 provider를 설치하고 모델을 받는 것**이었다. 대부분의 사람은 이미 쓰는 AI 채팅이 있다. 그래서 한 걸음 더 간다 — **AI Provider가 하나도 없어도 AI의 값을 얻을 수 있게 한다** |
+| 어디의 연장인가 | **§11(Markdown interoperability)의 연장이다.** "기록을 앱 밖으로 가져갈 수 있다"는 이미 제품 원칙이고, 늘어나는 것은 **가져가는 형태 하나**다. 다만 "AI에 줄 형태"는 rev 8까지의 Spec에 없던 개념이므로 여기에 따로 적는다 |
+| 근거 문서 | `docs/ADR-0010-manual-ai-handoff.md` · `phase-prompt/05.5-manual-ai-handoff-and-ui-foundation.md` |
+
+```text
+Recording + current Transcript (§7.2)
+        │
+        ├──▶ Manual 프롬프트 텍스트 ──▶ (사람이) 붙여 넣기 ──▶ 사용자의 AI 채팅
+        ├──▶ Transcript 텍스트 ───────▶ (사람이) 붙여 넣기 ──▶ 사용자의 AI 채팅
+        └──▶ AI-ready Markdown 문서 ──▶ exports/…-ai-request.md ──▶ (사람이) 첨부
+```
+
+**앱은 이 경로에서 네트워크로 아무것도 보내지 않는다.** 나가는 행위의 주체는 사람이고, 앱이
+하는 일은 값에서 문자열을 만들고, clipboard에 쓰고, `exports/`에 파일 하나를 더하는 것까지다.
+§12의 세 단계 구분은 그대로다 — 이 경로는 **LOCAL**이며, 그 뒤에 일어나는 일은 앱의 전송이
+아니라 사용자의 행동이다.
+
+이 경로가 지키는 것 (전부 자동 테스트로 고정돼 있다 · ADR-0010 §8.4):
+
+```text
+MH-1  AI Provider가 하나도 설정되지 않아도 동작한다      ← §9.4의 provider를 요구하지 않는다
+MH-2  특정 로컬 provider를 요구하지 않는다
+MH-3  네트워크로 자동 전송하지 않는다
+MH-4  audio 바이트도 audio 경로도 산출물에 없다          ← INV-6
+MH-5  현재 성공한 Transcript를 쓴다                      ← §7.2
+MH-6  vendor 중립이다                                    ← INV-9
+MH-7  실패가 Recording · Transcript · AINote · 기존 export를 훼손하지 않는다  ← INV-3
+MH-8  기존 Connected Provider 경로가 그대로 살아 있다
+```
+
+**이 경로가 만들지 않는 것**: `AINote` 레코드 · `promptVersion`(§9.6의 provenance) ·
+두 번째 프롬프트 세트 · 두 번째 export 시스템 · 채팅의 답을 앱으로 되돌리는 import 경로.
+저장하지 않으므로 provenance가 필요하지 않다 (ADR-0010 §6.4).
+
+**§9.6의 규칙은 §9.1~§9.5의 Provider 경로에 대한 것이며 이 절이 그것을 바꾸지 않는다.**
 
 ---
 
@@ -1079,6 +1139,26 @@ Recording → Stop → 실제 Whisper 전사 → Transcript 표시 → AI Note �
 > 어느 모델이 이 제품의 transcript에 실제로 적합한지는 **UNVERIFIED**다.
 > Phase 4의 Human Review 항목이며, 문서가 대신 판정하지 않는다.
 
+### 14.5.1 제품상 위치의 재배치 (운영자 결정 · 2026-09-04 · 본문 반영 2026-09-06)
+
+> **§14.5의 외부 사실은 하나도 바뀌지 않았다.** 엔드포인트 · `format` · 헬스 체크 · CORS ·
+> 기본 `num_ctx` 4096은 2026-09-01에 확인된 값 그대로이며, 그것을 근거로 내린 Phase 4의
+> 결정(호출 주체를 Rust backend로)도 그대로다. **바뀐 것은 사실이 아니라 이 provider의
+> 제품상 자리다.**
+
+| | |
+| --- | --- |
+| 날짜 | 결정 **2026-09-04** (운영자 Human Review · D-2 **APPROVED**) · 본문 반영 **2026-09-06** (rev 9) |
+| rev 8까지의 서술 | **'첫 provider · 기본 AI 경험'** — §9.4가 `Primary local provider`로 적었고, §21이 Phase 4를 `Local AI(Ollama) → Structured Note`로 적었다. **그 서술을 지우지 않는다.** 그때 그렇게 정했다는 것이 이 문단의 근거다 |
+| rev 9의 서술 | **'선택적 · 로컬 · 고급'** — 스스로 설치해서 쓰는 provider 하나이며, **기본 AI 경험이 아니다.** 켜지 않은 상태가 결함이 아니라 정상이다 (INV-8) |
+| 왜 | Phase 6과 Final Integration에서 사람이 앱을 처음 실제로 쓴다. 그 시점에 "AI Note를 보려면 먼저 로컬 추론 서버를 설치하세요"가 유일한 길이면, 검증되는 것은 제품이 아니라 설치 안내다. §9.7이 그 자리를 대신하는 길을 하나 놓았다 |
+| **삭제가 아니다** | `ai/provider.rs`의 계약 · adapter · provider 설정 영속화 · 연결 확인 · 모델 선택 · 로컬/외부 표시(INV-5)를 **그대로 둔다.** Phase 4가 만든 것은 "이 벤더의 기능"이 아니라 **provider 추상화**이며, 그 추상화는 §9.7이 생겨도 유효하다. 지우면 §16의 DEFERRED cloud provider가 돌아올 자리도 함께 사라진다 |
+| 무엇이 실제로 바뀌었는가 | **Settings에서의 자리와 언어뿐이다** — 연결된 provider 부분 뒤로 내려가고, 켜라는 요구 대신 켜는 방법만 적는다 |
+| 무엇이 늘지 않는가 | 새 cloud provider(§14.6)를 붙이지 않는다. 그것은 여전히 §16의 DEFERRED다 |
+
+**§9.4의 `Primary local provider` 표기는 rev 8까지의 기록으로 남겨 두었다.** 오늘의 제품
+서술은 이 절과 §9.7이며, 둘이 어긋나 보이면 **날짜가 늦은 쪽(이 절)이 오늘의 서술이다.**
+
 ### 14.6 Cloud AI Providers — DEFERRED
 
 V1에서 구현하지 않는다 (§16). 아래는 향후 adapter를 만들 때의 참고 사실이며,
@@ -1449,15 +1529,33 @@ Windows에서도 같은 디자인 방향을 유지하되, 플랫폼별 UI 분기
 | Phase | 파일 | 한 줄 목적 | 상태 |
 | --- | --- | --- | --- |
 | Bootstrap | (`prompts/PROJECT-BOOTSTRAP.md`) | 실행 가능한 개발 baseline과 실제 Gate 확보 | **DONE** (2026-09-01) |
-| 1 | `01-application-foundation.md` | 앱 셸 · 로컬 저장소 · 데이터 영속성 · 플랫폼 경계 · 마이크 권한 선언 | PLANNED |
+| 1 | `01-application-foundation.md` | 앱 셸 · 로컬 저장소 · 데이터 영속성 · 플랫폼 경계 · 마이크 권한 선언 | **DONE** (2026-09-02) |
 | 2A | `02a-recording-engine-validation.md` | engine 잠정 선택 + 최소 spike | **DONE** (engineering) · 장치 검증 DEFERRED |
-| 2B | `02-reliable-recording.md` | 확정된 engine으로 실제 녹음 → 파일 → 재생, 재시작 후에도 살아남는다 | PLANNED |
-| 3 | `03-local-transcription.md` | 로컬 whisper로 timestamped transcript 생성 | PLANNED |
-| 4 | `04-ai-provider-system.md` | **Provider 추상화 + Local AI(Ollama) → Structured Note** | PLANNED |
-| 5 | `05-notion-and-export.md` | Notion 전송 · Markdown export | PLANNED |
+| 2B | `02-reliable-recording.md` | 확정된 engine으로 실제 녹음 → 파일 → 재생, 재시작 후에도 살아남는다 | **DONE** (engineering · 2026-09-03) · `A-REC-001` 유효 |
+| 3 | `03-local-transcription.md` | 로컬 whisper로 timestamped transcript 생성 | **DONE** (engineering · 2026-09-03) · `A-TRANS-001` 유효 |
+| 4 | `04-ai-provider-system.md` | **Provider 추상화 + Local AI(Ollama) → Structured Note** | **DONE** (engineering · 2026-09-04) · `A-AI-001` 유효 |
+| 5 | `05-notion-and-export.md` | Notion 전송 · Markdown export | **DONE** (engineering · 2026-09-04) · `A-NOTION-001` 유효 |
+| **5.5** | **`05.5-manual-ai-handoff-and-ui-foundation.md`** | **Manual AI Handoff(§9.7) + UI 기반** — 로드맵에 없던 삽입 (2026-09-04 운영자 결정) | **현재 Phase** |
+| 5.6 | `05.6-transcription-correctness-and-reach.md` | 전사 정확도 결함(언어 미설정 · Metal)의 수정 — 2026-09-05 첫 실제 전사 실행이 드러낸 것 | PLANNED |
 | 6 | `06-cross-platform-validation.md` | **Windows에서 핵심 기능 검증 및 hardening** | PLANNED |
 | Final | `Goal.md` | 통합 · 정합성 정리 · V1 성공 기준 검증 | PLANNED |
 | — | (DEFERRED) | Optional Cloud Providers (Claude · Gemini · Groq) | **DEFERRED** |
+
+> **DONE의 뜻은 여기서도 §18 그대로다** — 구현이 있고 자동 검증(build · lint · test Gate와
+> 독립 Verifier)을 통과했다는 뜻이며, **사람이 실물로 확인했다는 뜻이 아니다.**
+> `A-REC-001` · `A-TRANS-001` · `A-AI-001` · `A-NOTION-001` 넷은 여전히 열려 있고, 확정은
+> `Goal.md`의 hard human gate에서만 일어난다 (§17.3).
+
+**이 표는 rev 9(2026-09-06)에서 두 가지가 바뀌었다. 과거 기록을 지우지 않고 여기에 적는다.**
+
+| | 무엇을 | 왜 |
+| --- | --- | --- |
+| **(1) Phase 5.5 삽입** | Phase 5와 Phase 6 사이에 **로드맵에 없던 Phase를 하나 넣었다** (운영자 결정 · 2026-09-04) | Final Integration에서 사람이 앱을 처음 실제로 쓰기 전에, **AI Provider 없이도 AI의 값을 얻는 길**(§9.7)과 화면이 딛고 설 UI 기반을 놓는다. 근거는 `phase-prompt/05.5` 상단과 `docs/ADR-0010` §4 |
+| **(2) 상태 열 정정** | rev 8까지 Phase 1 ~ 5가 `PLANNED`로 남아 있었다 — **표가 실제 저장소 상태와 어긋나 있었다.** 실제 구현 상태로 정정했다 (D-3) | 로드맵의 상태 열이 사실과 다르면 이 문서를 근거로 계획하는 쪽이 잘못된 전제 위에 선다. **과거를 다시 쓴 것이 아니라 오늘의 상태를 적은 것이다** — 각 Phase가 무엇을 남겼는지의 이력은 `docs/SYSTEM-MAP.md` §5에 그대로 있다 |
+
+> Phase 5.6은 **2026-09-05에 운영자가 처음으로 실제 전사를 실행한 결과**로 추가된 Goal이다
+> (`docs/PHASE-3-TRANSCRIPTION-SMOKE-TEST.md` 부록). 엔진 경로는 동작했으나 언어가 설정되지
+> 않아 한국어가 영어로 강제 디코딩됐다. **`A-TRANS-001`은 그 실행으로 해소되지 않았다.**
 
 ### 순서의 근거
 
@@ -1467,6 +1565,12 @@ Windows에서도 같은 디자인 방향을 유지하되, 플랫폼별 UI 분기
   **2A/2B로 나눈 이유는 §6.1에 있다** — engine 확정에 필요한 증거의 일부는 사람만 만들 수 있다.
 - Phase 3~5는 각각 이전 Phase가 증명한 산출물 위에서만 동작한다.
   Transcript 없이 AI Note를 만들 수 없고, structured note 없이 Notion 렌더러를 만들 수 없다.
+- **Phase 5.5가 Phase 6 앞에 오는 이유**는 §9.7의 근거와 같다. Windows 검증과 Final
+  Integration은 **사람이 앱을 실제로 쓰는 자리**이며, 그때 AI Note로 가는 유일한 길이
+  "로컬 추론 서버를 설치하세요"이면 검증되는 것이 제품이 아니게 된다. §17.1의 core는 이미
+  서 있으므로, 그 위에 **AI 없이 AI의 값을 얻는 길**을 놓는 것이 플랫폼 검증보다 먼저 올
+  값이 있다고 판단했다. UI 기반을 같은 Phase에 둔 이유도 같다 — 조각처럼 보이는 화면을
+  Windows에서 두 번 보게 하지 않는다.
 - Phase 6은 Windows가 **지원 대상 플랫폼**(§3)이므로 V1 범위 안에 있다.
   단 플랫폼 검증은 검증할 기능이 존재한 뒤에만 의미가 있으므로 마지막에 온다.
 - `Goal.md`는 새 기능 영역이 아니라 **통합과 검증**이다.

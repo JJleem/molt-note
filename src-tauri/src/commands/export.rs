@@ -2,10 +2,16 @@
 //! (PRODUCT-SPEC §11 · `docs/ADR-0009-notion-and-export.md` §4 · `phase-prompt/05` 요구 A-1~3).
 //!
 //! ```text
-//! export_markdown ─→ Exporter ─→ exports 디렉터리 준비 ─→ export::run::export ─→ 쓰인 경로
-//!                       │              (INV-10)              (읽기 + 파일 하나 쓰기)
-//!                       └─ 앱 데이터 디렉터리를 얻지 못한 실패도 값으로 들고 있다 (§13)
+//! export_markdown ──→ Exporter ─→ exports 디렉터리 준비 ─→ export::run::export ────┐
+//! export_ai_request ─→          │        (INV-10)        export::handoff::…  ──────┤
+//!                               │                          (읽기 + 파일 하나 쓰기)  ▼
+//!                               └─ 앱 데이터 디렉터리를 얻지 못한 실패도 값으로 들고 있다 (§13)
 //! ```
+//!
+//! **파일을 만드는 이름이 둘이 됐지만 자리는 하나다** (`docs/ADR-0010-manual-ai-handoff.md`
+//! §5.6). 두 이름 모두 같은 `exports/` 아래에 같은 정책으로 쓰며, 다른 것은 문서의 내용과 파일
+//! 이름의 표식 하나뿐이다 — 두 번째 export 시스템도, 두 번째 디렉터리도, 지우거나 덮어쓰는
+//! 경로도 생기지 않았다.
 //!
 //! ## 시작·상태 조회 규약을 쓰지 않는다
 //!
@@ -33,7 +39,7 @@
 use tauri::Manager;
 
 use crate::db;
-use crate::domain::{Failure, FailureKind, RecordingId};
+use crate::domain::{Failure, FailureKind, NoteType, RecordingId};
 use crate::export;
 use crate::platform::app_data_dir::AppDataDirectory;
 
@@ -83,6 +89,47 @@ impl Exporter {
     /// 같은 이름의 파일이 이미 있으면 **덮어쓰지 않고 번호를 붙인다** (ADR-0009 §4.3). 그래서
     /// 돌려주는 값에는 실제로 쓰인 이름이 함께 들어 있다 — 화면이 이름을 다시 짐작하지 않는다.
     pub fn export(&self, recording_id: &str) -> Result<ExportedFilePayload, Failure> {
+        self.write_file(recording_id, |connection, directory, id| {
+            export::run::export(connection, directory, id)
+        })
+    }
+
+    /// Recording 하나를 **AI-ready Markdown 문서**로 내보내고 쓰인 파일을 돌려준다
+    /// (`docs/ADR-0010-manual-ai-handoff.md` §5.6 · §8.1).
+    ///
+    /// [`Self::export`]와 **같은 디렉터리, 같은 쓰기 정책**이다 — 두 번째 export 시스템도 두
+    /// 번째 자리도 만들지 않는다. 다른 것은 문서의 내용과 이름의 표식 하나뿐이며, 그래서 같은
+    /// 녹음의 두 문서가 파일 목록에서 서로 구분된다.
+    ///
+    /// **provider를 하나도 고르지 않아도 성공한다** (MH-1 · MH-2 · INV-8) — 이 경로에는
+    /// provider도 AI 설정도 들어오지 않으므로 그것을 이유로 거절할 수단 자체가 없다.
+    pub fn export_ai_request(
+        &self,
+        recording_id: &str,
+        mode: NoteType,
+    ) -> Result<ExportedFilePayload, Failure> {
+        self.write_file(recording_id, |connection, directory, id| {
+            export::handoff::export_ai_request(connection, directory, id, mode)
+        })
+    }
+
+    /// 두 export가 공유하는 순서 — 쓸 자리를 준비하고, 저장소를 열고, 파일 하나를 쓴다.
+    ///
+    /// 순서를 한 자리에 두는 이유는 [`Self::export`]의 문서가 말하는 그대로다. **자리를 먼저
+    /// 준비한다**: 쓸 자리가 없다는 사실은 무엇을 읽기 전에 알 수 있고, 그 실패에는 사용자가
+    /// 할 수 있는 일이 따로 있다 (§13).
+    ///
+    /// 무엇을 쓸지는 넘겨받은 실행 순서가 정한다 — 이 함수에는 렌더링 규칙도, 저장소 질의도,
+    /// 저장소에 **쓰는** 코드도 없다 (INV-3 · MH-7).
+    fn write_file(
+        &self,
+        recording_id: &str,
+        write: impl FnOnce(
+            &rusqlite::Connection,
+            &std::path::Path,
+            &RecordingId,
+        ) -> Result<export::WrittenFile, Failure>,
+    ) -> Result<ExportedFilePayload, Failure> {
         let app_data_dir = self.app_data_dir.as_ref().map_err(Clone::clone)?;
 
         let recording_id = recording_id.trim();
@@ -95,7 +142,7 @@ impl Exporter {
 
         let directory = app_data_dir.ensure_exports_dir()?;
         let connection = db::open_in(app_data_dir)?;
-        let written = export::run::export(&connection, &directory, &RecordingId::new(recording_id))?;
+        let written = write(&connection, &directory, &RecordingId::new(recording_id))?;
 
         Ok(ExportedFilePayload::new(recording_id, written))
     }
@@ -133,6 +180,43 @@ mod tests {
 
         assert_eq!(failure.kind, FailureKind::InvalidInput);
         assert!(!failure.retryable, "같은 값을 다시 보내도 같다");
+        assert!(failure.source_data_safe);
+        assert!(
+            !temp.exists(),
+            "고르지 않은 요청 때문에 디렉터리를 만들지 않는다"
+        );
+    }
+
+    #[test]
+    fn the_ai_request_path_answers_the_same_two_failures_the_same_way() {
+        // 두 이름이 **같은 순서**를 지난다는 것을 여기서 못박는다 (ADR-0010 §5.6) — 자리를
+        // 얻지 못한 상태와 고른 녹음이 없는 상태에서 Markdown export와 답이 갈리지 않는다.
+        let exporter = Exporter {
+            app_data_dir: Err(Failure::retryable(
+                FailureKind::Storage,
+                "앱 데이터 디렉터리 경로를 결정하지 못했다",
+            )),
+        };
+
+        let failure = exporter
+            .export_ai_request("rec-1", NoteType::Study)
+            .expect_err("자리를 모르면 쓸 수 없다");
+
+        assert_eq!(failure.kind, FailureKind::Storage);
+        assert!(failure.source_data_safe, "아무것도 건드리지 않았다 (MH-7)");
+
+        let temp = std::env::temp_dir().join(format!(
+            "molt-note-exporter-ai-request-empty-id-{}",
+            std::process::id()
+        ));
+        let exporter = Exporter::in_directory(AppDataDirectory::new(&temp));
+
+        let failure = exporter
+            .export_ai_request("   ", NoteType::Meeting)
+            .expect_err("고른 녹음이 없다");
+
+        assert_eq!(failure.kind, FailureKind::InvalidInput);
+        assert!(!failure.retryable);
         assert!(failure.source_data_safe);
         assert!(
             !temp.exists(),

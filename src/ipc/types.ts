@@ -486,12 +486,21 @@ export interface AiNote {
  * 문자열을 잘라 이름을 짐작하지 않도록 실제로 쓰인 이름이 함께 온다.
  *
  * 문서 본문은 오지 않는다 — 그것은 파일에 있고, IPC로 한 번 더 흘려보낼 이유가 없다.
+ *
+ * **파일을 만드는 두 command가 같은 값을 돌려준다** — `exportMarkdown`과 `exportAiRequest`다
+ * (docs/ADR-0010-manual-ai-handoff.md §5.6). 두 번째 타입을 만들지 않는 이유는 화면이 알아야
+ * 하는 것이 둘 다 같기 때문이다: 어디에 무엇이 만들어졌는가. 두 문서는 **이름으로** 구분된다
+ * (AI-ready 문서는 `…-ai-request.md`) — 접미사 번호로만 구분되면 파일 목록에서 무엇이 무엇인지
+ * 알 수 없다.
  */
 export interface ExportedFile {
   readonly recordingId: string;
   /** 만들어진 파일의 전체 경로. 사용자에게 그대로 보여줄 수 있는 값이다. */
   readonly path: string;
-  /** 그 파일의 이름 (`2026-09-01-3dgs-study-04.md`). */
+  /**
+   * 그 파일의 이름 (`2026-09-01-3dgs-study-04.md` ·
+   * AI-ready 문서면 `2026-09-01-3dgs-study-04-ai-request.md`).
+   */
   readonly fileName: string;
 }
 

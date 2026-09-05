@@ -15,6 +15,21 @@
 //! 늘고, 재생성은 대체가 아니라 추가다 (ADR-0008 §9.2).
 //! Phase 5가 **Markdown export** 하나를 더한다 ([`Exporter`]) — 저장소를 읽어 파일 하나를
 //! 만들 뿐, 저장된 것을 고치거나 지우지 않는다.
+//! Phase 5.5가 **Manual AI Handoff** 셋을 더한다 ([`get_ai_prompt`] · [`get_transcript_text`] ·
+//! [`export_ai_request`] · `docs/ADR-0010-manual-ai-handoff.md` §8.1). 사용자 동작 하나에 이름
+//! 하나이며, 여기서도 쓰기 이름은 늘지 않는다 — 앞의 둘은 문자열을 만들어 돌려줄 뿐이고
+//! ([`Storage::ai_prompt`] · [`Storage::transcript_text`]), 마지막 하나는 Markdown export와
+//! **같은 자리에 파일을 하나 더한다** (MH-7 · INV-3).
+//!
+//! ## AI Provider가 없어도 세 이름이 전부 동작한다 (MH-1 · MH-2)
+//!
+//! 세 command 어디에도 provider도, AI 설정도, 벤더 이름도 들어오지 않는다 — 읽는 것은
+//! 프롬프트 **상수**뿐이며 그것은 어디에도 연결하지 않는다 (`crate::export::handoff`). 그래서
+//! provider가 없다는 이유로 거절할 수단 자체가 없다.
+//!
+//! **셋 모두 `transcriptId`를 받지 않는다** (ADR-0010 §8.2 · MH-5) — 쓰이는 것은 언제나
+//! `Recording.current_transcript_id`가 가리키는 Transcript이며, 실패했거나 대체된 옛 version을
+//! 고를 방법이 wire에 없다.
 //!
 //! **Notion 전송의 소유자도 이 경계에 있다** ([`NotionSender`]) — 전사 · 노트 생성과 같은
 //! 규약이다 (`crate::commands::notion`). 그 표면은 여섯이다 — 전송 시작 · 전송 상태 조회 ·
@@ -92,7 +107,12 @@ use crate::audio::{
     SystemSampleSource,
 };
 use crate::db::{self, settings, store};
-use crate::domain::{AiNoteId, Failure, FailureKind, RecordingId, RecordingView, TranscriptId};
+use crate::domain::{
+    AiNoteId, Failure, FailureKind, NoteType, RecordingId, RecordingView, TranscriptId,
+};
+// `crate::export`를 이름으로 들여오지 않는다 — 이 모듈에는 command 소유자 쪽의 [`export`]가
+// 이미 있다. 아래 두 읽기는 실행 순서를 전체 경로로 부른다.
+use crate::export::handoff;
 use crate::platform::app_data_dir::AppDataDirectory;
 use crate::platform::clock::{Clock, MonotonicClock};
 use crate::platform::microphone::{
@@ -186,6 +206,38 @@ impl Storage {
         let connection = self.connection()?;
         let transcript = store::load_transcript(&connection, &TranscriptId::new(id))?;
         Ok(transcript.map(TranscriptPayload::from))
+    }
+
+    /// 고른 mode에 맞는 **Manual 프롬프트**를 돌려준다
+    /// (`docs/ADR-0010-manual-ai-handoff.md` §6 · MH-1).
+    ///
+    /// 사람이 자기 AI 채팅에 그대로 붙여 넣는 문자열 하나이며 transcript를 포함한다. **읽기
+    /// 뿐이다** — 이 경로는 저장소에 쓰지 않고, 프롬프트도 노트도 저장하지 않는다 (§6.4 · MH-7).
+    ///
+    /// **`transcriptId`를 받지 않는다** (§8.2 · MH-5). 쓰이는 것은 언제나
+    /// `Recording.current_transcript_id`가 가리키는 Transcript이며, 옛 version을 고를 수단이
+    /// 이 경계에 없다.
+    ///
+    /// **provider를 고르지 않아도 성공한다** (INV-8 · MH-1 · MH-2) — 여기에는 provider도 AI
+    /// 설정도 들어오지 않으므로 그것을 이유로 거절할 수단 자체가 없다.
+    pub fn ai_prompt(&self, recording_id: &str, mode: NoteType) -> Result<String, Failure> {
+        let connection = self.connection()?;
+
+        handoff::ai_prompt(&connection, &RecordingId::new(recording_id.trim()), mode)
+    }
+
+    /// 사람이 그대로 붙여 넣을 수 있는 **Transcript 텍스트**를 돌려준다 (ADR-0010 §5.4).
+    ///
+    /// [`Self::transcript`]와 다른 값이다 — 저쪽은 화면이 그리는 데이터(segment 목록)이고,
+    /// 이쪽은 **붙여 넣을 수 있는 완성된 문자열**이다. 타임스탬프를 문장으로 만드는 규칙이 Rust
+    /// 한 곳에만 있다는 사실이 그 차이를 만든다 (`tests/screen-boundary.test.ts`).
+    ///
+    /// `ai_prompt`와 같은 규칙을 따른다 — current Transcript만 쓰고(MH-5), 저장소에 쓰지
+    /// 않으며(MH-7), provider를 보지 않는다 (MH-1 · MH-2).
+    pub fn transcript_text(&self, recording_id: &str) -> Result<String, Failure> {
+        let connection = self.connection()?;
+
+        handoff::transcript_text(&connection, &RecordingId::new(recording_id.trim()))
     }
 
     /// 그 Transcript에서 만들어진 **AI 노트 전부**를 만들어진 순서대로 돌려준다 (§7.3).
@@ -797,7 +849,7 @@ fn validated(recording: NewRecording) -> Result<NewRecording, Failure> {
 
 // --- Tauri command 표면 -------------------------------------------------------------
 //
-// 아래 스물여덟 개가 frontend가 부를 수 있는 전부다. 각 함수는 [`Storage`] · [`AudioDevices`] ·
+// 아래 서른한 개가 frontend가 부를 수 있는 전부다. 각 함수는 [`Storage`] · [`AudioDevices`] ·
 // [`Recorder`] · [`Transcriber`] · [`NoteGenerator`] · [`Exporter`] · [`NotionSender`]의 같은 이름
 // 동작이나 [`finish_recording`]을 그대로 부른다 — 로직을 여기에 두지 않으므로, 실제 동작은
 // Tauri 없이 테스트할 수 있다.
@@ -1018,6 +1070,66 @@ pub fn export_markdown(
     recording_id: String,
 ) -> Result<ExportedFilePayload, Failure> {
     exporter.export(&recording_id)
+}
+
+/// 고른 mode에 맞는 **Manual 프롬프트**를 돌려준다 — 사람이 자기 AI 채팅에 붙여 넣을
+/// 문자열 하나다 (`docs/ADR-0010-manual-ai-handoff.md` §6 · §8.1).
+///
+/// **앱은 이 경로에서 아무 데도 보내지 않는다** (MH-3). 나가는 행위의 주체는 사람이며, 여기서
+/// 하는 일은 저장된 값에서 문자열을 만드는 것까지다. clipboard에 쓰는 자리도 이 경계 밖이다
+/// (ADR-0010 §7).
+///
+/// **provider를 하나도 고르지 않아도 동작한다** (INV-8 · MH-1 · MH-2) — 이 command에는
+/// provider도 AI 설정도 들어오지 않으므로, 그것을 이유로 거절할 수단 자체가 없다.
+///
+/// **`transcriptId`를 받지 않는다** (§8.2 · MH-5). 쓰이는 것은 언제나 current Transcript이며,
+/// 실패했거나 대체된 옛 version을 고를 방법이 wire에 없다.
+///
+/// 아직 전사 내용이 없는 녹음이면 실패한다 — 지시만 있고 본문이 없는 프롬프트를 만드는 대신
+/// 무엇이 필요한지 말한다 (§13 · ADR-0010 §5.5). **어떤 실패에서도 저장된 것은 그대로다**
+/// (INV-3 · MH-7).
+#[tauri::command]
+pub fn get_ai_prompt(
+    storage: State<'_, Storage>,
+    recording_id: String,
+    mode: String,
+) -> Result<String, Failure> {
+    storage.ai_prompt(&recording_id, notes::parse_mode(&mode)?)
+}
+
+/// 사람이 그대로 붙여 넣을 수 있는 **Transcript 텍스트**를 돌려준다 (ADR-0010 §5.4 · §8.1).
+///
+/// [`get_transcript`]와 다른 값이다 — 저쪽은 화면이 그리는 데이터이고, 이쪽은 완성된 문자열
+/// 하나다. 타임스탬프를 문장으로 만드는 규칙은 여전히 Rust 한 곳에만 있다.
+///
+/// mode를 받지 않는다. 같은 전사에서 언제나 같은 문자열이 나오며, 자기 지시를 직접 쓰고 싶은
+/// 사람을 위한 길이다 ([`get_ai_prompt`]는 지시와 본문을 함께 준다).
+#[tauri::command]
+pub fn get_transcript_text(
+    storage: State<'_, Storage>,
+    recording_id: String,
+) -> Result<String, Failure> {
+    storage.transcript_text(&recording_id)
+}
+
+/// Recording 하나를 **AI-ready Markdown 문서**로 내보내고 쓰인 파일의 경로를 돌려준다
+/// (ADR-0010 §5.2 · §5.6 · §8.1).
+///
+/// [`export_markdown`]과 **같은 디렉터리 · 같은 쓰기 정책**이며, 이름의 표식 하나로 구분된다.
+/// 같은 이름이 이미 있으면 **덮어쓰지 않고 번호를 붙인다** (ADR-0009 §4.3) — 이미 내보낸
+/// 파일은 사용자의 문서이고, 이 command에도 그것을 지우거나 고치는 경로가 없다 (INV-3 · MH-7).
+///
+/// clipboard가 거절되는 환경에서도 이 이름은 그대로 동작한다 — 파일 하나를 더할 뿐 clipboard를
+/// 쓰지 않는다 (ADR-0010 §7.5).
+///
+/// `async`인 이유는 [`export_markdown`]과 같다 — 디스크가 느릴 때 창이 함께 멈추지 않게 한다.
+#[tauri::command(async)]
+pub fn export_ai_request(
+    exporter: State<'_, Exporter>,
+    recording_id: String,
+    mode: String,
+) -> Result<ExportedFilePayload, Failure> {
+    exporter.export_ai_request(&recording_id, notes::parse_mode(&mode)?)
 }
 
 /// Recording 하나의 Notion 전송을 시작한다. **돌아오는 것은 접수 사실이지 전송 결과가 아니다.**

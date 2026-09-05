@@ -144,6 +144,23 @@ pub fn run() {
             // **AI가 없어도 부를 수 있고** (INV-8), 이미 있는 파일을 덮어쓰지 않으며
             // (ADR-0009 §4.3), 저장된 것을 고치거나 지우는 이름은 여기에도 없다.
             commands::export_markdown,
+            // Manual AI Handoff의 표면은 이 셋이다 — Manual 프롬프트 · 붙여 넣을 Transcript
+            // 텍스트 · AI-ready 문서 파일 하나 (docs/ADR-0010-manual-ai-handoff.md §8.1).
+            // **사용자 동작 하나에 이름 하나**다: 셋을 하나로 묶으면 같은 전사를 세 벌 실어
+            // 나르게 된다.
+            //
+            // 셋 다 `recordingId`를 받고 `transcriptId`를 받지 않는다 (§8.2 · MH-5) — 실패했거나
+            // 대체된 옛 Transcript version을 고를 방법이 wire에 없다는 것이 그 표현이다.
+            //
+            // **provider도 AI 설정도 이 경로에 들어오지 않는다** (MH-1 · MH-2 · INV-8): AI를
+            // 하나도 설정하지 않은 사용자에게도 셋이 전부 동작하며, 거절할 수단 자체가 없다.
+            //
+            // **저장된 것을 고치거나 지우는 이름은 여기서도 늘지 않는다** (INV-3 · MH-7).
+            // 앞의 둘은 문자열을 돌려줄 뿐이고, 마지막 하나는 Markdown export와 같은 `exports/`에
+            // 파일을 하나 더한다 — 이미 있는 파일은 덮어써지지 않는다 (ADR-0009 §4.3).
+            commands::get_ai_prompt,
+            commands::get_transcript_text,
+            commands::export_ai_request,
             // Notion 전송의 표면은 이 여섯이다 — 전송 시작 · 진행 상태 조회 · 저장된 전송 기록
             // 읽기 · 연결 확인 · token 저장 · token 삭제. **저장된 것을 고치거나 지우는 이름은
             // 여기에도 없다**: 지우는 하나는 이 앱이 넣은 자격증명 항목이며, 녹음 · 전사 · 노트 ·

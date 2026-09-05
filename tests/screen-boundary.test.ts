@@ -198,3 +198,87 @@ describe('실패는 사용자에게 보인다', () => {
     }
   });
 });
+
+/**
+ * clipboard를 실제로 부르는 자리가 **하나**라는 것을 원문으로 못박는 자리
+ * (`phase-prompt/05.5` R-4 · 요구 5 · docs/ADR-0010-manual-ai-handoff.md §7.2 · INV-10).
+ *
+ * 값의 모양은 `src/platform/clipboard.test.ts`와 `src/screens/copyView.test.ts`가 고정한다 —
+ * 실패가 값으로 돌아온다는 것과 복사 상태 네 갈래가 거기 있다. 여기서 보는 것은 **부르는
+ * 자리가 흩어지지 않았다**는 것이며, 컴포넌트 하나가 새로 생기는 것만으로 조용히 깨질 수
+ * 있으므로 원문을 읽는 이 파일에 있다.
+ *
+ * 부르는 자리가 하나라는 것이 지켜지지 않으면 두 가지가 무너진다 — 실패를 다루는 방식이
+ * 자리마다 달라지고(§13), 플랫폼이 이 능력을 주지 않을 때 갈아 끼울 자리가 사라진다
+ * (ADR-0010 §7.4 · §7.5).
+ */
+const CLIPBOARD_MODULE = path('../src/platform/clipboard.ts');
+const COPY_VIEW_MODULE = path('../src/screens/copyView.ts');
+
+/**
+ * webview의 clipboard에 실제로 닿는 코드의 모양.
+ *
+ * 이름을 문장 안에서 언급한 주석이 아니라 **그것을 쓰는 모양**을 찾는다. `execCommand('copy')`는
+ * 같은 일을 하는 옛 경로이며, 경계를 우회하는 두 번째 자리가 되므로 함께 막는다.
+ */
+const CLIPBOARD_USE = [
+  /navigator\s*\.\s*clipboard/,
+  /navigator\s*\[\s*['"]clipboard/,
+  /\bClipboardItem\b/,
+  /execCommand\s*\(\s*['"]copy/,
+];
+
+/** 이 검사 자신은 위 모양을 정규식으로 적고 있으므로 스스로에게 걸리지 않게 제외한다. */
+const THIS_FILE = path('./screen-boundary.test.ts');
+
+/** `tests/` 아래의 원문. 끝의 `/`를 떼어야 위 경로들과 같은 모양이 된다. */
+const testSources = sourceFiles(path('.').replace(/\/$/, ''));
+
+describe('clipboard는 경계 하나 뒤에 있다 (R-4 · INV-10)', () => {
+  it('src/ 아래에서 clipboard를 부르는 파일이 정확히 하나다', () => {
+    const callers = frontendSources.filter((file) => {
+      const source = readFileSync(file, 'utf8');
+      return CLIPBOARD_USE.some((shape) => shape.test(source));
+    });
+
+    expect(callers).toEqual([CLIPBOARD_MODULE]);
+  });
+
+  it('그 하나가 React 컴포넌트가 아니다', () => {
+    // 컴포넌트 여기저기에서 부르기 시작하면 실패를 값으로 돌려줄 자리가 사라진다 (R-4).
+    expect(CLIPBOARD_MODULE.endsWith('.tsx')).toBe(false);
+    expect(frontendSources).toContain(CLIPBOARD_MODULE);
+  });
+
+  it('복사 상태를 판정하는 순수 모듈이 clipboard를 부르지 않는다', () => {
+    // 네 갈래(아직 안 함 · 복사 중 · 복사됨 · 실패)의 판정은 DOM도 clipboard도 모르는 자리에
+    // 있어야 clipboard 없이 vitest로 전부 판정된다 (§18).
+    expect(frontendSources).toContain(COPY_VIEW_MODULE);
+
+    const source = readFileSync(COPY_VIEW_MODULE, 'utf8');
+    expect(source).not.toMatch(/copyText\s*\(/);
+    expect(source).not.toMatch(/systemClipboard\s*\(/);
+    expect(source).not.toMatch(/writeText/);
+    expect(source).not.toMatch(/document\s*\.|window\s*\./);
+    // provider를 보기 시작하면 그 순간 provider가 복사를 막을 수 있게 된다 (MH-1 · MH-2).
+    expect(source).not.toMatch(/AiProviderStatus|aiProviderStatus|providerName|locality|ollama/i);
+    expect(source).not.toMatch(/\baiStatus\b/);
+  });
+
+  it('자동 테스트가 실제 시스템 clipboard를 건드리지 않는다', () => {
+    // 경계는 쓰는 대상을 인자로 받으므로 테스트는 언제나 test double을 넘긴다. 테스트 어디에도
+    // 이 창의 clipboard를 집는 자리가 없다는 것이 그 사실을 지킨다.
+    const testFiles = [
+      ...frontendSources.filter((file) => /\.test\.tsx?$/.test(file)),
+      ...testSources.filter((file) => file !== THIS_FILE),
+    ];
+
+    expect(testFiles.length).toBeGreaterThan(0);
+    for (const file of testFiles) {
+      const source = readFileSync(file, 'utf8');
+      for (const shape of CLIPBOARD_USE) {
+        expect(source, `${file}가 실제 clipboard를 집는다`).not.toMatch(shape);
+      }
+    }
+  });
+});

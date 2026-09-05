@@ -6,15 +6,83 @@
 :root {
   font-family:
     -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, 'Helvetica Neue', sans-serif;
-  font-size: 14px;
-  line-height: 1.5;
+  /* 기준 크기는 스케일의 body 칸이다 — 두 벌이 되지 않게 여기서도 같은 토큰을 쓴다. */
+  font-size: var(--type-body);
+  line-height: var(--line-normal);
 
   --text: #1c1c1e;
-  --text-muted: #8a8a8e;
+  /*
+   * 거드는 글자. **읽을 수 있는 회색이어야 한다** (요구 12의 합리적 대비).
+   *
+   * 이전 값(#8a8a8e)은 흰 표면 위에서 약 3.4:1이었고, 이 Task가 부제 · 상태 · caption을
+   * 이 색으로 옮기면서 그 글자의 양이 늘었다. 약 5.3:1로 낮춰 잡아 본문(#1c1c1e)보다는
+   * 분명히 조용하되 읽히지 않는 자리가 생기지 않게 한다. dark 쪽은 이미 5:1을 넘으므로
+   * 그대로 둔다.
+   */
+  --text-muted: #6b6b70;
   --surface: #ffffff;
   --surface-sidebar: #f4f4f5;
   --hairline: #e0e0e2;
   --selected: #e4e4e7;
+
+  /*
+   * 타이포그래피 스케일 — 다섯 위계뿐이다 (§19 typography first).
+   * 화면이 임의의 크기를 만들지 않는다. 값은 이미 이 파일에서 쓰이던 것을 규칙으로 올린 것이며
+   * 새 크기를 발명하지 않았다.
+   */
+
+  --type-page-title: 20px;
+  --type-section-title: 16px;
+  --type-body: 14px;
+  --type-secondary: 13px;
+  --type-caption: 12px;
+
+  /*
+   * 위계 밖의 한 칸 — 녹음 화면의 경과 시간 하나만 쓴다 (§19 · 요구 10).
+   *
+   * 크기를 스케일 밖에 흩지 않으려고 값을 여기로 올렸다. 이것은 여섯 번째 위계가 아니라
+   * **한 화면을 지배해야 하는 값**의 자리이며, 다른 화면이 이것을 쓰지 않는다.
+   */
+
+  --type-display: 56px;
+
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-strong: 600;
+
+  --line-tight: 1.3;
+  --line-normal: 1.5;
+
+  /* 여백 스케일. 이 여섯 밖의 값을 새로 만들지 않는다. */
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+
+  /* 이미 모든 곳이 5px 하나로 통일돼 있다. 바꿀 이유가 없어 그대로 토큰으로만 올린다. */
+
+  --radius: 5px;
+
+  /*
+   * accent와 상태색.
+   *
+   * accent는 주 동작 · 활성 네비게이션 · 의미 있는 상태 강조에만 쓴다 — 경쟁하는 색을
+   * 여럿 두지 않는다 (§19 · 요구 11). `--accent`는 채우는 면과 테두리, `--accent-text`는
+   * 표면 위의 글자다: dark에서 면으로 쓸 색과 글자로 읽을 색의 대비 조건이 다르다.
+   *
+   * 상태색은 거들 뿐이며 상태를 색으로만 말하지 않는다 — 언제나 글자가 함께 온다 (요구 12).
+   */
+
+  --accent: #0060df;
+  --accent-strong: #0050bb;
+  --accent-text: #0060df;
+  --on-accent: #ffffff;
+  --success: #1a7f37;
+  --warning: #9a6700;
+  --danger: #c0362c;
 
   color: var(--text);
   background-color: var(--surface);
@@ -25,6 +93,12 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
+/*
+ * dark는 이 Phase의 목표가 아니다 — 이미 있는 장치를 깨뜨리지 않는 것으로 충분하다.
+ * 그러므로 새로 더한 색 토큰은 여기에도 함께 정의한다. 크기·여백·굵기는 테마와 무관하므로
+ * 여기서 다시 정의하지 않는다.
+ */
+
 @media (prefers-color-scheme: dark) {
   :root {
     --text: #f2f2f7;
@@ -33,6 +107,17 @@
     --surface-sidebar: #242426;
     --hairline: #3a3a3c;
     --selected: #38383a;
+
+    /* 어두운 표면 위에서 같은 역할을 하는 값. 면(`--accent`)과 글자(`--accent-text`)가
+       여기서 갈라진다 — 면 위의 흰 글자와 표면 위의 파란 글자가 동시에 읽혀야 한다. */
+
+    --accent: #0a6cff;
+    --accent-strong: #3b8bff;
+    --accent-text: #6aa9ff;
+    --on-accent: #ffffff;
+    --success: #3fb950;
+    --warning: #d29922;
+    --danger: #ff6b5e;
   }
 }
 
@@ -45,9 +130,360 @@ body {
 }
 
 button,
-input {
+input,
+select,
+textarea {
   font: inherit;
   color: inherit;
+}
+
+/*
+ * ─────────────────────────────────────────────────────────────────────────────
+ * foundation — 화면들이 공유하는 규칙 (phase-prompt/05.5 요구 9 · 11 · 12)
+ *
+ * 서드파티 디자인 시스템을 들이지 않는다. 여기 있는 것은 이 파일에 이미 있던 모양을
+ * 이름 붙여 규칙으로 올린 것이고, 화면 하나에만 필요한 것은 아래 각 절에 그대로 둔다.
+ * 화면 마크업을 이 규칙 위로 옮기는 것은 다음 Task다.
+ * ─────────────────────────────────────────────────────────────────────────────
+ */
+
+/* 타이포그래피 — 위계는 다섯이며 이 밖의 크기를 화면이 만들지 않는다. */
+
+.t-page-title {
+  font-size: var(--type-page-title);
+  font-weight: var(--weight-strong);
+  line-height: var(--line-tight);
+}
+
+.t-section-title {
+  font-size: var(--type-section-title);
+  font-weight: var(--weight-strong);
+  line-height: var(--line-tight);
+}
+
+.t-body {
+  font-size: var(--type-body);
+  font-weight: var(--weight-regular);
+  line-height: var(--line-normal);
+}
+
+/* 본문 옆에서 본문을 거드는 값. 조용하지만 읽을 수 있어야 한다. */
+
+.t-secondary {
+  font-size: var(--type-secondary);
+  line-height: var(--line-normal);
+  color: var(--text-muted);
+}
+
+/* 경로 · 식별자 · 출처처럼 필요할 때만 읽는 값. */
+
+.t-caption {
+  font-size: var(--type-caption);
+  line-height: var(--line-normal);
+  color: var(--text-muted);
+}
+
+/*
+ * 문단으로 쓰일 때의 여백.
+ *
+ * 유틸리티가 크기만 정하고 여백을 화면에 맡기면, 화면마다 임의의 margin이 다시 생긴다 —
+ * 그것이 이 Phase가 없애려는 것이므로 여기서 한 번만 정한다.
+ */
+
+p.t-page-title,
+p.t-section-title,
+p.t-body,
+p.t-secondary,
+p.t-caption {
+  margin: 0 0 var(--space-2);
+}
+
+/*
+ * 보이는 focus (요구 12 · R-5).
+ *
+ * 지금까지 이 파일에 focus 스타일이 하나도 없어서, 키보드로 옮겨 다니면 지금 어디에 있는지
+ * 알 수 없었다. `:focus-visible`이므로 마우스로 누를 때는 뜨지 않는다 — 키보드로 왔을 때만
+ * 보인다.
+ */
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* 스크롤 영역 안에서는 바깥으로 나간 링이 잘린다. 안쪽으로 그린다. */
+
+.sidebar :focus-visible,
+.list :focus-visible {
+  outline-offset: -2px;
+}
+
+/*
+ * 버튼 — Primary · Secondary · Ghost, 그리고 정말 필요한 곳의 Danger.
+ * 한 화면의 primary는 하나다. 그림자도 gradient도 두지 않는다 (§19).
+ */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: none;
+  font-size: var(--type-body);
+  line-height: var(--line-normal);
+  color: var(--text);
+  cursor: default;
+  /* 눌렀는가 · 위에 있는가 · 꺼졌는가가 튀지 않고 갈리도록 하는 것뿐이다. 장식이 아니다. */
+  transition:
+    background-color 0.12s ease,
+    border-color 0.12s ease,
+    color 0.12s ease;
+}
+
+/* 나란히 놓인 버튼이 서로 붙지 않게 한다. 감싸는 상자를 새로 두지 않기 위한 규칙이다. */
+
+.btn + .btn {
+  margin-left: var(--space-2);
+}
+
+.btn--primary {
+  background-color: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+  font-weight: var(--weight-medium);
+}
+
+.btn--primary:hover:not(:disabled),
+.btn--primary:active:not(:disabled) {
+  background-color: var(--accent-strong);
+  border-color: var(--accent-strong);
+}
+
+.btn--secondary {
+  border-color: var(--hairline);
+  background-color: var(--surface);
+}
+
+.btn--secondary:hover:not(:disabled) {
+  background-color: var(--selected);
+}
+
+/* 목록 안이나 제목 옆처럼 테두리가 소음이 되는 자리. */
+
+.btn--ghost {
+  color: var(--text-muted);
+}
+
+.btn--ghost:hover:not(:disabled) {
+  background-color: var(--selected);
+  color: var(--text);
+}
+
+/* 되돌리기 어려운 동작에만. 붉은 면이 아니라 붉은 글자다 — 화면이 경보처럼 보이지 않는다. */
+
+.btn--danger {
+  border-color: var(--hairline);
+  color: var(--danger);
+}
+
+.btn--danger:hover:not(:disabled) {
+  border-color: var(--danger);
+}
+
+/* 꺼진 컨트롤은 흐리되 사라지지 않는다 — 무엇이 꺼졌는지 읽을 수 있어야 한다. */
+
+.btn:disabled {
+  opacity: 0.5;
+}
+
+/*
+ * 입력 — text input · select · toggle이 같은 규칙을 쓴다.
+ * 검증 실패는 테두리 색과 `.field__error` 문장이 함께 말한다 (요구 12).
+ */
+
+.input,
+.select {
+  width: 100%;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  background-color: var(--surface);
+  font-size: var(--type-body);
+  line-height: var(--line-normal);
+  color: var(--text);
+}
+
+.input:focus-visible,
+.select:focus-visible {
+  border-color: var(--accent);
+}
+
+.input:disabled,
+.select:disabled {
+  opacity: 0.5;
+}
+
+.input[aria-invalid='true'],
+.select[aria-invalid='true'] {
+  border-color: var(--danger);
+}
+
+/* 네이티브 checkbox를 그대로 쓴다 — 키보드 조작과 상태 전달이 이미 옳다. accent만 맞춘다. */
+
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.toggle__input {
+  margin: 0;
+  accent-color: var(--accent);
+  flex: none;
+}
+
+.toggle__input:disabled {
+  opacity: 0.5;
+}
+
+.field__error {
+  margin: var(--space-1) 0 0;
+  font-size: var(--type-secondary);
+  color: var(--danger);
+}
+
+.field__hint {
+  margin: var(--space-1) 0 0;
+  font-size: var(--type-caption);
+  color: var(--text-muted);
+}
+
+/*
+ * 상태 — idle · working · success · warning · error · disabled.
+ *
+ * 색은 거들 뿐이다. `.status`는 언제나 상태를 말하는 글자를 담으며, 색만으로 상태를 말하는
+ * 자리를 만들지 않는다 (요구 12). idle은 조용한 기본값이라 따로 두지 않는다.
+ */
+
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--type-secondary);
+  line-height: var(--line-normal);
+  color: var(--text-muted);
+}
+
+/* 지금 무언가 하고 있다는 사실은 조용하지 않다. */
+
+.status--working {
+  color: var(--text);
+}
+
+.status--success {
+  color: var(--success);
+}
+
+.status--warning {
+  color: var(--warning);
+}
+
+.status--error {
+  color: var(--danger);
+}
+
+.status--disabled {
+  color: var(--text-muted);
+}
+
+/*
+ * 빈 상태 — 데이터가 없는 것은 고장이 아니다 (INV-8의 태도 · §13).
+ * 경고색도 테두리도 쓰지 않는다. 무엇이 없는가 한 줄, 무엇을 하면 되는가 한 줄, 동작 하나.
+ */
+
+.empty-state {
+  max-width: 520px;
+  padding: var(--space-5) 0;
+}
+
+.empty-state__title {
+  margin: 0 0 var(--space-1);
+  font-size: var(--type-body);
+  font-weight: var(--weight-medium);
+}
+
+.empty-state__body {
+  margin: 0 0 var(--space-3);
+  font-size: var(--type-secondary);
+  color: var(--text-muted);
+}
+
+/*
+ * 같은 규칙이되 자리에 맞는 크기다 — 내보내기 칸 · handoff 자리 · 설정 그룹 안에서는
+ * 위아래 여백을 줄인다. 빈 상태가 화면마다 제각각이지 않게 하는 것이 목적이므로
+ * 모양이 아니라 여백만 다르다.
+ */
+
+.share__panel .empty-state,
+.note__handoff-item .empty-state,
+.group .empty-state,
+.note__row .empty-state {
+  padding: 0 0 var(--space-2);
+}
+
+/*
+ * 로딩 — 오래 걸리는 동작이 얼어붙은 것처럼 보이지 않게 한다.
+ *
+ * 고리 하나가 전부이며 장식이 아니라 '아직 진행 중'이라는 사실이다. 고리만으로는 무엇을
+ * 기다리는지 알 수 없으므로 글자가 언제나 함께 온다.
+ */
+
+.loading {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--type-secondary);
+  line-height: var(--line-normal);
+  color: var(--text-muted);
+}
+
+/* 문단으로 놓일 때의 여백. 크기와 마찬가지로 화면이 다시 정하지 않는다. */
+
+p.status,
+p.loading {
+  margin: 0 0 var(--space-2);
+}
+
+/* radius 5px는 사각 표면의 규칙이다. 고리는 원이어야 하므로 이 한 곳만 50%다. */
+
+.spinner {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  border: 2px solid var(--hairline);
+  border-top-color: var(--text-muted);
+  border-radius: 50%;
+  animation: spinner-turn 0.8s linear infinite;
+}
+
+@keyframes spinner-turn {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+/* 움직임을 원하지 않는 사람에게는 멈춘 고리로 남는다 — 글자가 함께 있으므로 뜻은 그대로다. */
+
+@media (prefers-reduced-motion: reduce) {
+  .btn {
+    transition: none;
+  }
+
+  .spinner {
+    animation: none;
+  }
 }
 
 /* app frame */
@@ -61,14 +497,14 @@ input {
 .sidebar {
   background-color: var(--surface-sidebar);
   border-right: 1px solid var(--hairline);
-  padding: 16px 12px;
+  padding: var(--space-4) var(--space-3);
   overflow-y: auto;
 }
 
 .sidebar__brand {
-  margin: 0 8px 16px;
-  font-size: 13px;
-  font-weight: 600;
+  margin: 0 var(--space-2) var(--space-4);
+  font-size: var(--type-secondary);
+  font-weight: var(--weight-strong);
   letter-spacing: 0.02em;
   color: var(--text-muted);
 }
@@ -82,17 +518,29 @@ input {
 .sidebar__item {
   display: block;
   width: 100%;
-  padding: 5px 8px;
+  padding: var(--space-1) var(--space-2);
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--radius);
   background: none;
+  font-size: var(--type-body);
+  line-height: var(--line-normal);
   text-align: left;
+  color: var(--text-muted);
   cursor: default;
 }
 
+.sidebar__item:hover {
+  background-color: var(--selected);
+  color: var(--text);
+}
+
+/* 지금 보고 있는 화면. 면 · 굵기 · 글자색 셋이 함께 말한다 — 색 하나로만 말하지 않으며
+   (요구 12) `aria-current="page"`가 그 사실을 소리로도 전한다. */
+
 .sidebar__item--active {
   background-color: var(--selected);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
+  color: var(--text);
 }
 
 .main {
@@ -104,29 +552,28 @@ input {
 .header {
   display: flex;
   align-items: baseline;
-  gap: 12px;
-  padding: 20px 24px 12px;
+  gap: var(--space-3);
+  padding: var(--space-5) var(--space-5) var(--space-3);
   border-bottom: 1px solid var(--hairline);
 }
 
 .header__title {
   margin: 0;
-  font-size: 20px;
-  font-weight: 600;
+  font-size: var(--type-page-title);
+  font-weight: var(--weight-strong);
+  line-height: var(--line-tight);
 }
 
+/* 제목 옆의 되돌아가기. 테두리가 소음이 되는 자리라 ghost 버튼을 쓰고 여백만 없앤다. */
+
 .header__back {
-  border: 0;
-  background: none;
   padding: 0;
-  color: var(--text-muted);
-  cursor: default;
 }
 
 /* screens */
 
 .screen {
-  padding: 20px 24px;
+  padding: var(--space-5);
 }
 
 .screen--centered {
@@ -135,66 +582,85 @@ input {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 4px;
+  gap: var(--space-1);
 }
+
+/* 한 문장짜리 사실. 본문 크기 그대로이며 그 아래에 보통 거드는 줄이 온다. */
 
 .empty {
-  margin: 0 0 4px;
+  margin: 0 0 var(--space-1);
 }
 
+/* 본문을 거드는 줄. 타입 스케일의 secondary 칸이며 화면마다 크기를 새로 정하지 않는다. */
+
 .hint {
-  margin: 0 0 12px;
+  margin: 0 0 var(--space-2);
+  font-size: var(--type-secondary);
+  line-height: var(--line-normal);
   color: var(--text-muted);
 }
 
-.action {
-  padding: 4px 12px;
-  border: 1px solid var(--hairline);
-  border-radius: 5px;
-  background: var(--surface);
-  cursor: default;
+/* 문장 여럿이 잇달아 올 때는 사이를 좁게 둔다 — 문단 하나로 읽힌다. */
+
+.hint + .hint {
+  margin-top: calc(-1 * var(--space-1));
 }
 
 /* recordings list */
 
+/*
+ * 행 하나하나를 카드로 만들지 않는다 (요구 10). 구분은 hairline 하나와 여백이고, 위계는
+ * 제목(body medium) · 날짜와 길이(secondary) · 상태(caption) 세 단으로 타이포가 만든다.
+ * 좌우 여백만큼 목록을 바깥으로 물려서, 가리키는 면이 화면 여백과 나란히 서게 한다.
+ */
+
 .list {
   list-style: none;
-  margin: 0;
+  margin: 0 calc(-1 * var(--space-2));
   padding: 0;
 }
 
 .list__row {
   display: block;
   width: 100%;
-  padding: 10px 0;
+  padding: var(--space-3) var(--space-2);
   border: 0;
   border-bottom: 1px solid var(--hairline);
+  border-radius: var(--radius);
   background: none;
   text-align: left;
   cursor: default;
 }
 
+.list__row:hover {
+  background-color: var(--surface-sidebar);
+}
+
 .list__title {
   display: block;
-  font-weight: 500;
+  font-size: var(--type-body);
+  font-weight: var(--weight-medium);
+  line-height: var(--line-normal);
 }
 
 .list__row .hint {
   display: block;
-  margin: 0;
+  margin: var(--space-1) 0 0;
 }
 
-/* 항목마다 transcription · AI · Notion 세 가지 상태 (§5 A). */
+/* 항목마다 transcription · AI · Notion 세 가지 상태 (§5 A). 언제나 이름과 값이 함께 있다 —
+   색으로만 말하는 자리가 아니다 (요구 12). */
 
 .list__statuses {
   display: block;
-  margin-top: 2px;
-  font-size: 13px;
+  margin-top: var(--space-1);
+  font-size: var(--type-caption);
+  line-height: var(--line-normal);
   color: var(--text-muted);
 }
 
 .list__status + .list__status {
-  margin-left: 12px;
+  margin-left: var(--space-3);
 }
 
 .list__status-value {
@@ -205,32 +671,34 @@ input {
 
 .failure {
   max-width: 520px;
-  margin-bottom: 16px;
-  padding: 12px;
+  margin-bottom: var(--space-4);
+  padding: var(--space-3);
   border: 1px solid var(--hairline);
-  border-radius: 5px;
+  border-radius: var(--radius);
 }
 
 /* 무엇을 하다 실패했는가 — 원인 문장 위에 놓인다. */
 
 .failure__headline {
-  margin: 0 0 4px;
-  font-weight: 600;
+  margin: 0 0 var(--space-1);
+  font-size: var(--type-body);
+  font-weight: var(--weight-strong);
 }
 
 .failure__message {
-  margin: 0 0 4px;
-  font-weight: 500;
+  margin: 0 0 var(--space-1);
+  font-weight: var(--weight-medium);
 }
 
 .failure__answers {
-  margin: 0 0 8px;
+  margin: 0 0 var(--space-2);
+  font-size: var(--type-secondary);
   color: var(--text-muted);
 }
 
 .failure__detail {
-  margin: 0 0 8px;
-  font-size: 13px;
+  margin: 0 0 var(--space-2);
+  font-size: var(--type-caption);
   color: var(--text-muted);
   word-break: break-word;
 }
@@ -249,27 +717,34 @@ input {
 }
 
 .recording {
-  margin: 28px 0 16px;
+  margin: var(--space-6) 0 var(--space-4);
 }
 
 .recording__state {
-  margin: 0;
-  font-size: 13px;
+  margin: 0 0 var(--space-1);
+  font-size: var(--type-secondary);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--text-muted);
 }
 
-/* 녹음 중일 때만 흐리지 않다. 상태가 한눈에 갈린다. */
+/* 녹음 중일 때만 흐리지 않다. 상태가 한눈에 갈린다 — 그리고 그 사실은 언제나 글자로 있다
+   (`stateText` · 요구 12). 색은 거들 뿐이다. */
 
 .recording__state--live {
-  font-weight: 600;
+  font-weight: var(--weight-strong);
   color: var(--text);
 }
 
+/*
+ * 경과 시간은 타입 스케일 밖의 한 곳이다 — 이 화면에서 가장 큰 것이 상태와 시간이어야
+ * 하기 때문이다 (§19). 크기 자체는 `--type-display`로 올려 두었다: 예외는 한 자리지만
+ * 값이 화면 안에 흩어져 있을 이유는 없다.
+ */
+
 .recording__elapsed {
   margin: 0;
-  font-size: 56px;
+  font-size: var(--type-display);
   font-weight: 300;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.01em;
@@ -277,30 +752,49 @@ input {
 
 .recording__controls {
   display: flex;
-  gap: 8px;
-  margin-bottom: 20px;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-5);
+}
+
+/*
+ * 주 조작이 화면을 지배한다 (요구 10). 네 버튼은 본문보다 크고 서로 같은 크기이며, 지금
+ * 누를 수 있는 것과 없는 것이 `:disabled`의 흐림으로 갈린다 — 보기 좋으라고 기능적 명확성을
+ * 줄이지 않는다.
+ */
+
+.recording__controls .btn {
+  margin-left: 0;
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--type-section-title);
 }
 
 .recording__microphone {
   max-width: 520px;
-  margin-bottom: 20px;
+  margin-bottom: var(--space-5);
 }
 
 .recording__device {
-  margin: 0 0 4px;
+  margin: 0 0 var(--space-1);
 }
 
 /* recording detail (§5 C) */
 
+/*
+ * 위계는 넷이다 (요구 10) — 이 녹음이 무엇인가(제목) · 언제 얼마나(부제) · 재생 ·
+ * 내보내는 문 둘, 그 아래에 탭이 온다. 탭 구성은 그대로다.
+ */
+
 .detail__title {
-  margin: 0 0 2px;
-  font-size: 16px;
-  font-weight: 600;
+  margin: 0 0 var(--space-1);
+  font-size: var(--type-section-title);
+  font-weight: var(--weight-strong);
+  line-height: var(--line-tight);
 }
 
 .detail__player {
   max-width: 520px;
-  margin: 16px 0 4px;
+  margin: var(--space-4) 0 var(--space-1);
 }
 
 /* 재생 막대 하나가 전부다. 파형도 장식도 두지 않는다 (§19). */
@@ -312,19 +806,19 @@ input {
 /* 파일이 없는 상태. 실패처럼 붉게 칠하지 않는다 — 레코드는 온전하다 (INV-3 · INV-4). */
 
 .detail__player--missing {
-  padding: 12px;
+  padding: var(--space-3);
   border: 1px solid var(--hairline);
-  border-radius: 5px;
+  border-radius: var(--radius);
 }
 
 .detail__missing {
-  margin: 0 0 4px;
-  font-weight: 500;
+  margin: 0 0 var(--space-1);
+  font-weight: var(--weight-medium);
 }
 
 .detail__path {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--type-caption);
   color: var(--text-muted);
   word-break: break-all;
 }
@@ -334,9 +828,9 @@ input {
 .share {
   display: flex;
   flex-wrap: wrap;
-  gap: 24px;
+  gap: var(--space-5);
   max-width: 640px;
-  margin: 16px 0;
+  margin: var(--space-5) 0;
 }
 
 .share__panel {
@@ -346,42 +840,44 @@ input {
 .share__title {
   display: flex;
   align-items: baseline;
-  gap: 8px;
-  margin: 0 0 8px;
-  font-size: 13px;
-  font-weight: 600;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-2);
+  font-size: var(--type-secondary);
+  font-weight: var(--weight-strong);
   letter-spacing: 0.02em;
   color: var(--text-muted);
 }
 
-/* 이 녹음의 Notion 상태 (§7). 목록의 상태 표시와 같은 문자열이다. */
+/* 이 녹음의 Notion 상태 (§7). 목록의 상태 표시와 같은 문자열이며, 상태는 언제나 글자다. */
 
 .share__status {
-  font-weight: 400;
+  font-weight: var(--weight-regular);
   color: var(--text);
 }
 
 .share__done {
-  margin-bottom: 8px;
+  margin-bottom: var(--space-2);
 }
 
 .share__confirm {
-  margin-bottom: 8px;
+  margin-bottom: var(--space-2);
 }
 
 .share__headline {
-  margin: 0 0 4px;
+  margin: 0 0 var(--space-1);
+  font-weight: var(--weight-medium);
 }
 
 .share__file {
-  margin: 0;
+  margin: 0 0 var(--space-1);
+  font-size: var(--type-secondary);
 }
 
 /* 만들어진 파일의 전체 경로 · 만들어진 페이지의 식별자. 잘라 보이지 않는다 (§4.1). */
 
 .share__path {
-  margin: 0 0 4px;
-  font-size: 13px;
+  margin: 0 0 var(--space-1);
+  font-size: var(--type-caption);
   color: var(--text-muted);
   word-break: break-all;
 }
@@ -389,45 +885,64 @@ input {
 /* 무엇이 나가는가 (INV-5 · INV-6). 본문이 어느 상태든 같은 자리에 있다. */
 
 .share__contents {
-  margin-top: 12px;
+  margin-top: var(--space-3);
 }
 
 .share__contents-title {
-  margin: 0 0 4px;
-  font-size: 13px;
+  margin: 0 0 var(--space-1);
+  font-size: var(--type-caption);
   color: var(--text-muted);
 }
 
 .share__items {
-  margin: 0 0 4px;
-  padding-left: 20px;
-  font-size: 13px;
+  margin: 0 0 var(--space-1);
+  padding-left: var(--space-5);
+  font-size: var(--type-caption);
   color: var(--text-muted);
 }
 
 .share__item {
-  padding: 1px 0;
+  padding: var(--space-1) 0 0;
 }
+
+/*
+ * 탭 (§5 C). **구성은 그대로다** — 세 탭의 이름도 순서도 이 Task가 바꾸지 않았고,
+ * 바뀐 것은 여백과 활성 표시뿐이다. 활성은 밑줄 · 굵기 · 글자색 셋이 함께 말하며
+ * `aria-selected`가 그 사실을 소리로도 전한다 (요구 12).
+ */
 
 .tabs {
   display: flex;
-  gap: 16px;
-  margin: 12px 0;
+  gap: var(--space-4);
+  margin: var(--space-5) 0 var(--space-4);
   border-bottom: 1px solid var(--hairline);
 }
 
 .tabs__tab {
-  padding: 0 0 8px;
+  padding: 0 0 var(--space-2);
   border: 0;
   border-bottom: 2px solid transparent;
   background: none;
+  font-size: var(--type-body);
+  line-height: var(--line-normal);
   color: var(--text-muted);
   cursor: default;
 }
 
-.tabs__tab--active {
-  border-bottom-color: var(--text);
+.tabs__tab:hover {
   color: var(--text);
+}
+
+.tabs__tab--active {
+  border-bottom-color: var(--accent);
+  font-weight: var(--weight-medium);
+  color: var(--text);
+}
+
+/* 지금 보고 있는 탭의 내용. 탭 줄과 붙어 보이지 않을 만큼만 띄운다. */
+
+.tabs__panel {
+  padding-top: var(--space-1);
 }
 
 /* transcript 탭 (§5 C · phase-prompt/03 요구 6) */
@@ -439,7 +954,7 @@ input {
 /* 문장 목록. 번호도 강조도 두지 않는다 — 읽는 것은 문장이다 (§19). */
 
 .transcript__lines {
-  margin: 12px 0 0;
+  margin: var(--space-3) 0 0;
   padding: 0;
   list-style: none;
 }
@@ -447,15 +962,15 @@ input {
 .transcript__line {
   display: grid;
   grid-template-columns: 92px 1fr;
-  gap: 12px;
-  padding: 6px 0;
+  gap: var(--space-3);
+  padding: var(--space-1) 0;
 }
 
 /* timestamp는 자리를 알려 줄 뿐이므로 문장보다 조용하다. 자릿수가 흔들리지 않게 고정폭으로. */
 
 .transcript__time {
   font-variant-numeric: tabular-nums;
-  font-size: 13px;
+  font-size: var(--type-secondary);
   color: var(--text-muted);
   white-space: nowrap;
 }
@@ -474,48 +989,101 @@ input {
 
 .note__modes {
   display: flex;
-  gap: 8px;
-  margin-bottom: 12px;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
 }
 
 .note__mode {
-  padding: 4px 12px;
+  padding: var(--space-1) var(--space-3);
   border: 1px solid var(--hairline);
-  border-radius: 5px;
+  border-radius: var(--radius);
   background: var(--surface);
+  font-size: var(--type-body);
+  line-height: var(--line-normal);
   color: var(--text-muted);
   cursor: default;
 }
 
-.note__mode--active {
-  color: var(--text);
-  font-weight: 500;
+.note__mode:hover:not(:disabled) {
+  background-color: var(--selected);
 }
+
+/* 고른 mode. 테두리 · 굵기 · 글자색이 함께 말하고 `aria-pressed`가 그 사실을 전한다. */
+
+.note__mode--active {
+  border-color: var(--accent);
+  color: var(--text);
+  font-weight: var(--weight-medium);
+}
+
+/* 지금 고를 수 없는 상태. 흐리되 사라지지 않는다 — 무엇이 꺼졌는지 읽을 수 있어야 한다. */
 
 .note__mode:disabled {
   opacity: 0.5;
 }
 
+/* 노트를 얻는 두 길 (phase-prompt/05.5 요구 6). 위아래로 놓이고, 아래 줄은 AI provider가
+   없어도 그대로 쓸 수 있다 (MH-1 · MH-2). 어느 쪽도 카드나 테두리로 강조하지 않는다 — 위계는
+   제목과 여백으로 만든다. */
+
+.note__row {
+  margin-bottom: var(--space-5);
+}
+
+.note__row-title {
+  margin: 0 0 var(--space-1);
+  font-size: var(--type-secondary);
+  font-weight: var(--weight-strong);
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+}
+
+/* 위 줄은 조건이 아니다. 둘 사이의 접속사도 조용하다. */
+
+.note__or {
+  margin: 0 0 var(--space-5);
+  font-size: var(--type-secondary);
+  color: var(--text-muted);
+}
+
+/* 세 자리는 나란히 놓이고, 좁아지면 접힌다. */
+
+.note__handoff {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-5);
+}
+
+.note__handoff-item {
+  flex: 1 1 260px;
+}
+
+.note__handoff-title {
+  margin: 0 0 var(--space-1);
+  font-weight: var(--weight-medium);
+}
+
 /* AI가 꺼져 있는 상태. 경고색도 테두리도 없다 — 담담한 사실이다 (INV-8 · §13). */
 
 .note__off {
-  margin-bottom: 12px;
+  margin-bottom: var(--space-3);
 }
 
 /* 노트 본문. 구조 그대로 놓인다 (§9.3). */
 
 .note__document {
-  margin: 12px 0 0;
+  margin: var(--space-4) 0 0;
 }
 
 .note__section {
-  margin-bottom: 16px;
+  margin-bottom: var(--space-4);
 }
 
 .note__section-title {
-  margin: 0 0 4px;
-  font-size: 13px;
-  font-weight: 600;
+  margin: 0 0 var(--space-1);
+  font-size: var(--type-secondary);
+  font-weight: var(--weight-strong);
   letter-spacing: 0.02em;
   color: var(--text-muted);
 }
@@ -527,57 +1095,84 @@ input {
 
 .note__items {
   margin: 0;
-  padding-left: 20px;
+  padding-left: var(--space-5);
 }
 
 .note__item {
-  padding: 2px 0;
+  padding: var(--space-1) 0 0;
 }
 
 /* 이 노트가 무엇으로 언제 어떤 Transcript에서 만들어졌는가 (§7.3). 본문보다 조용하다. */
 
 .note__provenance {
-  margin: 16px 0 12px;
-  font-size: 13px;
+  margin: var(--space-4) 0 var(--space-3);
+  font-size: var(--type-caption);
   color: var(--text-muted);
   word-break: break-all;
 }
 
-/* settings */
+/*
+ * settings — 단순한 그룹 목록이다 (요구 10).
+ *
+ * 설정 하나하나에 카드를 두지 않는다. 그룹 사이를 가르는 것은 hairline 하나와 여백뿐이며,
+ * 그룹 안의 위계는 제목과 여백이 만든다.
+ */
 
 .group {
   max-width: 520px;
-  margin-bottom: 28px;
+  margin-bottom: var(--space-6);
+}
+
+.group + .group {
+  padding-top: var(--space-6);
+  border-top: 1px solid var(--hairline);
 }
 
 .group__title {
-  margin: 0 0 8px;
-  font-size: 13px;
-  font-weight: 600;
+  margin: 0 0 var(--space-3);
+  font-size: var(--type-secondary);
+  font-weight: var(--weight-strong);
   letter-spacing: 0.02em;
   color: var(--text-muted);
 }
 
+/* 한 그룹 안의 부분. AI 그룹이 '연결된 provider'와 '스스로 세우는 로컬 provider'로 나뉜다
+   (phase-prompt/05.5 요구 7 · 10). 위계는 여백과 제목으로 만든다 — 카드도 테두리도 쓰지
+   않는다. */
+
+.group__part {
+  margin-top: var(--space-5);
+}
+
+.group__subtitle {
+  margin: 0 0 var(--space-1);
+  font-size: var(--type-body);
+  font-weight: var(--weight-strong);
+}
+
 .field {
   display: block;
-  margin-bottom: 8px;
+  margin-bottom: var(--space-3);
 }
 
 .field--inline {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .field__label {
   display: block;
+  font-size: var(--type-body);
 }
 
-.field__input {
-  width: 100%;
-  margin-top: 4px;
-  padding: 4px 8px;
-  border: 1px solid var(--hairline);
-  border-radius: 5px;
-  background: var(--surface);
+/* 레이블과 컨트롤은 한 덩어리다 — 그 사이가 다음 항목과의 사이보다 좁다. */
+
+.field .input,
+.field .select {
+  margin-top: var(--space-1);
+}
+
+.field--inline .field__label {
+  margin: 0;
 }

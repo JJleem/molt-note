@@ -31,7 +31,7 @@ export function FailureNotice({
       </p>
       {view.detail !== null && <p className="failure__detail">{view.detail}</p>}
       {view.retryable && onRetry !== undefined && (
-        <button type="button" className="action" onClick={onRetry}>
+        <button type="button" className="btn btn--secondary" onClick={onRetry}>
           Try Again
         </button>
       )}

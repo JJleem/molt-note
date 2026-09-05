@@ -1,0 +1,66 @@
+ M src-tauri/src/commands/export.rs
+ M src-tauri/src/commands/mod.rs
+ M src-tauri/src/commands/payload.rs
+ M src-tauri/src/export/filename.rs
+ M src-tauri/src/export/markdown.rs
+ M src-tauri/src/export/mod.rs
+ M src-tauri/src/export/run.rs
+ M src-tauri/src/lib.rs
+ M src/App.css
+ M src/ipc/commands.ts
+ M src/ipc/types.ts
+ M src/screens/RecordingDetailScreen.tsx
+ M src/screens/SettingsScreen.tsx
+ M src/screens/aiProviderSettings.test.ts
+ M src/screens/aiProviderSettings.ts
+ M tests/ipc-boundary.test.ts
+ M tests/screen-boundary.test.ts
+?? .loop/evidence/TASK-055/
+?? .loop/evidence/TASK-056/
+?? .loop/evidence/TASK-057/
+?? .loop/evidence/TASK-058/
+?? .loop/evidence/TASK-059/
+?? .loop/evidence/TASK-060/
+?? .loop/evidence/TASK-061/
+?? .loop/evidence/TASK-063/
+?? .loop/tasks/TASK-055.yaml
+?? .loop/tasks/TASK-056.yaml
+?? .loop/tasks/TASK-057.yaml
+?? .loop/tasks/TASK-058.yaml
+?? .loop/tasks/TASK-059.yaml
+?? .loop/tasks/TASK-060.yaml
+?? .loop/tasks/TASK-061.yaml
+?? .loop/tasks/TASK-062.yaml
+?? .loop/tasks/TASK-063.yaml
+?? .loop/tasks/TASK-064.yaml
+?? .loop/tasks/TASK-065.yaml
+?? docs/ADR-0010-manual-ai-handoff.md
+?? phase-prompt/05.5-manual-ai-handoff-and-ui-foundation.md
+?? src-tauri/src/export/ai_request.rs
+?? src-tauri/src/export/handoff.rs
+?? src-tauri/tests/manual_ai_handoff.rs
+?? src-tauri/tests/manual_handoff_invariants.rs
+?? src/platform/
+?? src/screens/aiHandoffView.test.ts
+?? src/screens/aiHandoffView.ts
+?? src/screens/copyView.test.ts
+?? src/screens/copyView.ts
+?? tests/manual-handoff-invariants.test.ts
+ src-tauri/src/commands/export.rs       |  94 ++++++-
+ src-tauri/src/commands/mod.rs          | 116 +++++++-
+ src-tauri/src/commands/payload.rs      |   5 +
+ src-tauri/src/export/filename.rs       |  78 ++++++
+ src-tauri/src/export/markdown.rs       |  65 ++++-
+ src-tauri/src/export/mod.rs            |  10 +-
+ src-tauri/src/export/run.rs            |  52 +++-
+ src-tauri/src/lib.rs                   |  17 ++
+ src/App.css                            | 473 +++++++++++++++++++++++++++++++--
+ src/ipc/commands.ts                    |  60 ++++-
+ src/ipc/types.ts                       |  11 +-
+ src/screens/RecordingDetailScreen.tsx  | 366 ++++++++++++++++++++++++-
+ src/screens/SettingsScreen.tsx         | 240 ++++++++++-------
+ src/screens/aiProviderSettings.test.ts | 107 ++++++++
+ src/screens/aiProviderSettings.ts      | 124 +++++++++
+ tests/ipc-boundary.test.ts             |  48 +++-
+ tests/screen-boundary.test.ts          |  84 ++++++
+ 17 files changed, 1772 insertions(+), 178 deletions(-)

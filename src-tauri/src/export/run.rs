@@ -41,7 +41,7 @@ use rusqlite::Connection;
 
 use crate::ai::note::{decode_content, StructuredNote};
 use crate::db::store;
-use crate::domain::{Failure, FailureKind, RecordingId, TranscriptId};
+use crate::domain::{Failure, FailureKind, Recording, RecordingId, Transcript, TranscriptId};
 
 use super::file::{self, WrittenFile};
 use super::filename::export_file_name;
@@ -60,17 +60,14 @@ pub fn export(
     directory: &Path,
     recording_id: &RecordingId,
 ) -> Result<WrittenFile, Failure> {
-    // 내보낼 대상이 실재하는지부터 본다. 없는 Recording에 대해서는 파일을 만들지 않는다.
-    let recording =
-        store::load_recording(connection, recording_id)?.ok_or_else(|| unknown_recording(recording_id))?;
-
-    // 기본 입력은 `current_transcript_id`가 가리키는 Transcript다 (§7.2). **다른 version을
-    // 추측해서 고르지 않는다.**
-    let Some(transcript_id) = recording.current_transcript_id.clone() else {
-        return Err(nothing_to_export(recording_id));
-    };
-    let transcript = store::load_transcript(connection, &transcript_id)?
-        .ok_or_else(|| dangling_transcript(&transcript_id))?;
+    // 내보낼 대상과 **current가 가리키는** Transcript를 읽는다 (§7.2). 다른 version을
+    // 추측해서 고르지 않는다.
+    let (recording, transcript) = current_input(
+        connection,
+        recording_id,
+        unknown_recording,
+        nothing_to_export,
+    )?;
 
     // **없는 것이 정상이다** (INV-8). 여기서 provider를 묻지 않고, 노트를 만들지도 않는다.
     let note = latest_note(connection, &transcript.id)?;
@@ -83,6 +80,37 @@ pub fn export(
     let file_name = export_file_name(&recording.created_at, &recording.title);
 
     file::write_new(directory, &file_name, &markdown)
+}
+
+/// Recording 하나와 **`current_transcript_id`가 가리키는 Transcript만** 읽는다 (§7.2 · MH-5).
+///
+/// **다른 version을 추측해서 고르지 않는다.** 실패했거나 대체된 옛 Transcript를 고르는 자리는
+/// 이 함수 안에도, 이 함수를 부르는 어느 경로에도 없다 — 저장소에서 Transcript를 고르는 규칙이
+/// 여기 하나뿐이기 때문이다 (`crate::ai::run`과 같은 태도).
+///
+/// **없을 때 할 말은 부르는 쪽이 정한다.** 같은 상태라도 사용자가 요청한 동작에 따라 해야 할
+/// 말이 다르기 때문이다 — Markdown export가 "내보낼 내용이 없다"고 말하는 자리에서 Copy AI
+/// Prompt는 "AI에게 줄 것이 없다"고 말한다 ([`super::handoff`]). 그래서 **고르는 규칙은 한
+/// 자리에 있고, 문장만 갈라진다.**
+///
+/// **읽기 질의뿐이다** (INV-3 · MH-7). 여기서 저장소에 쓰는 코드가 없으므로 어떤 실패 경로도
+/// recording · transcript · ai_note를 고치거나 지울 수 없다.
+pub(crate) fn current_input(
+    connection: &Connection,
+    recording_id: &RecordingId,
+    unknown_recording: fn(&RecordingId) -> Failure,
+    no_transcript: fn(&RecordingId) -> Failure,
+) -> Result<(Recording, Transcript), Failure> {
+    let Some(recording) = store::load_recording(connection, recording_id)? else {
+        return Err(unknown_recording(recording_id));
+    };
+    let Some(transcript_id) = recording.current_transcript_id.clone() else {
+        return Err(no_transcript(recording_id));
+    };
+    let transcript = store::load_transcript(connection, &transcript_id)?
+        .ok_or_else(|| dangling_transcript(&transcript_id))?;
+
+    Ok((recording, transcript))
 }
 
 /// 그 Transcript에서 만들어진 노트 중 **마지막 것**. 하나도 없으면 `None`이다.

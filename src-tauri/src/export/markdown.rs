@@ -112,11 +112,7 @@ pub fn render(document: &ExportDocument<'_>) -> String {
     // 넣는가"를 각 자리가 따로 판단하지 않아도 되고, 빈 섹션이 생길 여지도 없다.
     let mut blocks = vec![
         format!("# {}", heading_text(&recording.title)),
-        format!(
-            "Date: {}\nDuration: {}",
-            date_text(&recording.created_at),
-            format_duration_ms(recording.duration_ms)
-        ),
+        metadata_block(recording),
     ];
 
     if let Some(note) = document.note {
@@ -210,12 +206,27 @@ fn render_body(body: SectionBody<'_>) -> Option<String> {
     }
 }
 
-/// Transcript가 만드는 블록들 — `## Transcript`와 타임스탬프 소제목들 (§11).
+/// Transcript 본문이 만드는 것 — **제목을 붙이지 않은 값**이다 (ADR-0010 §5.4).
+///
+/// 제목까지 필요한 자리(§11의 문서 · Copy Transcript)와 본문만 필요한 자리(프롬프트의
+/// `{{transcript}}`)가 **같은 규칙을 쓰되 붙이는 쪽이 붙이도록** 이 값으로 갈라진다 —
+/// 완성된 문자열을 잘라 쓰면 규칙이 두 벌이 된다.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum TranscriptBody<'a> {
+    /// 각 블록이 `### HH:MM:SS\n텍스트`다. 받은 순서 그대로이며 정렬하지 않는다.
+    Segments(Vec<String>),
+    /// segment가 하나도 남지 않았을 때의 `raw_text` 한 문단.
+    Raw(&'a str),
+    /// 적을 것이 없다.
+    Empty,
+}
+
+/// Transcript 본문을 만드는 **유일한 규칙** (§11).
 ///
 /// segment가 있으면 그것을 순서대로 적고, 없으면 `raw_text`를 한 문단으로 적는다.
-/// **둘 다 없으면 섹션 자체를 만들지 않는다** — 빈 제목은 "여기 무언가 실패했다"처럼
+/// **둘 다 없으면 아무것도 만들지 않는다** — 빈 제목은 "여기 무언가 실패했다"처럼
 /// 보이지만 실제로는 적을 것이 없을 뿐이다 (INV-8과 같은 이유).
-fn transcript_blocks(transcript: &Transcript) -> Vec<String> {
+pub(crate) fn transcript_body(transcript: &Transcript) -> TranscriptBody<'_> {
     let segments: Vec<String> = transcript
         .segments
         .iter()
@@ -230,24 +241,50 @@ fn transcript_blocks(transcript: &Transcript) -> Vec<String> {
         .collect();
 
     if !segments.is_empty() {
-        let mut blocks = vec![format!("## {TRANSCRIPT_SECTION}")];
-        blocks.extend(segments);
-        return blocks;
+        return TranscriptBody::Segments(segments);
     }
 
     let raw_text = transcript.raw_text.trim();
     if raw_text.is_empty() {
-        return Vec::new();
+        return TranscriptBody::Empty;
     }
 
-    vec![format!("## {TRANSCRIPT_SECTION}\n{raw_text}")]
+    TranscriptBody::Raw(raw_text)
+}
+
+/// Transcript가 만드는 블록들 — `## Transcript`와 [`transcript_body`]가 만든 본문 (§11).
+///
+/// 적을 것이 없으면 **섹션 자체를 만들지 않는다.**
+pub(crate) fn transcript_blocks(transcript: &Transcript) -> Vec<String> {
+    match transcript_body(transcript) {
+        TranscriptBody::Segments(segments) => {
+            let mut blocks = vec![format!("## {TRANSCRIPT_SECTION}")];
+            blocks.extend(segments);
+            blocks
+        }
+        TranscriptBody::Raw(raw_text) => vec![format!("## {TRANSCRIPT_SECTION}\n{raw_text}")],
+        TranscriptBody::Empty => Vec::new(),
+    }
+}
+
+/// Recording의 메타데이터 블록 — `Date:` · `Duration:` 두 줄 (§11).
+///
+/// **읽는 필드는 `created_at` · `duration_ms` 둘뿐이다.** 오디오 경로도 형식도 여기에 닿지
+/// 않는다 (INV-6). AI-ready 문서의 `## Recording`도 이 함수가 만든 두 줄을 그대로 쓴다
+/// (ADR-0010 §5.2) — 두 벌이 되면 같은 녹음이 문서마다 다른 날짜를 갖게 된다.
+pub(crate) fn metadata_block(recording: &Recording) -> String {
+    format!(
+        "Date: {}\nDuration: {}",
+        date_text(&recording.created_at),
+        format_duration_ms(recording.duration_ms)
+    )
 }
 
 /// 문서의 첫 `# ` 줄에 쓸 제목.
 ///
 /// **한 줄로 만든다.** 제목 안의 개행이 그대로 나가면 `# ` 다음 줄부터는 제목이 아니게 되고,
 /// Notion은 첫 h1을 페이지 제목으로 삼으므로(ADR-0009 §5.3) 그 경계가 문서마다 달라진다.
-fn heading_text(title: &str) -> String {
+pub(crate) fn heading_text(title: &str) -> String {
     let collapsed = single_line(title);
 
     if collapsed.is_empty() {

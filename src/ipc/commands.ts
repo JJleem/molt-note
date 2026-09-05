@@ -1,7 +1,7 @@
 /**
  * 프론트엔드가 부를 수 있는 동작의 전부.
  *
- * `src-tauri/src/lib.rs`가 등록한 스물여덟 개 command와 1:1이며, 그 밖의 경로는 없다 —
+ * `src-tauri/src/lib.rs`가 등록한 서른한 개 command와 1:1이며, 그 밖의 경로는 없다 —
  * **임의의 질의를 보낼 수단이 없다.** 저장소를 아는 코드는 Rust 안에만 있고, Notion으로
  * 나가는 요청을 만드는 코드도 마찬가지다 — webview에는 그 통로가 없다
  * (`docs/ADR-0001-local-persistence.md` · `docs/ADR-0009-notion-and-export.md` §5 ·
@@ -346,6 +346,64 @@ export function getAiNote(aiNoteId: string): Promise<AiNote | null> {
  */
 export function exportMarkdown(recordingId: string): Promise<ExportedFile> {
   return call<ExportedFile>('export_markdown', { recordingId });
+}
+
+/**
+ * 고른 mode에 맞는 **Manual 프롬프트**를 받는다 — 사람이 자기 AI 채팅에 그대로 붙여 넣을
+ * 문자열 하나다 (docs/ADR-0010-manual-ai-handoff.md §6 · §8.1).
+ *
+ * **앱은 이 경로에서 아무 데도 보내지 않는다** (MH-3). 나가는 행위의 주체는 사람이며, 이
+ * 호출이 하는 일은 저장된 값에서 문자열을 만들어 받는 것까지다. 그 문자열을 clipboard에 쓰는
+ * 자리는 이 모듈이 아니라 `src/platform/clipboard.ts`다 (ADR-0010 §7).
+ *
+ * **AI provider를 하나도 고르지 않아도 성공한다** (INV-8 · MH-1 · MH-2). 이 command에는
+ * provider도 AI 설정도 들어오지 않으므로, 그것을 이유로 거절당할 수단 자체가 없다 — Ollama를
+ * 설치하지 않은 사용자도 AI의 값을 얻을 수 있다.
+ *
+ * **`transcriptId`를 보내지 않는다** (§8.2 · MH-5). 쓰이는 것은 언제나
+ * `Recording.currentTranscriptId`가 가리키는 Transcript이며, 실패했거나 대체된 옛 version을
+ * 고를 방법이 이 경계에 없다.
+ *
+ * 프롬프트에는 transcript가 **포함된다** — 한 번의 붙여 넣기로 완결되게 하기 위해서다. 자기
+ * 지시를 직접 쓰고 싶으면 {@link getTranscriptText}가 별개의 길로 남는다.
+ *
+ * 아직 전사 내용이 없는 녹음이면 실패한다 — 본문 없는 프롬프트를 만드는 대신 무엇이 필요한지
+ * 말한다 (§13). 어떤 실패에서도 녹음 · 전사 · 노트 · 이미 내보낸 파일은 그대로다 (INV-3 · MH-7).
+ */
+export function getAiPrompt(recordingId: string, mode: NoteMode): Promise<string> {
+  return call<string>('get_ai_prompt', { recordingId, mode });
+}
+
+/**
+ * 사람이 그대로 붙여 넣을 수 있는 **Transcript 텍스트**를 받는다 (ADR-0010 §5.4 · §8.1).
+ *
+ * {@link getTranscript}와 다른 값이다 — 저쪽은 화면이 그리는 데이터(segment 목록)이고, 이쪽은
+ * **완성된 문자열 하나**다. timestamp를 문장으로 만드는 규칙은 여전히 Rust 한 곳에만 있으므로
+ * (`tests/screen-boundary.test.ts`), 화면이 이 값을 조립하지 않는다.
+ *
+ * `mode`를 보내지 않는다 — 같은 전사에서 언제나 같은 문자열이 온다. current Transcript만
+ * 쓴다는 것도 {@link getAiPrompt}와 같다 (MH-5).
+ */
+export function getTranscriptText(recordingId: string): Promise<string> {
+  return call<string>('get_transcript_text', { recordingId });
+}
+
+/**
+ * 녹음 하나를 **AI-ready Markdown 문서**로 내보낸다 (ADR-0010 §5.2 · §5.6 · §8.1).
+ *
+ * {@link exportMarkdown}과 **같은 디렉터리에 같은 정책으로** 쓴다 — 두 번째 export 시스템이
+ * 생기지 않았다. 다른 것은 문서의 내용과 파일 이름의 표식 하나뿐이며
+ * ({@link ExportedFile.fileName}), 그래서 같은 녹음의 두 문서가 파일 목록에서 구분된다.
+ *
+ * **이미 있는 파일을 덮어쓰지 않는다** — 같은 이름이 있으면 backend가 번호를 붙인다
+ * (docs/ADR-0009-notion-and-export.md §4.3). 그래서 실제로 쓰인 경로가 함께 오며, 화면은 그것을
+ * 보여준다 — 사용자가 파일을 찾지 못하는 상태로 두지 않는다.
+ *
+ * **clipboard를 전혀 쓰지 않는다.** 복사가 거절되는 환경에서도 이 길은 그대로 남는다
+ * (ADR-0010 §7.5) — 사용자는 만들어진 파일을 자기 AI 채팅에 첨부하거나 열어서 복사한다.
+ */
+export function exportAiRequest(recordingId: string, mode: NoteMode): Promise<ExportedFile> {
+  return call<ExportedFile>('export_ai_request', { recordingId, mode });
 }
 
 /**

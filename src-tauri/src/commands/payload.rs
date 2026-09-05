@@ -804,6 +804,11 @@ impl AiNotePayload {
 /// 짐작하지 않도록 실제로 쓰인 이름을 함께 싣는다.
 ///
 /// 내용은 싣지 않는다. 문서 본문은 파일에 있고, 그것을 IPC로 한 번 더 흘려보낼 이유가 없다.
+///
+/// **파일을 만드는 두 command가 이 값을 돌려준다** — [`crate::commands::export_markdown`]과
+/// [`crate::commands::export_ai_request`]다 (ADR-0010 §5.6). 두 번째 타입을 만들지 않는 이유는
+/// 화면이 알아야 하는 것이 둘 다 같기 때문이다: 어디에 무엇이 만들어졌는가. 두 문서는 이름으로
+/// 구분된다 (AI-ready 문서는 `…-ai-request.md`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExportedFilePayload {

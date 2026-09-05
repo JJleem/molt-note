@@ -1,0 +1,67 @@
+# Phase 5.5 기록 — Spec 방향 변경 · ADR 확정 · SYSTEM-MAP · Human Review 절차, 그리고 저장소 전체 Gate
+# Runtime이 PLAN-20260904T075433Z 승인 시점에 생성했다 (proposal P11). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-065
+status: DONE
+
+request: |-
+  **문서만 바꾸는 Task다 — 소스 · 설정 · 의존성 · 테스트를 건드리지 않는다.** 넷을 한다. (1) `docs/PRODUCT-SPEC.md`의 §9 · §14.5 · §21을 이 Phase의 두 방향 변경에 맞게 갱신한다 — §21의 Phase Roadmap에 **Phase 5.5를 삽입**하고, §14.5의 Ollama 서술을 '첫 provider · 기본 AI 경험'에서 '선택적 · 로컬 · 고급'으로 조정하며, §9에 Manual AI Handoff(사람이 Transcript를 외부 AI 채팅에 넘기는 경로)를 §11의 연장으로 더한다. **소급해서 지우지 않는다** — 언제 왜 바뀌었는지를 rev 기록으로 남기고, 이전 서술이 무엇이었는지가 사라지지 않게 한다. (2) `docs/ADR-0010-manual-ai-handoff.md`를 실제 구현 결과로 확정한다 — 계획과 달라진 것, 확인된 것(VERIFIED)과 확인하지 못한 것(UNVERIFIED)을 구분해 적는다. clipboard가 실제 환경에서 동작하는지는 이 Phase에서 확인되지 않았다면 그렇게 적는다. (3) `docs/SYSTEM-MAP.md`를 갱신한다 — Phase 5.5를 Build Evolution Map에 더하고, §2 흐름 · §3 컴포넌트(새 순수 모듈 · command · clipboard 경계) · §6 검증 모델의 테스트 수 · §9 결정 이력에 반영한다. **history를 덮어쓰지 않는다** — Current / Planned / Deferred가 구분되게 두고, 실제 외부 AI 채팅에서 확인되지 않은 것을 DONE으로 적지 않는다. (4) Human Review 절차 문서를 만든다 — 자동으로 판정할 수 없는 세 가지(화면이 실제로 차분하고 읽기 쉬운가 · Manual AI Handoff로 받은 결과가 실제 외부 AI 채팅에서 쓸 만한가 · Ollama가 선택적·고급으로 읽히는가)의 확인 절차와 **빈 기록표**를 담는다. 기록표를 미리 채우지 않는다. **Git commit / push는 이 Task의 일이 아니다** (`docs/GIT-WORKFLOW.md` — Phase commit은 완료·검증 후 운영자가 한다). 마지막으로 이 Task의 Gate는 **저장소 전체에 build · lint · test 셋 다** 돈다 (Phase 종료 요구 14).
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-063
+  - TASK-064
+
+stop_condition:
+  gates: [build, lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 2
+
+acceptance_criteria:
+  - id: AC-1
+    description: |-
+      저장소 전체에 build Gate가 통과한다.
+    verification:
+      type: gate
+      ref: build
+  - id: AC-2
+    description: |-
+      저장소 전체에 lint Gate가 통과한다.
+    verification:
+      type: gate
+      ref: lint
+  - id: AC-3
+    description: |-
+      저장소 전체에 test Gate가 통과한다.
+    verification:
+      type: gate
+      ref: test
+  - id: AC-4
+    description: |-
+      PRODUCT-SPEC §9 · §14.5 · §21이 갱신됐고, Phase 5.5가 로드맵에 삽입됐으며, 이전 서술을 소급 삭제하지 않고 언제 왜 바뀌었는지가 남아 있다.
+    verification:
+      type: verifier
+  - id: AC-5
+    description: |-
+      ADR-0010이 실제 구현 결과로 확정됐고, VERIFIED와 UNVERIFIED가 구분돼 있다. 확인하지 않은 것을 확인했다고 적지 않았다.
+    verification:
+      type: verifier
+  - id: AC-6
+    description: |-
+      SYSTEM-MAP에 Phase 5.5가 반영됐고 history가 덮어쓰이지 않았으며, 실제 외부 AI 채팅에서 확인되지 않은 것이 DONE으로 적히지 않았다.
+    verification:
+      type: verifier
+  - id: AC-7
+    description: |-
+      Human Review 절차 문서에 세 항목의 절차와 **빈** 기록표가 있고, 미리 채워진 결과가 없다. 이 Task가 소스 · 설정 · 테스트를 바꾸지 않았고 git commit을 만들지 않았다.
+    verification:
+      type: verifier
+      instruction: |-
+        git 변경 목록이 문서 파일뿐인지, 그리고 새 commit이 생기지 않았는지 확인한다.
+
+evidence: []
+
+failure_memo: []

@@ -1,0 +1,61 @@
+# clipboard capability 경계 하나와 복사 상태의 순수 판정
+# Runtime이 PLAN-20260904T075433Z 승인 시점에 생성했다 (proposal P4). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-058
+status: DONE
+
+request: |-
+  ADR-0010이 정한 자리에 **clipboard 쓰기 경계를 하나만** 만든다. React 컴포넌트 여기저기에서 clipboard를 직접 부르지 않는다 — 부르는 자리는 이 경계 하나이고, 화면은 그것을 통해서만 복사한다 (R-4 · INV-10). 경계는 실패를 **값으로** 돌려줘야 한다: 무엇이 실패했는지 · 원본이 안전한지 · 다시 시도할 수 있는지가 기존 `Failure` 모양으로 화면에 도달한다 (§13). 실패를 `console`로 흘리는 경로를 만들지 않는다 — `tests/screen-boundary.test.ts`가 `src/` 전체에서 그것을 막는다. 복사 동작의 상태(아직 안 함 · 복사 중 · 복사됨 · 실패)와 그 상태에서 무엇을 보여줄지의 판정은 **DOM을 모르는 순수 모듈**에 둔다(기존 `src/screens/<name>View.ts` 규약 그대로) — 그래야 clipboard 없이 vitest로 전부 판정된다. 복사 성공 표시는 색만으로 말하지 않고 텍스트를 동반한다. 브라우저 저장소(localStorage · sessionStorage · IndexedDB · cookie)를 쓰지 않는다. 자동 테스트가 실제 시스템 clipboard를 건드리지 않아야 한다 — 경계는 테스트에서 test double로 대체될 수 있는 모양이어야 한다. 확인하지 못한 플랫폼 능력을 동작한다고 단정하지 말고, 실패했을 때 사용자가 Export for AI로 갈 수 있다는 것이 화면 값으로 남게 한다.
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-055
+
+stop_condition:
+  gates: [build, lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 2
+
+acceptance_criteria:
+  - id: AC-1
+    description: |-
+      build Gate가 통과한다.
+    verification:
+      type: gate
+      ref: build
+  - id: AC-2
+    description: |-
+      lint Gate가 통과한다.
+    verification:
+      type: gate
+      ref: lint
+  - id: AC-3
+    description: |-
+      test Gate가 통과하고, 복사 상태 네 갈래(아직 안 함 · 복사 중 · 복사됨 · 실패)가 clipboard 없이 순수 모듈 테스트로 판정된다.
+    verification:
+      type: gate
+      ref: test
+  - id: AC-4
+    description: |-
+      clipboard를 실제로 부르는 자리가 저장소에 정확히 하나이고, React 컴포넌트에 흩어져 있지 않다.
+    verification:
+      type: verifier
+      instruction: |-
+        `src/`와 `src-tauri/src/`에서 clipboard 호출 지점을 전수 검색해 한 곳인지 확인한다.
+  - id: AC-5
+    description: |-
+      복사 실패가 사용자에게 보이고 재시도 가능하며, console로만 남는 경로가 없다. 실패 표시가 색만으로 말하지 않는다.
+    verification:
+      type: verifier
+  - id: AC-6
+    description: |-
+      자동 테스트가 실제 시스템 clipboard를 건드리지 않는다 — 경계가 test double로 대체된다.
+    verification:
+      type: verifier
+
+evidence: []
+
+failure_memo: []

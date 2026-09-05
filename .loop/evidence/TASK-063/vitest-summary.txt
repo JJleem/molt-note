@@ -1,0 +1,20 @@
+
+> molt-note@0.1.0 test
+> npm run test:web && npm run test:rust
+
+
+> molt-note@0.1.0 test:web
+> vitest run
+
+
+ RUN  v4.1.11 /Users/molt/orca/projects/molt-note
+
+
+ Test Files  25 passed (25)
+      Tests  468 passed (468)
+   Start at  00:23:37
+   Duration  413ms (transform 544ms, setup 0ms, import 865ms, tests 298ms, environment 1ms)
+
+
+> molt-note@0.1.0 test:rust
+> cargo test --manifest-path src-tauri/Cargo.toml

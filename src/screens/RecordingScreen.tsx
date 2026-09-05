@@ -188,7 +188,7 @@ export function RecordingScreen({ navigate }: ScreenProps) {
         <input
           id="recording-title"
           type="text"
-          className="field__input"
+          className="input"
           placeholder="Untitled recording"
           value={view.title}
           onChange={(event) => setView((state) => editedTitle(state, event.currentTarget.value))}
@@ -207,17 +207,40 @@ export function RecordingScreen({ navigate }: ScreenProps) {
         <p className="recording__elapsed">{display.elapsedLabel}</p>
       </section>
 
-      <div className="recording__controls">
-        <button type="button" className="action" disabled={!controls.record} onClick={start}>
+      {/* 주 조작 넷이 이 화면에서 상태 다음으로 크다 (§19 · 요구 10). 지금 누를 수 있는
+          것과 없는 것은 `disabled`가 가르고, 흐림으로 눈에도 갈린다 (요구 12). 어느 것을
+          누를 수 있는지 정하는 규칙은 여기 없고 `recordingControls`에 있다. */}
+      <div className="recording__controls" role="group" aria-label="Recording controls">
+        <button
+          type="button"
+          className="btn btn--primary"
+          disabled={!controls.record}
+          onClick={start}
+        >
           Record
         </button>
-        <button type="button" className="action" disabled={!controls.pause} onClick={pause}>
+        <button
+          type="button"
+          className="btn btn--secondary"
+          disabled={!controls.pause}
+          onClick={pause}
+        >
           Pause
         </button>
-        <button type="button" className="action" disabled={!controls.resume} onClick={resume}>
+        <button
+          type="button"
+          className="btn btn--secondary"
+          disabled={!controls.resume}
+          onClick={resume}
+        >
           Resume
         </button>
-        <button type="button" className="action" disabled={!controls.stop} onClick={stop}>
+        <button
+          type="button"
+          className="btn btn--secondary"
+          disabled={!controls.stop}
+          onClick={stop}
+        >
           Stop
         </button>
       </div>
@@ -225,7 +248,7 @@ export function RecordingScreen({ navigate }: ScreenProps) {
       <section className="recording__microphone">
         <p className="recording__device">{microphoneLabel(view.microphone)}</p>
         {notice !== null && <p className="hint">{notice}</p>}
-        <button type="button" className="action" onClick={reloadDevices}>
+        <button type="button" className="btn btn--secondary" onClick={reloadDevices}>
           Reload devices
         </button>
       </section>
@@ -249,7 +272,7 @@ export function RecordingScreen({ navigate }: ScreenProps) {
           </p>
           <button
             type="button"
-            className="action"
+            className="btn btn--secondary"
             onClick={() => navigate({ screen: 'recordings' })}
           >
             Show in Recordings

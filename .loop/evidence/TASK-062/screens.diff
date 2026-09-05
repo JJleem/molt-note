@@ -1,0 +1,2710 @@
+diff --git a/src/App.css b/src/App.css
+index 4bc980c..908f189 100644
+--- a/src/App.css
++++ b/src/App.css
+@@ -6,16 +6,84 @@
+ :root {
+   font-family:
+     -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, 'Helvetica Neue', sans-serif;
+-  font-size: 14px;
+-  line-height: 1.5;
++  /* 기준 크기는 스케일의 body 칸이다 — 두 벌이 되지 않게 여기서도 같은 토큰을 쓴다. */
++  font-size: var(--type-body);
++  line-height: var(--line-normal);
+ 
+   --text: #1c1c1e;
+-  --text-muted: #8a8a8e;
++  /*
++   * 거드는 글자. **읽을 수 있는 회색이어야 한다** (요구 12의 합리적 대비).
++   *
++   * 이전 값(#8a8a8e)은 흰 표면 위에서 약 3.4:1이었고, 이 Task가 부제 · 상태 · caption을
++   * 이 색으로 옮기면서 그 글자의 양이 늘었다. 약 5.3:1로 낮춰 잡아 본문(#1c1c1e)보다는
++   * 분명히 조용하되 읽히지 않는 자리가 생기지 않게 한다. dark 쪽은 이미 5:1을 넘으므로
++   * 그대로 둔다.
++   */
++  --text-muted: #6b6b70;
+   --surface: #ffffff;
+   --surface-sidebar: #f4f4f5;
+   --hairline: #e0e0e2;
+   --selected: #e4e4e7;
+ 
++  /*
++   * 타이포그래피 스케일 — 다섯 위계뿐이다 (§19 typography first).
++   * 화면이 임의의 크기를 만들지 않는다. 값은 이미 이 파일에서 쓰이던 것을 규칙으로 올린 것이며
++   * 새 크기를 발명하지 않았다.
++   */
++
++  --type-page-title: 20px;
++  --type-section-title: 16px;
++  --type-body: 14px;
++  --type-secondary: 13px;
++  --type-caption: 12px;
++
++  /*
++   * 위계 밖의 한 칸 — 녹음 화면의 경과 시간 하나만 쓴다 (§19 · 요구 10).
++   *
++   * 크기를 스케일 밖에 흩지 않으려고 값을 여기로 올렸다. 이것은 여섯 번째 위계가 아니라
++   * **한 화면을 지배해야 하는 값**의 자리이며, 다른 화면이 이것을 쓰지 않는다.
++   */
++
++  --type-display: 56px;
++
++  --weight-regular: 400;
++  --weight-medium: 500;
++  --weight-strong: 600;
++
++  --line-tight: 1.3;
++  --line-normal: 1.5;
++
++  /* 여백 스케일. 이 여섯 밖의 값을 새로 만들지 않는다. */
++
++  --space-1: 4px;
++  --space-2: 8px;
++  --space-3: 12px;
++  --space-4: 16px;
++  --space-5: 24px;
++  --space-6: 32px;
++
++  /* 이미 모든 곳이 5px 하나로 통일돼 있다. 바꿀 이유가 없어 그대로 토큰으로만 올린다. */
++
++  --radius: 5px;
++
++  /*
++   * accent와 상태색.
++   *
++   * accent는 주 동작 · 활성 네비게이션 · 의미 있는 상태 강조에만 쓴다 — 경쟁하는 색을
++   * 여럿 두지 않는다 (§19 · 요구 11). `--accent`는 채우는 면과 테두리, `--accent-text`는
++   * 표면 위의 글자다: dark에서 면으로 쓸 색과 글자로 읽을 색의 대비 조건이 다르다.
++   *
++   * 상태색은 거들 뿐이며 상태를 색으로만 말하지 않는다 — 언제나 글자가 함께 온다 (요구 12).
++   */
++
++  --accent: #0060df;
++  --accent-strong: #0050bb;
++  --accent-text: #0060df;
++  --on-accent: #ffffff;
++  --success: #1a7f37;
++  --warning: #9a6700;
++  --danger: #c0362c;
++
+   color: var(--text);
+   background-color: var(--surface);
+ 
+@@ -25,6 +93,12 @@
+   -moz-osx-font-smoothing: grayscale;
+ }
+ 
++/*
++ * dark는 이 Phase의 목표가 아니다 — 이미 있는 장치를 깨뜨리지 않는 것으로 충분하다.
++ * 그러므로 새로 더한 색 토큰은 여기에도 함께 정의한다. 크기·여백·굵기는 테마와 무관하므로
++ * 여기서 다시 정의하지 않는다.
++ */
++
+ @media (prefers-color-scheme: dark) {
+   :root {
+     --text: #f2f2f7;
+@@ -33,6 +107,17 @@
+     --surface-sidebar: #242426;
+     --hairline: #3a3a3c;
+     --selected: #38383a;
++
++    /* 어두운 표면 위에서 같은 역할을 하는 값. 면(`--accent`)과 글자(`--accent-text`)가
++       여기서 갈라진다 — 면 위의 흰 글자와 표면 위의 파란 글자가 동시에 읽혀야 한다. */
++
++    --accent: #0a6cff;
++    --accent-strong: #3b8bff;
++    --accent-text: #6aa9ff;
++    --on-accent: #ffffff;
++    --success: #3fb950;
++    --warning: #d29922;
++    --danger: #ff6b5e;
+   }
+ }
+ 
+@@ -45,11 +130,362 @@ body {
+ }
+ 
+ button,
+-input {
++input,
++select,
++textarea {
+   font: inherit;
+   color: inherit;
+ }
+ 
++/*
++ * ─────────────────────────────────────────────────────────────────────────────
++ * foundation — 화면들이 공유하는 규칙 (phase-prompt/05.5 요구 9 · 11 · 12)
++ *
++ * 서드파티 디자인 시스템을 들이지 않는다. 여기 있는 것은 이 파일에 이미 있던 모양을
++ * 이름 붙여 규칙으로 올린 것이고, 화면 하나에만 필요한 것은 아래 각 절에 그대로 둔다.
++ * 화면 마크업을 이 규칙 위로 옮기는 것은 다음 Task다.
++ * ─────────────────────────────────────────────────────────────────────────────
++ */
++
++/* 타이포그래피 — 위계는 다섯이며 이 밖의 크기를 화면이 만들지 않는다. */
++
++.t-page-title {
++  font-size: var(--type-page-title);
++  font-weight: var(--weight-strong);
++  line-height: var(--line-tight);
++}
++
++.t-section-title {
++  font-size: var(--type-section-title);
++  font-weight: var(--weight-strong);
++  line-height: var(--line-tight);
++}
++
++.t-body {
++  font-size: var(--type-body);
++  font-weight: var(--weight-regular);
++  line-height: var(--line-normal);
++}
++
++/* 본문 옆에서 본문을 거드는 값. 조용하지만 읽을 수 있어야 한다. */
++
++.t-secondary {
++  font-size: var(--type-secondary);
++  line-height: var(--line-normal);
++  color: var(--text-muted);
++}
++
++/* 경로 · 식별자 · 출처처럼 필요할 때만 읽는 값. */
++
++.t-caption {
++  font-size: var(--type-caption);
++  line-height: var(--line-normal);
++  color: var(--text-muted);
++}
++
++/*
++ * 문단으로 쓰일 때의 여백.
++ *
++ * 유틸리티가 크기만 정하고 여백을 화면에 맡기면, 화면마다 임의의 margin이 다시 생긴다 —
++ * 그것이 이 Phase가 없애려는 것이므로 여기서 한 번만 정한다.
++ */
++
++p.t-page-title,
++p.t-section-title,
++p.t-body,
++p.t-secondary,
++p.t-caption {
++  margin: 0 0 var(--space-2);
++}
++
++/*
++ * 보이는 focus (요구 12 · R-5).
++ *
++ * 지금까지 이 파일에 focus 스타일이 하나도 없어서, 키보드로 옮겨 다니면 지금 어디에 있는지
++ * 알 수 없었다. `:focus-visible`이므로 마우스로 누를 때는 뜨지 않는다 — 키보드로 왔을 때만
++ * 보인다.
++ */
++
++:focus-visible {
++  outline: 2px solid var(--accent);
++  outline-offset: 2px;
++}
++
++/* 스크롤 영역 안에서는 바깥으로 나간 링이 잘린다. 안쪽으로 그린다. */
++
++.sidebar :focus-visible,
++.list :focus-visible {
++  outline-offset: -2px;
++}
++
++/*
++ * 버튼 — Primary · Secondary · Ghost, 그리고 정말 필요한 곳의 Danger.
++ * 한 화면의 primary는 하나다. 그림자도 gradient도 두지 않는다 (§19).
++ */
++
++.btn {
++  display: inline-flex;
++  align-items: center;
++  gap: var(--space-2);
++  padding: var(--space-1) var(--space-3);
++  border: 1px solid transparent;
++  border-radius: var(--radius);
++  background: none;
++  font-size: var(--type-body);
++  line-height: var(--line-normal);
++  color: var(--text);
++  cursor: default;
++  /* 눌렀는가 · 위에 있는가 · 꺼졌는가가 튀지 않고 갈리도록 하는 것뿐이다. 장식이 아니다. */
++  transition:
++    background-color 0.12s ease,
++    border-color 0.12s ease,
++    color 0.12s ease;
++}
++
++/* 나란히 놓인 버튼이 서로 붙지 않게 한다. 감싸는 상자를 새로 두지 않기 위한 규칙이다. */
++
++.btn + .btn {
++  margin-left: var(--space-2);
++}
++
++.btn--primary {
++  background-color: var(--accent);
++  border-color: var(--accent);
++  color: var(--on-accent);
++  font-weight: var(--weight-medium);
++}
++
++.btn--primary:hover:not(:disabled),
++.btn--primary:active:not(:disabled) {
++  background-color: var(--accent-strong);
++  border-color: var(--accent-strong);
++}
++
++.btn--secondary {
++  border-color: var(--hairline);
++  background-color: var(--surface);
++}
++
++.btn--secondary:hover:not(:disabled) {
++  background-color: var(--selected);
++}
++
++/* 목록 안이나 제목 옆처럼 테두리가 소음이 되는 자리. */
++
++.btn--ghost {
++  color: var(--text-muted);
++}
++
++.btn--ghost:hover:not(:disabled) {
++  background-color: var(--selected);
++  color: var(--text);
++}
++
++/* 되돌리기 어려운 동작에만. 붉은 면이 아니라 붉은 글자다 — 화면이 경보처럼 보이지 않는다. */
++
++.btn--danger {
++  border-color: var(--hairline);
++  color: var(--danger);
++}
++
++.btn--danger:hover:not(:disabled) {
++  border-color: var(--danger);
++}
++
++/* 꺼진 컨트롤은 흐리되 사라지지 않는다 — 무엇이 꺼졌는지 읽을 수 있어야 한다. */
++
++.btn:disabled {
++  opacity: 0.5;
++}
++
++/*
++ * 입력 — text input · select · toggle이 같은 규칙을 쓴다.
++ * 검증 실패는 테두리 색과 `.field__error` 문장이 함께 말한다 (요구 12).
++ */
++
++.input,
++.select {
++  width: 100%;
++  padding: var(--space-1) var(--space-2);
++  border: 1px solid var(--hairline);
++  border-radius: var(--radius);
++  background-color: var(--surface);
++  font-size: var(--type-body);
++  line-height: var(--line-normal);
++  color: var(--text);
++}
++
++.input:focus-visible,
++.select:focus-visible {
++  border-color: var(--accent);
++}
++
++.input:disabled,
++.select:disabled {
++  opacity: 0.5;
++}
++
++.input[aria-invalid='true'],
++.select[aria-invalid='true'] {
++  border-color: var(--danger);
++}
++
++/* 네이티브 checkbox를 그대로 쓴다 — 키보드 조작과 상태 전달이 이미 옳다. accent만 맞춘다. */
++
++.toggle {
++  display: inline-flex;
++  align-items: center;
++  gap: var(--space-2);
++}
++
++.toggle__input {
++  margin: 0;
++  accent-color: var(--accent);
++  flex: none;
++}
++
++.toggle__input:disabled {
++  opacity: 0.5;
++}
++
++.field__error {
++  margin: var(--space-1) 0 0;
++  font-size: var(--type-secondary);
++  color: var(--danger);
++}
++
++.field__hint {
++  margin: var(--space-1) 0 0;
++  font-size: var(--type-caption);
++  color: var(--text-muted);
++}
++
++/*
++ * 상태 — idle · working · success · warning · error · disabled.
++ *
++ * 색은 거들 뿐이다. `.status`는 언제나 상태를 말하는 글자를 담으며, 색만으로 상태를 말하는
++ * 자리를 만들지 않는다 (요구 12). idle은 조용한 기본값이라 따로 두지 않는다.
++ */
++
++.status {
++  display: inline-flex;
++  align-items: center;
++  gap: var(--space-2);
++  font-size: var(--type-secondary);
++  line-height: var(--line-normal);
++  color: var(--text-muted);
++}
++
++/* 지금 무언가 하고 있다는 사실은 조용하지 않다. */
++
++.status--working {
++  color: var(--text);
++}
++
++.status--success {
++  color: var(--success);
++}
++
++.status--warning {
++  color: var(--warning);
++}
++
++.status--error {
++  color: var(--danger);
++}
++
++.status--disabled {
++  color: var(--text-muted);
++}
++
++/*
++ * 빈 상태 — 데이터가 없는 것은 고장이 아니다 (INV-8의 태도 · §13).
++ * 경고색도 테두리도 쓰지 않는다. 무엇이 없는가 한 줄, 무엇을 하면 되는가 한 줄, 동작 하나.
++ */
++
++.empty-state {
++  max-width: 520px;
++  padding: var(--space-5) 0;
++}
++
++.empty-state__title {
++  margin: 0 0 var(--space-1);
++  font-size: var(--type-body);
++  font-weight: var(--weight-medium);
++}
++
++.empty-state__body {
++  margin: 0 0 var(--space-3);
++  font-size: var(--type-secondary);
++  color: var(--text-muted);
++}
++
++/*
++ * 같은 규칙이되 자리에 맞는 크기다 — 내보내기 칸 · handoff 자리 · 설정 그룹 안에서는
++ * 위아래 여백을 줄인다. 빈 상태가 화면마다 제각각이지 않게 하는 것이 목적이므로
++ * 모양이 아니라 여백만 다르다.
++ */
++
++.share__panel .empty-state,
++.note__handoff-item .empty-state,
++.group .empty-state,
++.note__row .empty-state {
++  padding: 0 0 var(--space-2);
++}
++
++/*
++ * 로딩 — 오래 걸리는 동작이 얼어붙은 것처럼 보이지 않게 한다.
++ *
++ * 고리 하나가 전부이며 장식이 아니라 '아직 진행 중'이라는 사실이다. 고리만으로는 무엇을
++ * 기다리는지 알 수 없으므로 글자가 언제나 함께 온다.
++ */
++
++.loading {
++  display: inline-flex;
++  align-items: center;
++  gap: var(--space-2);
++  font-size: var(--type-secondary);
++  line-height: var(--line-normal);
++  color: var(--text-muted);
++}
++
++/* 문단으로 놓일 때의 여백. 크기와 마찬가지로 화면이 다시 정하지 않는다. */
++
++p.status,
++p.loading {
++  margin: 0 0 var(--space-2);
++}
++
++/* radius 5px는 사각 표면의 규칙이다. 고리는 원이어야 하므로 이 한 곳만 50%다. */
++
++.spinner {
++  width: 12px;
++  height: 12px;
++  flex: none;
++  border: 2px solid var(--hairline);
++  border-top-color: var(--text-muted);
++  border-radius: 50%;
++  animation: spinner-turn 0.8s linear infinite;
++}
++
++@keyframes spinner-turn {
++  to {
++    transform: rotate(1turn);
++  }
++}
++
++/* 움직임을 원하지 않는 사람에게는 멈춘 고리로 남는다 — 글자가 함께 있으므로 뜻은 그대로다. */
++
++@media (prefers-reduced-motion: reduce) {
++  .btn {
++    transition: none;
++  }
++
++  .spinner {
++    animation: none;
++  }
++}
++
+ /* app frame */
+ 
+ .app {
+@@ -61,14 +497,14 @@ input {
+ .sidebar {
+   background-color: var(--surface-sidebar);
+   border-right: 1px solid var(--hairline);
+-  padding: 16px 12px;
++  padding: var(--space-4) var(--space-3);
+   overflow-y: auto;
+ }
+ 
+ .sidebar__brand {
+-  margin: 0 8px 16px;
+-  font-size: 13px;
+-  font-weight: 600;
++  margin: 0 var(--space-2) var(--space-4);
++  font-size: var(--type-secondary);
++  font-weight: var(--weight-strong);
+   letter-spacing: 0.02em;
+   color: var(--text-muted);
+ }
+@@ -82,17 +518,29 @@ input {
+ .sidebar__item {
+   display: block;
+   width: 100%;
+-  padding: 5px 8px;
++  padding: var(--space-1) var(--space-2);
+   border: 0;
+-  border-radius: 5px;
++  border-radius: var(--radius);
+   background: none;
++  font-size: var(--type-body);
++  line-height: var(--line-normal);
+   text-align: left;
++  color: var(--text-muted);
+   cursor: default;
+ }
+ 
++.sidebar__item:hover {
++  background-color: var(--selected);
++  color: var(--text);
++}
++
++/* 지금 보고 있는 화면. 면 · 굵기 · 글자색 셋이 함께 말한다 — 색 하나로만 말하지 않으며
++   (요구 12) `aria-current="page"`가 그 사실을 소리로도 전한다. */
++
+ .sidebar__item--active {
+   background-color: var(--selected);
+-  font-weight: 500;
++  font-weight: var(--weight-medium);
++  color: var(--text);
+ }
+ 
+ .main {
+@@ -104,29 +552,28 @@ input {
+ .header {
+   display: flex;
+   align-items: baseline;
+-  gap: 12px;
+-  padding: 20px 24px 12px;
++  gap: var(--space-3);
++  padding: var(--space-5) var(--space-5) var(--space-3);
+   border-bottom: 1px solid var(--hairline);
+ }
+ 
+ .header__title {
+   margin: 0;
+-  font-size: 20px;
+-  font-weight: 600;
++  font-size: var(--type-page-title);
++  font-weight: var(--weight-strong);
++  line-height: var(--line-tight);
+ }
+ 
++/* 제목 옆의 되돌아가기. 테두리가 소음이 되는 자리라 ghost 버튼을 쓰고 여백만 없앤다. */
++
+ .header__back {
+-  border: 0;
+-  background: none;
+   padding: 0;
+-  color: var(--text-muted);
+-  cursor: default;
+ }
+ 
+ /* screens */
+ 
+ .screen {
+-  padding: 20px 24px;
++  padding: var(--space-5);
+ }
+ 
+ .screen--centered {
+@@ -135,66 +582,85 @@ input {
+   flex-direction: column;
+   align-items: center;
+   justify-content: center;
+-  gap: 4px;
++  gap: var(--space-1);
+ }
+ 
++/* 한 문장짜리 사실. 본문 크기 그대로이며 그 아래에 보통 거드는 줄이 온다. */
++
+ .empty {
+-  margin: 0 0 4px;
++  margin: 0 0 var(--space-1);
+ }
+ 
++/* 본문을 거드는 줄. 타입 스케일의 secondary 칸이며 화면마다 크기를 새로 정하지 않는다. */
++
+ .hint {
+-  margin: 0 0 12px;
++  margin: 0 0 var(--space-2);
++  font-size: var(--type-secondary);
++  line-height: var(--line-normal);
+   color: var(--text-muted);
+ }
+ 
+-.action {
+-  padding: 4px 12px;
+-  border: 1px solid var(--hairline);
+-  border-radius: 5px;
+-  background: var(--surface);
+-  cursor: default;
++/* 문장 여럿이 잇달아 올 때는 사이를 좁게 둔다 — 문단 하나로 읽힌다. */
++
++.hint + .hint {
++  margin-top: calc(-1 * var(--space-1));
+ }
+ 
+ /* recordings list */
+ 
++/*
++ * 행 하나하나를 카드로 만들지 않는다 (요구 10). 구분은 hairline 하나와 여백이고, 위계는
++ * 제목(body medium) · 날짜와 길이(secondary) · 상태(caption) 세 단으로 타이포가 만든다.
++ * 좌우 여백만큼 목록을 바깥으로 물려서, 가리키는 면이 화면 여백과 나란히 서게 한다.
++ */
++
+ .list {
+   list-style: none;
+-  margin: 0;
++  margin: 0 calc(-1 * var(--space-2));
+   padding: 0;
+ }
+ 
+ .list__row {
+   display: block;
+   width: 100%;
+-  padding: 10px 0;
++  padding: var(--space-3) var(--space-2);
+   border: 0;
+   border-bottom: 1px solid var(--hairline);
++  border-radius: var(--radius);
+   background: none;
+   text-align: left;
+   cursor: default;
+ }
+ 
++.list__row:hover {
++  background-color: var(--surface-sidebar);
++}
++
+ .list__title {
+   display: block;
+-  font-weight: 500;
++  font-size: var(--type-body);
++  font-weight: var(--weight-medium);
++  line-height: var(--line-normal);
+ }
+ 
+ .list__row .hint {
+   display: block;
+-  margin: 0;
++  margin: var(--space-1) 0 0;
+ }
+ 
+-/* 항목마다 transcription · AI · Notion 세 가지 상태 (§5 A). */
++/* 항목마다 transcription · AI · Notion 세 가지 상태 (§5 A). 언제나 이름과 값이 함께 있다 —
++   색으로만 말하는 자리가 아니다 (요구 12). */
+ 
+ .list__statuses {
+   display: block;
+-  margin-top: 2px;
+-  font-size: 13px;
++  margin-top: var(--space-1);
++  font-size: var(--type-caption);
++  line-height: var(--line-normal);
+   color: var(--text-muted);
+ }
+ 
+ .list__status + .list__status {
+-  margin-left: 12px;
++  margin-left: var(--space-3);
+ }
+ 
+ .list__status-value {
+@@ -205,32 +671,34 @@ input {
+ 
+ .failure {
+   max-width: 520px;
+-  margin-bottom: 16px;
+-  padding: 12px;
++  margin-bottom: var(--space-4);
++  padding: var(--space-3);
+   border: 1px solid var(--hairline);
+-  border-radius: 5px;
++  border-radius: var(--radius);
+ }
+ 
+ /* 무엇을 하다 실패했는가 — 원인 문장 위에 놓인다. */
+ 
+ .failure__headline {
+-  margin: 0 0 4px;
+-  font-weight: 600;
++  margin: 0 0 var(--space-1);
++  font-size: var(--type-body);
++  font-weight: var(--weight-strong);
+ }
+ 
+ .failure__message {
+-  margin: 0 0 4px;
+-  font-weight: 500;
++  margin: 0 0 var(--space-1);
++  font-weight: var(--weight-medium);
+ }
+ 
+ .failure__answers {
+-  margin: 0 0 8px;
++  margin: 0 0 var(--space-2);
++  font-size: var(--type-secondary);
+   color: var(--text-muted);
+ }
+ 
+ .failure__detail {
+-  margin: 0 0 8px;
+-  font-size: 13px;
++  margin: 0 0 var(--space-2);
++  font-size: var(--type-caption);
+   color: var(--text-muted);
+   word-break: break-word;
+ }
+@@ -249,27 +717,34 @@ input {
+ }
+ 
+ .recording {
+-  margin: 28px 0 16px;
++  margin: var(--space-6) 0 var(--space-4);
+ }
+ 
+ .recording__state {
+-  margin: 0;
+-  font-size: 13px;
++  margin: 0 0 var(--space-1);
++  font-size: var(--type-secondary);
+   letter-spacing: 0.08em;
+   text-transform: uppercase;
+   color: var(--text-muted);
+ }
+ 
+-/* 녹음 중일 때만 흐리지 않다. 상태가 한눈에 갈린다. */
++/* 녹음 중일 때만 흐리지 않다. 상태가 한눈에 갈린다 — 그리고 그 사실은 언제나 글자로 있다
++   (`stateText` · 요구 12). 색은 거들 뿐이다. */
+ 
+ .recording__state--live {
+-  font-weight: 600;
++  font-weight: var(--weight-strong);
+   color: var(--text);
+ }
+ 
++/*
++ * 경과 시간은 타입 스케일 밖의 한 곳이다 — 이 화면에서 가장 큰 것이 상태와 시간이어야
++ * 하기 때문이다 (§19). 크기 자체는 `--type-display`로 올려 두었다: 예외는 한 자리지만
++ * 값이 화면 안에 흩어져 있을 이유는 없다.
++ */
++
+ .recording__elapsed {
+   margin: 0;
+-  font-size: 56px;
++  font-size: var(--type-display);
+   font-weight: 300;
+   font-variant-numeric: tabular-nums;
+   letter-spacing: 0.01em;
+@@ -277,30 +752,49 @@ input {
+ 
+ .recording__controls {
+   display: flex;
+-  gap: 8px;
+-  margin-bottom: 20px;
++  flex-wrap: wrap;
++  gap: var(--space-2);
++  margin-bottom: var(--space-5);
++}
++
++/*
++ * 주 조작이 화면을 지배한다 (요구 10). 네 버튼은 본문보다 크고 서로 같은 크기이며, 지금
++ * 누를 수 있는 것과 없는 것이 `:disabled`의 흐림으로 갈린다 — 보기 좋으라고 기능적 명확성을
++ * 줄이지 않는다.
++ */
++
++.recording__controls .btn {
++  margin-left: 0;
++  padding: var(--space-2) var(--space-4);
++  font-size: var(--type-section-title);
+ }
+ 
+ .recording__microphone {
+   max-width: 520px;
+-  margin-bottom: 20px;
++  margin-bottom: var(--space-5);
+ }
+ 
+ .recording__device {
+-  margin: 0 0 4px;
++  margin: 0 0 var(--space-1);
+ }
+ 
+ /* recording detail (§5 C) */
+ 
++/*
++ * 위계는 넷이다 (요구 10) — 이 녹음이 무엇인가(제목) · 언제 얼마나(부제) · 재생 ·
++ * 내보내는 문 둘, 그 아래에 탭이 온다. 탭 구성은 그대로다.
++ */
++
+ .detail__title {
+-  margin: 0 0 2px;
+-  font-size: 16px;
+-  font-weight: 600;
++  margin: 0 0 var(--space-1);
++  font-size: var(--type-section-title);
++  font-weight: var(--weight-strong);
++  line-height: var(--line-tight);
+ }
+ 
+ .detail__player {
+   max-width: 520px;
+-  margin: 16px 0 4px;
++  margin: var(--space-4) 0 var(--space-1);
+ }
+ 
+ /* 재생 막대 하나가 전부다. 파형도 장식도 두지 않는다 (§19). */
+@@ -312,19 +806,19 @@ input {
+ /* 파일이 없는 상태. 실패처럼 붉게 칠하지 않는다 — 레코드는 온전하다 (INV-3 · INV-4). */
+ 
+ .detail__player--missing {
+-  padding: 12px;
++  padding: var(--space-3);
+   border: 1px solid var(--hairline);
+-  border-radius: 5px;
++  border-radius: var(--radius);
+ }
+ 
+ .detail__missing {
+-  margin: 0 0 4px;
+-  font-weight: 500;
++  margin: 0 0 var(--space-1);
++  font-weight: var(--weight-medium);
+ }
+ 
+ .detail__path {
+   margin: 0;
+-  font-size: 13px;
++  font-size: var(--type-caption);
+   color: var(--text-muted);
+   word-break: break-all;
+ }
+@@ -334,9 +828,9 @@ input {
+ .share {
+   display: flex;
+   flex-wrap: wrap;
+-  gap: 24px;
++  gap: var(--space-5);
+   max-width: 640px;
+-  margin: 16px 0;
++  margin: var(--space-5) 0;
+ }
+ 
+ .share__panel {
+@@ -346,42 +840,44 @@ input {
+ .share__title {
+   display: flex;
+   align-items: baseline;
+-  gap: 8px;
+-  margin: 0 0 8px;
+-  font-size: 13px;
+-  font-weight: 600;
++  gap: var(--space-2);
++  margin: 0 0 var(--space-2);
++  font-size: var(--type-secondary);
++  font-weight: var(--weight-strong);
+   letter-spacing: 0.02em;
+   color: var(--text-muted);
+ }
+ 
+-/* 이 녹음의 Notion 상태 (§7). 목록의 상태 표시와 같은 문자열이다. */
++/* 이 녹음의 Notion 상태 (§7). 목록의 상태 표시와 같은 문자열이며, 상태는 언제나 글자다. */
+ 
+ .share__status {
+-  font-weight: 400;
++  font-weight: var(--weight-regular);
+   color: var(--text);
+ }
+ 
+ .share__done {
+-  margin-bottom: 8px;
++  margin-bottom: var(--space-2);
+ }
+ 
+ .share__confirm {
+-  margin-bottom: 8px;
++  margin-bottom: var(--space-2);
+ }
+ 
+ .share__headline {
+-  margin: 0 0 4px;
++  margin: 0 0 var(--space-1);
++  font-weight: var(--weight-medium);
+ }
+ 
+ .share__file {
+-  margin: 0;
++  margin: 0 0 var(--space-1);
++  font-size: var(--type-secondary);
+ }
+ 
+ /* 만들어진 파일의 전체 경로 · 만들어진 페이지의 식별자. 잘라 보이지 않는다 (§4.1). */
+ 
+ .share__path {
+-  margin: 0 0 4px;
+-  font-size: 13px;
++  margin: 0 0 var(--space-1);
++  font-size: var(--type-caption);
+   color: var(--text-muted);
+   word-break: break-all;
+ }
+@@ -389,47 +885,66 @@ input {
+ /* 무엇이 나가는가 (INV-5 · INV-6). 본문이 어느 상태든 같은 자리에 있다. */
+ 
+ .share__contents {
+-  margin-top: 12px;
++  margin-top: var(--space-3);
+ }
+ 
+ .share__contents-title {
+-  margin: 0 0 4px;
+-  font-size: 13px;
++  margin: 0 0 var(--space-1);
++  font-size: var(--type-caption);
+   color: var(--text-muted);
+ }
+ 
+ .share__items {
+-  margin: 0 0 4px;
+-  padding-left: 20px;
+-  font-size: 13px;
++  margin: 0 0 var(--space-1);
++  padding-left: var(--space-5);
++  font-size: var(--type-caption);
+   color: var(--text-muted);
+ }
+ 
+ .share__item {
+-  padding: 1px 0;
++  padding: var(--space-1) 0 0;
+ }
+ 
++/*
++ * 탭 (§5 C). **구성은 그대로다** — 세 탭의 이름도 순서도 이 Task가 바꾸지 않았고,
++ * 바뀐 것은 여백과 활성 표시뿐이다. 활성은 밑줄 · 굵기 · 글자색 셋이 함께 말하며
++ * `aria-selected`가 그 사실을 소리로도 전한다 (요구 12).
++ */
++
+ .tabs {
+   display: flex;
+-  gap: 16px;
+-  margin: 12px 0;
++  gap: var(--space-4);
++  margin: var(--space-5) 0 var(--space-4);
+   border-bottom: 1px solid var(--hairline);
+ }
+ 
+ .tabs__tab {
+-  padding: 0 0 8px;
++  padding: 0 0 var(--space-2);
+   border: 0;
+   border-bottom: 2px solid transparent;
+   background: none;
++  font-size: var(--type-body);
++  line-height: var(--line-normal);
+   color: var(--text-muted);
+   cursor: default;
+ }
+ 
++.tabs__tab:hover {
++  color: var(--text);
++}
++
+ .tabs__tab--active {
+-  border-bottom-color: var(--text);
++  border-bottom-color: var(--accent);
++  font-weight: var(--weight-medium);
+   color: var(--text);
+ }
+ 
++/* 지금 보고 있는 탭의 내용. 탭 줄과 붙어 보이지 않을 만큼만 띄운다. */
++
++.tabs__panel {
++  padding-top: var(--space-1);
++}
++
+ /* transcript 탭 (§5 C · phase-prompt/03 요구 6) */
+ 
+ .transcript {
+@@ -439,7 +954,7 @@ input {
+ /* 문장 목록. 번호도 강조도 두지 않는다 — 읽는 것은 문장이다 (§19). */
+ 
+ .transcript__lines {
+-  margin: 12px 0 0;
++  margin: var(--space-3) 0 0;
+   padding: 0;
+   list-style: none;
+ }
+@@ -447,15 +962,15 @@ input {
+ .transcript__line {
+   display: grid;
+   grid-template-columns: 92px 1fr;
+-  gap: 12px;
+-  padding: 6px 0;
++  gap: var(--space-3);
++  padding: var(--space-1) 0;
+ }
+ 
+ /* timestamp는 자리를 알려 줄 뿐이므로 문장보다 조용하다. 자릿수가 흔들리지 않게 고정폭으로. */
+ 
+ .transcript__time {
+   font-variant-numeric: tabular-nums;
+-  font-size: 13px;
++  font-size: var(--type-secondary);
+   color: var(--text-muted);
+   white-space: nowrap;
+ }
+@@ -474,48 +989,101 @@ input {
+ 
+ .note__modes {
+   display: flex;
+-  gap: 8px;
+-  margin-bottom: 12px;
++  flex-wrap: wrap;
++  gap: var(--space-2);
++  margin-bottom: var(--space-3);
+ }
+ 
+ .note__mode {
+-  padding: 4px 12px;
++  padding: var(--space-1) var(--space-3);
+   border: 1px solid var(--hairline);
+-  border-radius: 5px;
++  border-radius: var(--radius);
+   background: var(--surface);
++  font-size: var(--type-body);
++  line-height: var(--line-normal);
+   color: var(--text-muted);
+   cursor: default;
+ }
+ 
++.note__mode:hover:not(:disabled) {
++  background-color: var(--selected);
++}
++
++/* 고른 mode. 테두리 · 굵기 · 글자색이 함께 말하고 `aria-pressed`가 그 사실을 전한다. */
++
+ .note__mode--active {
++  border-color: var(--accent);
+   color: var(--text);
+-  font-weight: 500;
++  font-weight: var(--weight-medium);
+ }
+ 
++/* 지금 고를 수 없는 상태. 흐리되 사라지지 않는다 — 무엇이 꺼졌는지 읽을 수 있어야 한다. */
++
+ .note__mode:disabled {
+   opacity: 0.5;
+ }
+ 
++/* 노트를 얻는 두 길 (phase-prompt/05.5 요구 6). 위아래로 놓이고, 아래 줄은 AI provider가
++   없어도 그대로 쓸 수 있다 (MH-1 · MH-2). 어느 쪽도 카드나 테두리로 강조하지 않는다 — 위계는
++   제목과 여백으로 만든다. */
++
++.note__row {
++  margin-bottom: var(--space-5);
++}
++
++.note__row-title {
++  margin: 0 0 var(--space-1);
++  font-size: var(--type-secondary);
++  font-weight: var(--weight-strong);
++  letter-spacing: 0.02em;
++  color: var(--text-muted);
++}
++
++/* 위 줄은 조건이 아니다. 둘 사이의 접속사도 조용하다. */
++
++.note__or {
++  margin: 0 0 var(--space-5);
++  font-size: var(--type-secondary);
++  color: var(--text-muted);
++}
++
++/* 세 자리는 나란히 놓이고, 좁아지면 접힌다. */
++
++.note__handoff {
++  display: flex;
++  flex-wrap: wrap;
++  gap: var(--space-5);
++}
++
++.note__handoff-item {
++  flex: 1 1 260px;
++}
++
++.note__handoff-title {
++  margin: 0 0 var(--space-1);
++  font-weight: var(--weight-medium);
++}
++
+ /* AI가 꺼져 있는 상태. 경고색도 테두리도 없다 — 담담한 사실이다 (INV-8 · §13). */
+ 
+ .note__off {
+-  margin-bottom: 12px;
++  margin-bottom: var(--space-3);
+ }
+ 
+ /* 노트 본문. 구조 그대로 놓인다 (§9.3). */
+ 
+ .note__document {
+-  margin: 12px 0 0;
++  margin: var(--space-4) 0 0;
+ }
+ 
+ .note__section {
+-  margin-bottom: 16px;
++  margin-bottom: var(--space-4);
+ }
+ 
+ .note__section-title {
+-  margin: 0 0 4px;
+-  font-size: 13px;
+-  font-weight: 600;
++  margin: 0 0 var(--space-1);
++  font-size: var(--type-secondary);
++  font-weight: var(--weight-strong);
+   letter-spacing: 0.02em;
+   color: var(--text-muted);
+ }
+@@ -527,57 +1095,84 @@ input {
+ 
+ .note__items {
+   margin: 0;
+-  padding-left: 20px;
++  padding-left: var(--space-5);
+ }
+ 
+ .note__item {
+-  padding: 2px 0;
++  padding: var(--space-1) 0 0;
+ }
+ 
+ /* 이 노트가 무엇으로 언제 어떤 Transcript에서 만들어졌는가 (§7.3). 본문보다 조용하다. */
+ 
+ .note__provenance {
+-  margin: 16px 0 12px;
+-  font-size: 13px;
++  margin: var(--space-4) 0 var(--space-3);
++  font-size: var(--type-caption);
+   color: var(--text-muted);
+   word-break: break-all;
+ }
+ 
+-/* settings */
++/*
++ * settings — 단순한 그룹 목록이다 (요구 10).
++ *
++ * 설정 하나하나에 카드를 두지 않는다. 그룹 사이를 가르는 것은 hairline 하나와 여백뿐이며,
++ * 그룹 안의 위계는 제목과 여백이 만든다.
++ */
+ 
+ .group {
+   max-width: 520px;
+-  margin-bottom: 28px;
++  margin-bottom: var(--space-6);
++}
++
++.group + .group {
++  padding-top: var(--space-6);
++  border-top: 1px solid var(--hairline);
+ }
+ 
+ .group__title {
+-  margin: 0 0 8px;
+-  font-size: 13px;
+-  font-weight: 600;
++  margin: 0 0 var(--space-3);
++  font-size: var(--type-secondary);
++  font-weight: var(--weight-strong);
+   letter-spacing: 0.02em;
+   color: var(--text-muted);
+ }
+ 
++/* 한 그룹 안의 부분. AI 그룹이 '연결된 provider'와 '스스로 세우는 로컬 provider'로 나뉜다
++   (phase-prompt/05.5 요구 7 · 10). 위계는 여백과 제목으로 만든다 — 카드도 테두리도 쓰지
++   않는다. */
++
++.group__part {
++  margin-top: var(--space-5);
++}
++
++.group__subtitle {
++  margin: 0 0 var(--space-1);
++  font-size: var(--type-body);
++  font-weight: var(--weight-strong);
++}
++
+ .field {
+   display: block;
+-  margin-bottom: 8px;
++  margin-bottom: var(--space-3);
+ }
+ 
+ .field--inline {
+   display: flex;
+   align-items: center;
+-  gap: 8px;
++  gap: var(--space-2);
+ }
+ 
+ .field__label {
+   display: block;
++  font-size: var(--type-body);
+ }
+ 
+-.field__input {
+-  width: 100%;
+-  margin-top: 4px;
+-  padding: 4px 8px;
+-  border: 1px solid var(--hairline);
+-  border-radius: 5px;
+-  background: var(--surface);
++/* 레이블과 컨트롤은 한 덩어리다 — 그 사이가 다음 항목과의 사이보다 좁다. */
++
++.field .input,
++.field .select {
++  margin-top: var(--space-1);
++}
++
++.field--inline .field__label {
++  margin: 0;
+ }
+diff --git a/src/App.tsx b/src/App.tsx
+index 2eb2923..357a2c6 100644
+--- a/src/App.tsx
++++ b/src/App.tsx
+@@ -46,7 +46,7 @@ function App() {
+       <main className="main">
+         <header className="header">
+           {canGoBack(nav) && (
+-            <button type="button" className="header__back" onClick={back}>
++            <button type="button" className="btn btn--ghost header__back" onClick={back}>
+               Back
+             </button>
+           )}
+diff --git a/src/screens/FailureNotice.tsx b/src/screens/FailureNotice.tsx
+index 0b6ea5f..1e9e44d 100644
+--- a/src/screens/FailureNotice.tsx
++++ b/src/screens/FailureNotice.tsx
+@@ -31,7 +31,7 @@ export function FailureNotice({
+       </p>
+       {view.detail !== null && <p className="failure__detail">{view.detail}</p>}
+       {view.retryable && onRetry !== undefined && (
+-        <button type="button" className="action" onClick={onRetry}>
++        <button type="button" className="btn btn--secondary" onClick={onRetry}>
+           Try Again
+         </button>
+       )}
+diff --git a/src/screens/RecordingDetailScreen.tsx b/src/screens/RecordingDetailScreen.tsx
+index 0f190b8..5735925 100644
+--- a/src/screens/RecordingDetailScreen.tsx
++++ b/src/screens/RecordingDetailScreen.tsx
+@@ -2,10 +2,13 @@ import { useCallback, useEffect, useRef, useState } from 'react';
+ import {
+   aiNoteStatus,
+   aiProviderStatus,
++  exportAiRequest,
+   exportMarkdown,
++  getAiPrompt,
+   getNotionSync,
+   getRecording,
+   getTranscript,
++  getTranscriptText,
+   listAiNotes,
+   listMissingAudio,
+   notionSyncStatus,
+@@ -27,6 +30,21 @@ import type {
+   Transcript,
+   TranscriptionStatus,
+ } from '../ipc/types';
++// 이 앱에서 clipboard에 쓰는 유일한 경로 (R-4 · INV-10). 실패는 던져지지 않고 값으로 온다.
++import { copyText } from '../platform/clipboard';
++import {
++  NO_AI_EXPORT_ATTEMPT,
++  aiNoteTabLayout,
++  exportedAiRequest,
++  failedAiExport,
++  manualHandoff,
++  startedAiExport,
++  type AiExportAction,
++  type AiExportAttempt,
++  type AiExportItemView,
++  type AiNoteTabLayout,
++  type ManualHandoffView,
++} from './aiHandoffView';
+ import {
+   aiNoteTab,
+   aiNoteTrouble,
+@@ -35,6 +53,16 @@ import {
+   type NoteSection,
+   type NoteView,
+ } from './aiNoteView';
++import {
++  NO_COPY_ATTEMPT,
++  copiedText,
++  failedCopy,
++  startedCopy,
++  type CopyAction,
++  type CopyAttempt,
++  type CopyItemView,
++} from './copyView';
++import { EmptyState } from './EmptyState';
+ import {
+   NO_EXPORT_ATTEMPT,
+   exportPanel,
+@@ -45,6 +73,7 @@ import {
+   type ExportPanelView,
+ } from './exportView';
+ import { FailureNotice } from './FailureNotice';
++import { Loading } from './Loading';
+ import {
+   notionPanel,
+   notionTrouble,
+@@ -76,6 +105,16 @@ type Tab = (typeof TABS)[number];
+ /** 레코드는 있는데 파일이 없을 때 Recording 탭이 말하는 것. */
+ const NO_AUDIO_TEXT = 'No audio file yet.';
+ 
++/**
++ * 탭 하나와 그 내용을 잇는 식별자 (요구 12).
++ *
++ * 탭 이름 자체에서 만든다 — 목록과 따로 관리되는 두 번째 표가 생기면 탭이 하나 늘 때 조용히
++ * 어긋난다. **탭 구성을 바꾸지 않으므로** 여기서 만드는 것은 이름의 다른 표기일 뿐이다.
++ */
++const slug = (name: Tab) => name.toLowerCase().replace(/\s+/g, '-');
++const tabId = (name: Tab) => `tab-${slug(name)}`;
++const panelId = (name: Tab) => `panel-${slug(name)}`;
++
+ /**
+  * 전사가 도는 동안 상태를 다시 물어보는 간격(밀리초).
+  *
+@@ -166,6 +205,15 @@ export function RecordingDetailScreen({ route, goBack }: ScreenProps) {
+ 
+   /** 이 화면이 건 Markdown export 한 번 (§11). 상태를 물어보는 규약을 쓰지 않는다. */
+   const [exportAttempt, setExportAttempt] = useState<ExportAttempt>(NO_EXPORT_ATTEMPT);
++  /**
++   * 이 화면이 건 복사 한 번 (요구 A-1 · A-2). 두 복사 자리 중 하나에만 해당한다.
++   *
++   * **AI provider와 아무 상관이 없다** — 이 값이 만들어지는 경로에 provider가 들어오지 않는다
++   * (MH-1 · MH-2).
++   */
++  const [copyAttempt, setCopyAttempt] = useState<CopyAttempt>(NO_COPY_ATTEMPT);
++  /** 이 화면이 건 Export for AI 한 번 (요구 3). Markdown export와 다른 자리, 다른 상태다. */
++  const [aiExportAttempt, setAiExportAttempt] = useState<AiExportAttempt>(NO_AI_EXPORT_ATTEMPT);
+   /** 디스크에 남아 있는 Notion 전송 기록. 아직 읽지 못했거나 보낸 적이 없으면 `null`이다. */
+   const [notionSync, setNotionSync] = useState<NotionSync | null>(null);
+   /** backend가 마지막으로 알려준 Notion 전송 상태. 아직 물어보지 못했으면 `null`이다. */
+@@ -410,6 +458,20 @@ export function RecordingDetailScreen({ route, goBack }: ScreenProps) {
+   });
+   const generatingNote = aiView.body.kind === 'generating';
+ 
++  // AI Note 탭의 두 줄 (요구 6). **아래 줄은 provider를 보지 않는다** — `manualHandoff`의
++  // 입력에 provider를 담을 자리가 없으므로, provider가 하나도 없어도 세 동작이 그대로 가능하다
++  // (MH-1 · MH-2). 위 줄의 상태는 `aiNoteTab`이 만든 값 그대로 실린다 (MH-8). 위계를 정하는
++  // 규칙은 여기 없고 `aiHandoffView.ts`에 있다.
++  const aiLayout = aiNoteTabLayout(
++    aiView,
++    manualHandoff({
++      recording: record,
++      mode: noteMode,
++      copy: copyAttempt,
++      aiExport: aiExportAttempt,
++    }),
++  );
++
+   useEffect(() => {
+     // 노트를 만드는 동안에만 되풀이해 물어본다. 상태 조회는 생성을 기다리지 않으므로
+     // (`NoteGenerator::status`) 이 되풀이가 화면을 멎게 하지 않는다.
+@@ -491,6 +553,50 @@ export function RecordingDetailScreen({ route, goBack }: ScreenProps) {
+     );
+   };
+ 
++  /**
++   * 이 녹음의 프롬프트나 전사 텍스트를 clipboard에 올린다 (요구 A-1 · A-2 · 5).
++   *
++   * 두 경계를 차례로 지난다 — 문자열을 만드는 것은 backend이고 (`get_ai_prompt` ·
++   * `get_transcript_text`), 그것을 clipboard에 쓰는 것은 `platform/clipboard`다. **어느 쪽이
++   * 거절해도 사용자에게는 "복사되지 않았다"는 하나의 사건이며**, 무엇 때문이었는지는 순수
++   * 모듈이 가른다 (`copyView`의 `CopyFailureCause`). 실패를 console로 흘려보내지 않는다 (§13).
++   *
++   * **AI provider가 들어오지 않는다** — 두 command 어디에도 provider 인자가 없으므로 provider가
++   * 없다는 이유로 거절당할 수단이 없다 (MH-1 · MH-2 · INV-8).
++   */
++  const beginCopy = (action: CopyAction) => {
++    const { target, recordingId: id, mode } = action;
++    setCopyAttempt(startedCopy(target, id));
++    // 프롬프트에는 mode가 실려 있고 전사에는 없다 — 그 구분은 값이 들고 있다.
++    const text = mode === null ? getTranscriptText(id) : getAiPrompt(id, mode);
++    text.then(
++      (value) =>
++        // `copyText`는 예외를 던지지 않는다. 결과가 값으로 온다 (ADR-0010 §7).
++        copyText(value).then((result) =>
++          setCopyAttempt(
++            result.ok ? copiedText(target, id) : failedCopy(target, id, result.failure),
++          ),
++        ),
++      (error: unknown) => setCopyAttempt(failedCopy(target, id, error)),
++    );
++  };
++
++  /**
++   * 이 녹음을 **AI에게 줄 문서 하나**로 내보낸다 (요구 3 · ADR-0010 §5.2).
++   *
++   * Markdown export와 같은 규약이다 — 돌아오는 것은 이미 만들어진 파일이며, 기다릴 서버도
++   * 모델도 없다. **clipboard를 전혀 쓰지 않으므로 복사가 거절되는 환경에서도 이 길은 남는다**
++   * (§7.5). 실패해도 녹음 · 전사 · 노트 · 이미 내보낸 파일은 그대로다 (INV-3 · MH-7).
++   */
++  const beginAiExport = (action: AiExportAction) => {
++    const { recordingId: id, mode } = action;
++    setAiExportAttempt(startedAiExport(id, mode));
++    exportAiRequest(id, mode).then(
++      (file) => setAiExportAttempt(exportedAiRequest(file)),
++      (error: unknown) => setAiExportAttempt(failedAiExport(id, error)),
++    );
++  };
++
+   /**
+    * 이 녹음을 Notion으로 보내기 시작한다 (§10 · ADR-0009 §8).
+    *
+@@ -519,10 +625,11 @@ export function RecordingDetailScreen({ route, goBack }: ScreenProps) {
+   if (recordingId === null) {
+     return (
+       <div className="screen">
+-        <p className="empty">No recording selected.</p>
+-        <button type="button" className="action" onClick={goBack}>
+-          Back
+-        </button>
++        <EmptyState title="No recording selected.">
++          <button type="button" className="btn btn--secondary" onClick={goBack}>
++            Back
++          </button>
++        </EmptyState>
+       </div>
+     );
+   }
+@@ -530,7 +637,7 @@ export function RecordingDetailScreen({ route, goBack }: ScreenProps) {
+   if (view.kind === 'loading') {
+     return (
+       <div className="screen">
+-        <p className="hint">Loading recording…</p>
++        <Loading text="Loading recording…" />
+       </div>
+     );
+   }
+@@ -543,7 +650,7 @@ export function RecordingDetailScreen({ route, goBack }: ScreenProps) {
+           headline="This recording could not be read."
+           onRetry={retry}
+         />
+-        <button type="button" className="action" onClick={goBack}>
++        <button type="button" className="btn btn--secondary" onClick={goBack}>
+           Back
+         </button>
+       </div>
+@@ -553,11 +660,13 @@ export function RecordingDetailScreen({ route, goBack }: ScreenProps) {
+   if (view.kind === 'notFound') {
+     return (
+       <div className="screen">
+-        <p className="empty">This recording is no longer in the list.</p>
+-        <p className="hint">{view.recordingId}</p>
+-        <button type="button" className="action" onClick={goBack}>
+-          Back
+-        </button>
++        {/* 목록에서 사라진 것도 실패가 아니다 (INV-3 · INV-4). 어느 레코드였는지는 남긴다. */}
++        <EmptyState title="This recording is no longer in the list.">
++          <p className="t-caption">{view.recordingId}</p>
++          <button type="button" className="btn btn--secondary" onClick={goBack}>
++            Back
++          </button>
++        </EmptyState>
+       </div>
+     );
+   }
+@@ -574,7 +683,13 @@ export function RecordingDetailScreen({ route, goBack }: ScreenProps) {
+       {view.kind === 'playable' ? (
+         <div className="detail__player">
+           {/* 파일은 asset protocol로 흐른다. 주소를 만드는 것은 ipc 모듈의 일이다. */}
+-          <audio className="detail__audio" controls preload="metadata" src={view.audioSource} />
++          <audio
++            className="detail__audio"
++            controls
++            preload="metadata"
++            aria-label={`Play ${recording.title}`}
++            src={view.audioSource}
++          />
+         </div>
+       ) : (
+         // 파일이 없다는 사실을 보여줄 뿐 아무것도 지우지 않는다 (INV-3 · INV-4).
+@@ -592,13 +707,17 @@ export function RecordingDetailScreen({ route, goBack }: ScreenProps) {
+         <NotionPanel panel={notionView} trouble={notionIssue} onSend={beginNotionSend} />
+       </section>
+ 
++      {/* 탭 셋은 그대로다 — 이 Task가 바꾼 것은 여백과 활성 표시, 그리고 어느 탭이 어느
++          내용을 여는지 보조기술에도 이어 준 것뿐이다 (요구 10 · 12). */}
+       <div className="tabs" role="tablist">
+         {TABS.map((name) => (
+           <button
+             key={name}
+             type="button"
+             role="tab"
++            id={tabId(name)}
+             aria-selected={tab === name}
++            aria-controls={panelId(name)}
+             className={tab === name ? 'tabs__tab tabs__tab--active' : 'tabs__tab'}
+             onClick={() => setTab(name)}
+           >
+@@ -607,27 +726,37 @@ export function RecordingDetailScreen({ route, goBack }: ScreenProps) {
+         ))}
+       </div>
+ 
+-      {tab === 'Transcript' && (
+-        <TranscriptTab tab={transcriptView} trouble={trouble} onTranscribe={beginTranscription} />
+-      )}
+-
+-      {tab === 'Recording' && (
+-        <p className="hint">
+-          {view.kind === 'playable'
+-            ? `${view.audioFormat} · ${recording.durationLabel}`
+-            : NO_AUDIO_TEXT}
+-        </p>
+-      )}
++      <div
++        className="tabs__panel"
++        role="tabpanel"
++        id={panelId(tab)}
++        aria-labelledby={tabId(tab)}
++        tabIndex={0}
++      >
++        {tab === 'Transcript' && (
++          <TranscriptTab tab={transcriptView} trouble={trouble} onTranscribe={beginTranscription} />
++        )}
+ 
+-      {tab === 'AI Note' && (
+-        <AiNoteTab
+-          tab={aiView}
+-          trouble={aiTrouble}
+-          onMode={setNoteMode}
+-          onGenerate={beginAiNote}
+-          onRecheck={recheckProvider}
+-        />
+-      )}
++        {tab === 'Recording' && (
++          <p className="hint">
++            {view.kind === 'playable'
++              ? `${view.audioFormat} · ${recording.durationLabel}`
++              : NO_AUDIO_TEXT}
++          </p>
++        )}
++
++        {tab === 'AI Note' && (
++          <AiNoteTab
++            layout={aiLayout}
++            trouble={aiTrouble}
++            onMode={setNoteMode}
++            onGenerate={beginAiNote}
++            onRecheck={recheckProvider}
++            onCopy={beginCopy}
++            onExportForAi={beginAiExport}
++          />
++        )}
++      </div>
+     </div>
+   );
+ }
+@@ -654,14 +783,11 @@ function ExportPanel({
+     <section className="share__panel">
+       <h2 className="share__title">Markdown</h2>
+ 
+-      {body.kind === 'loading' && <p className="hint">Loading…</p>}
++      {body.kind === 'loading' && <Loading text="Loading…" />}
+ 
+       {body.kind === 'nothingToExport' && (
+         // 재료가 아직 없는 것은 실패가 아니다 (§7.2).
+-        <div role="status">
+-          <p className="empty">{body.text}</p>
+-          <p className="hint">{body.hint}</p>
+-        </div>
++        <EmptyState title={body.text} body={body.hint} />
+       )}
+ 
+       {body.kind === 'ready' && (
+@@ -671,11 +797,8 @@ function ExportPanel({
+         </>
+       )}
+ 
+-      {body.kind === 'exporting' && (
+-        <p className="hint" aria-live="polite">
+-          {body.text}
+-        </p>
+-      )}
++      {/* 파일을 만드는 동안 이 자리가 멎은 것처럼 보이지 않게 한다 (요구 9). */}
++      {body.kind === 'exporting' && <Loading text={body.text} live />}
+ 
+       {body.kind === 'done' && (
+         <div className="share__done" role="status">
+@@ -724,7 +847,11 @@ function ExportButton({
+   onExport: (recordingId: string) => void;
+ }) {
+   return (
+-    <button type="button" className="action" onClick={() => onExport(action.recordingId)}>
++    <button
++      type="button"
++      className="btn btn--secondary"
++      onClick={() => onExport(action.recordingId)}
++    >
+       {action.label}
+     </button>
+   );
+@@ -756,20 +883,15 @@ function NotionPanel({
+       <h2 className="share__title">
+         Notion
+         {/* 이 녹음의 Notion 상태 (§7 · 요구 9). 목록과 같은 규칙으로 만들어진 값이다. */}
+-        {status !== null && <span className="share__status">{status.text}</span>}
++        {status !== null && <span className="status share__status">{status.text}</span>}
+       </h2>
+ 
+       {/* 요청이 거절된 사실은 전송 상태를 덮지 않고 그 옆에 남는다 (§13). */}
+       {trouble !== null && <FailureNotice failure={trouble.failure} headline={trouble.headline} />}
+ 
+-      {body.kind === 'loading' && <p className="hint">Loading…</p>}
++      {body.kind === 'loading' && <Loading text="Loading…" />}
+ 
+-      {body.kind === 'nothingToSend' && (
+-        <div role="status">
+-          <p className="empty">{body.text}</p>
+-          <p className="hint">{body.hint}</p>
+-        </div>
+-      )}
++      {body.kind === 'nothingToSend' && <EmptyState title={body.text} body={body.hint} />}
+ 
+       {body.kind === 'ready' && (
+         <>
+@@ -778,11 +900,10 @@ function NotionPanel({
+         </>
+       )}
+ 
++      {/* 왕복이 여럿이라 오래 걸린다 (§9.2). 어디까지 갔는지가 고리 옆에 함께 있다. */}
+       {body.kind === 'sending' && (
+         <>
+-          <p className="hint" aria-live="polite">
+-            {body.text}
+-          </p>
++          <Loading text={body.text} live />
+           {body.progress !== null && <p className="hint">{body.progress.text}</p>}
+         </>
+       )}
+@@ -860,7 +981,7 @@ function SendButton({
+       <p className="hint">{action.outcomeText}</p>
+       <button
+         type="button"
+-        className="action"
++        className="btn btn--secondary"
+         onClick={() => onSend(action.recordingId, action.confirmation)}
+       >
+         {action.label}
+@@ -889,27 +1010,26 @@ function TranscriptTab({
+       {/* 요청이 거절된 사실은 전사 상태를 덮지 않고 그 옆에 남는다 (§13). */}
+       {trouble !== null && <FailureNotice failure={trouble.failure} headline={trouble.headline} />}
+ 
+-      {tab.kind === 'loading' && <p className="hint">Loading transcript…</p>}
++      {tab.kind === 'loading' && <Loading text="Loading transcript…" />}
+ 
+       {tab.kind === 'none' && (
+-        <>
+-          <p className="empty">{tab.text}</p>
++        // 빈 상태 둘 — 아직 전사가 없다. 여기서 할 수 있는 일 하나가 그 아래에 있다.
++        <EmptyState title={tab.text}>
+           <button
+             type="button"
+-            className="action"
++            className="btn btn--primary"
+             onClick={() => onTranscribe(tab.start.recordingId)}
+           >
+             {tab.start.label}
+           </button>
+-        </>
++        </EmptyState>
+       )}
+ 
+       {(tab.kind === 'pending' || tab.kind === 'running') && (
+         <>
+-          {/* 상태가 바뀌는 것은 소리로도 알린다. 화면은 이 동안에도 멎지 않는다. */}
+-          <p className="hint" aria-live="polite">
+-            {tab.text}
+-          </p>
++          {/* 상태가 바뀌는 것은 소리로도 알린다. 화면은 이 동안에도 멎지 않으며, 오래
++              걸리는 동안 그 사실이 고리와 글자로 함께 보인다 (요구 9). */}
++          <Loading text={tab.text} live />
+           {/* 새 전사가 도는 동안에도 이미 있던 Transcript는 그대로 보인다 (§7.1 · INV-2). */}
+           <TranscriptLines lines={tab.kept} />
+         </>
+@@ -937,7 +1057,7 @@ function TranscriptTab({
+           {tab.resolution !== null && <p className="hint">{tab.resolution}</p>}
+           <button
+             type="button"
+-            className="action"
++            className="btn btn--secondary"
+             onClick={() => onTranscribe(tab.retry.recordingId)}
+           >
+             {tab.retry.label}
+@@ -950,29 +1070,35 @@ function TranscriptTab({
+ }
+ 
+ /**
+- * AI Note 탭 (§5 C · §9 · `phase-prompt/04` 요구 4 · 12 · 14 · 15).
++ * AI Note 탭 (§5 C · §9 · `phase-prompt/04` 요구 4 · 12 · 14 · 15 ·
++ * `phase-prompt/05.5` 요구 6).
+  *
+- * 일곱 상태가 서로 다른 모습을 갖는다. 어느 상태인지 정하는 규칙은 여기 없고
+- * {@link aiNoteTab}에 있다 — 이 컴포넌트는 그리기만 한다.
++ * **노트를 얻는 길이 둘이고, 둘은 위아래로 놓인다** — 위는 연결된 provider가 여기서 쓰는 것,
++ * 아래는 사용자가 이미 쓰는 AI에 가져가는 것이다. **아래 줄은 provider가 하나도 없어도 완전히
++ * 쓸 수 있다** (MH-1 · MH-2). 어느 줄이 어떤 상태인지 정하는 규칙은 여기 없고
++ * {@link aiNoteTab} · {@link manualHandoff} · {@link aiNoteTabLayout}에 있다 — 이 컴포넌트는
++ * 그리기만 한다.
+  *
+- * **AI가 꺼져 있는 상태를 {@link FailureNotice}로 그리지 않는다** (INV-8 · §13). 그 자리에는
+- * `role="alert"`도 없고 `Failure`도 없다 — 담담한 사실 몇 줄과, 다시 확인해 볼 수단뿐이다.
++ * 세 mode는 두 줄 위에 있다 (§9.5). 프롬프트와 AI-ready 문서도 같은 mode로 만들어지므로 그
++ * 선택은 어느 한 줄의 것이 아니며, **provider가 없다는 이유로 잠기지 않는다.**
+  */
+ function AiNoteTab({
+-  tab,
++  layout,
+   trouble,
+   onMode,
+   onGenerate,
+   onRecheck,
++  onCopy,
++  onExportForAi,
+ }: {
+-  tab: AiNoteTabView;
++  layout: AiNoteTabLayout;
+   trouble: AiNoteTrouble | null;
+   onMode: (mode: NoteMode) => void;
+   onGenerate: (recordingId: string, mode: NoteMode) => void;
+   onRecheck: () => void;
++  onCopy: (action: CopyAction) => void;
++  onExportForAi: (action: AiExportAction) => void;
+ }) {
+-  const { body } = tab;
+-
+   return (
+     <section className="note">
+       {/* 요청이 거절된 사실은 노트 상태를 덮지 않고 그 옆에 남는다 (§13). */}
+@@ -980,13 +1106,13 @@ function AiNoteTab({
+ 
+       {/* 무엇을 만들 것인가 (§9.5). 지금 바꿀 수 있는지는 화면이 아니라 값이 말한다. */}
+       <div className="note__modes" role="group" aria-label="Note mode">
+-        {tab.modes.map((choice) => (
++        {layout.modes.map((choice) => (
+           <button
+             key={choice.mode}
+             type="button"
+             className={choice.selected ? 'note__mode note__mode--active' : 'note__mode'}
+             aria-pressed={choice.selected}
+-            disabled={!tab.modeSelectable}
++            disabled={!layout.modeSelectable}
+             title={choice.sections}
+             onClick={() => onMode(choice.mode)}
+           >
+@@ -995,53 +1121,91 @@ function AiNoteTab({
+         ))}
+       </div>
+ 
++      <AutomaticNote row={layout.automatic} onGenerate={onGenerate} onRecheck={onRecheck} />
++
++      {/* 위 줄은 조건이 아니다 — 둘 중 하나를 고르는 것이다. */}
++      <p className="note__or">{layout.orText}</p>
++
++      <ManualHandoff manual={layout.manual} onCopy={onCopy} onExportForAi={onExportForAi} />
++    </section>
++  );
++}
++
++/**
++ * 위 줄 — 연결된 provider가 여기서 노트를 쓴다 (§9 · `phase-prompt/04`).
++ *
++ * 일곱 상태가 서로 다른 모습을 갖는다. **이 Phase가 바꾼 것은 이 줄이 놓이는 자리와 그 위의
++ * 제목 두 줄뿐이며, 상태 표현은 그대로다** (MH-8).
++ *
++ * **AI가 꺼져 있는 상태를 {@link FailureNotice}로 그리지 않는다** (INV-8 · §13). 그 자리에는
++ * `role="alert"`도 없고 `Failure`도 없다 — 담담한 사실 몇 줄과, 다시 확인해 볼 수단과,
++ * **그것이 선택이라는 사실**뿐이다 (요구 6).
++ */
++function AutomaticNote({
++  row,
++  onGenerate,
++  onRecheck,
++}: {
++  row: AiNoteTabLayout['automatic'];
++  onGenerate: (recordingId: string, mode: NoteMode) => void;
++  onRecheck: () => void;
++}) {
++  const tab: AiNoteTabView = row.tab;
++  const { body } = tab;
++
++  return (
++    <section className="note__row">
++      <h3 className="note__row-title">{row.heading}</h3>
++      <p className="hint">{row.text}</p>
++      {/* provider가 준비되지 않은 것은 오류도 설정 요구도 아니다 — 아래 줄이 그대로 있다
++          (INV-8 · 요구 6). 그 사실이 상태보다 먼저 읽힌다. */}
++      {row.optionalNotice !== null && <p className="hint">{row.optionalNotice}</p>}
++
+       {/* 전사 텍스트가 이 기기를 떠나는가 (§12 · INV-5). audio는 어느 쪽이든 나가지 않는다. */}
+       {tab.provider !== null && <p className="hint">{tab.provider.label}</p>}
+ 
+-      {body.kind === 'loading' && <p className="hint">Loading AI note…</p>}
++      {body.kind === 'loading' && <Loading text="Loading AI note…" />}
+ 
+       {body.kind === 'disabled' && (
+-        // 경고가 아니다. AI 기능이 비활성이라는 사실을 담담히 알린다 (INV-8 · §13).
+-        <div className="note__off" role="status">
+-          <p className="empty">{body.notice.headline}</p>
+-          <p className="hint">{body.notice.text}</p>
+-          <p className="hint">{body.notice.resolution}</p>
+-          {/* 이 상태가 막지 않는 것 — 재생도 Transcript도 그대로다. */}
+-          <p className="hint">{body.notice.unaffectedNotice}</p>
+-          {body.notice.recheck !== null && (
+-            <button type="button" className="action" onClick={onRecheck}>
+-              {body.notice.recheck.label}
+-            </button>
+-          )}
++        // 빈 상태 셋 — provider가 없다. **경고가 아니다.** AI 기능이 비활성이라는 사실을
++        // 담담히 알리며, 아래 줄은 이 상태에서도 그대로 쓸 수 있다 (INV-8 · §13 · MH-1).
++        <div className="note__off">
++          <EmptyState title={body.notice.headline} body={body.notice.text}>
++            <p className="hint">{body.notice.resolution}</p>
++            {/* 이 상태가 막지 않는 것 — 재생도 Transcript도 그대로다. */}
++            <p className="hint">{body.notice.unaffectedNotice}</p>
++            {body.notice.recheck !== null && (
++              <button type="button" className="btn btn--secondary" onClick={onRecheck}>
++                {body.notice.recheck.label}
++              </button>
++            )}
++          </EmptyState>
+         </div>
+       )}
+ 
+       {body.kind === 'noTranscript' && (
+         // 재료가 아직 없는 것도 실패가 아니다 (§7.2).
+-        <div role="status">
+-          <p className="empty">{body.text}</p>
+-          <p className="hint">{body.hint}</p>
+-        </div>
++        <EmptyState title={body.text} body={body.hint} />
+       )}
+ 
+       {body.kind === 'none' && (
+-        <>
+-          <p className="empty">{body.text}</p>
++        // 빈 상태 넷 — 아직 노트가 없다. 여기서 할 수 있는 일 하나가 그 아래에 있다.
++        <EmptyState title={body.text}>
+           <button
+             type="button"
+-            className="action"
++            className="btn btn--primary"
+             onClick={() => onGenerate(body.generate.recordingId, body.generate.mode)}
+           >
+             {body.generate.label}
+           </button>
+-        </>
++        </EmptyState>
+       )}
+ 
+       {body.kind === 'generating' && (
+         <>
+-          <p className="hint" aria-live="polite">
+-            {body.text}
+-          </p>
++          {/* 로컬 모델이 노트 하나를 쓰는 데 걸리는 시간은 초 단위가 아니다 (§16.2) —
++              그동안 화면이 얼어붙은 것처럼 보이지 않게 한다 (요구 9). */}
++          <Loading text={body.text} live />
+           {/* 새 생성이 도는 동안에도 이미 있던 노트는 그대로 보인다 (ADR-0008 §9.2 · INV-2). */}
+           {body.kept !== null && <NoteDocument note={body.kept} />}
+         </>
+@@ -1053,7 +1217,7 @@ function AiNoteTab({
+           {/* 다시 만들어도 지금 보고 있는 노트는 지워지지 않는다 (요구 12). */}
+           <button
+             type="button"
+-            className="action"
++            className="btn btn--secondary"
+             onClick={() => onGenerate(body.regenerate.recordingId, body.regenerate.mode)}
+           >
+             {body.regenerate.label}
+@@ -1074,7 +1238,7 @@ function AiNoteTab({
+           {body.resolution !== null && <p className="hint">{body.resolution}</p>}
+           <button
+             type="button"
+-            className="action"
++            className="btn btn--secondary"
+             onClick={() => onGenerate(body.retry.recordingId, body.retry.mode)}
+           >
+             {body.retry.label}
+@@ -1086,6 +1250,191 @@ function AiNoteTab({
+   );
+ }
+ 
++/**
++ * 아래 줄 — 이미 쓰고 있는 AI로 가져간다 (`phase-prompt/05.5` 요구 3 · 6 · A-1 · A-2).
++ *
++ * 세 자리가 나란히 있고, **셋 다 AI provider 없이 동작한다** (MH-1 · MH-2). 어느 자리가 어떤
++ * 상태인지 정하는 규칙은 여기 없고 {@link manualHandoff}에 있다 — 이 컴포넌트는 그리기만 한다.
++ *
++ * **앱이 아무 데도 보내지 않는다** (MH-3). 나가는 행위의 주체는 사람이며, 그 사실이 세 자리
++ * 위에 한 줄로 있다.
++ */
++function ManualHandoff({
++  manual,
++  onCopy,
++  onExportForAi,
++}: {
++  manual: ManualHandoffView;
++  onCopy: (action: CopyAction) => void;
++  onExportForAi: (action: AiExportAction) => void;
++}) {
++  return (
++    <section className="note__row">
++      <h3 className="note__row-title">{manual.heading}</h3>
++      <p className="hint">{manual.text}</p>
++      {/* provider가 없어도 된다 · 아무것도 나가지 않는다 (MH-1 · MH-2 · MH-3 · INV-6). */}
++      <p className="hint">{manual.noProviderNotice}</p>
++      <p className="hint">{manual.localNotice}</p>
++
++      <div className="note__handoff">
++        <CopyItem item={manual.copy.prompt} onCopy={onCopy} />
++        <CopyItem item={manual.copy.transcript} onCopy={onCopy} />
++        <AiExportItem item={manual.aiExport} onExportForAi={onExportForAi} />
++      </div>
++    </section>
++  );
++}
++
++/**
++ * 복사 자리 하나 (요구 A-1 · A-2 · 5).
++ *
++ * **복사됐다는 것도 실패했다는 것도 문장으로 있다** — 색 하나로만 말하지 않는다 (§7.5 ·
++ * 요구 12). 실패했을 때는 다시 시도할 수단과, clipboard를 쓰지 않는 다른 길(Export for AI)이
++ * 함께 남는다.
++ */
++function CopyItem({
++  item,
++  onCopy,
++}: {
++  item: CopyItemView;
++  onCopy: (action: CopyAction) => void;
++}) {
++  const { body } = item;
++
++  return (
++    <div className="note__handoff-item">
++      <p className="note__handoff-title">{item.label}</p>
++
++      {body.kind === 'loading' && <Loading text="Loading…" />}
++
++      {body.kind === 'nothingToCopy' && (
++        // 재료가 아직 없는 것은 실패가 아니다 (§7.2 · MH-5).
++        <EmptyState title={body.text} body={body.hint} />
++      )}
++
++      {body.kind === 'notAsked' && (
++        <>
++          <p className="hint">{body.text}</p>
++          <CopyButton action={body.start} onCopy={onCopy} />
++        </>
++      )}
++
++      {body.kind === 'copying' && <Loading text={body.text} live />}
++
++      {body.kind === 'copied' && (
++        <div role="status">
++          {/* 색이 아니라 이 문장이 복사됐다고 말한다 (§7.5 · 요구 12). 다른 완료 표시와
++              같은 모양이며, 여기에만 쓰이는 색을 따로 두지 않는다. */}
++          <p className="share__headline">{body.headline}</p>
++          <p className="hint">{body.text}</p>
++          <CopyButton action={body.again} onCopy={onCopy} />
++        </div>
++      )}
++
++      {body.kind === 'failed' && (
++        <>
++          {/* 무엇이 실패했는지 · 원본은 안전한지 · 다시 시도할 수 있는지 (§13). */}
++          <FailureNotice failure={body.failure} headline={body.headline} />
++          {/* 복사는 읽기만 한다 — 아무것도 달라지지 않았다 (INV-3 · MH-7). */}
++          <p className="hint">{body.preservedNotice}</p>
++          {body.resolution !== null && <p className="hint">{body.resolution}</p>}
++          <CopyButton action={body.retry} onCopy={onCopy} />
++          {/* clipboard가 막혀도 남는 길 (§7.5). 실패에는 언제나 있다. */}
++          <p className="hint">
++            {body.alternative.label} — {body.alternative.text}
++          </p>
++        </>
++      )}
++    </div>
++  );
++}
++
++function CopyButton({
++  action,
++  onCopy,
++}: {
++  action: CopyAction;
++  onCopy: (action: CopyAction) => void;
++}) {
++  return (
++    <button type="button" className="btn btn--secondary" onClick={() => onCopy(action)}>
++      {action.label}
++    </button>
++  );
++}
++
++/**
++ * Export for AI 자리 (요구 3).
++ *
++ * **clipboard를 전혀 쓰지 않는다** — 복사가 거절되는 환경에서도 이 길은 그대로 남는다
++ * (ADR-0010 §7.5). 만들어진 파일의 **전체 경로**는 언제나 보인다: export 위치가 설정으로
++ * 노출되지 않으므로 그것이 사용자가 파일을 찾는 유일한 길이다 (§4.1).
++ */
++function AiExportItem({
++  item,
++  onExportForAi,
++}: {
++  item: AiExportItemView;
++  onExportForAi: (action: AiExportAction) => void;
++}) {
++  const { body } = item;
++
++  return (
++    <div className="note__handoff-item">
++      <p className="note__handoff-title">{item.label}</p>
++
++      {body.kind === 'loading' && <Loading text="Loading…" />}
++
++      {body.kind === 'nothingToExport' && <EmptyState title={body.text} body={body.hint} />}
++
++      {body.kind === 'notAsked' && (
++        <>
++          <p className="hint">{body.text}</p>
++          <AiExportButton action={body.start} onExportForAi={onExportForAi} />
++        </>
++      )}
++
++      {body.kind === 'exporting' && <Loading text={body.text} live />}
++
++      {body.kind === 'done' && (
++        <div className="share__done" role="status">
++          <p className="share__headline">{body.headline}</p>
++          <p className="share__file">{body.fileName}</p>
++          {/* 어디에 만들어졌는가 (§4.1). 이 줄이 없으면 사용자는 파일을 찾지 못한다. */}
++          <p className="share__path">{body.path}</p>
++          <p className="hint">{body.text}</p>
++          <AiExportButton action={body.again} onExportForAi={onExportForAi} />
++        </div>
++      )}
++
++      {body.kind === 'failed' && (
++        <>
++          {/* 무엇이 실패했는지 · 원본은 안전한지 · 다시 시도할 수 있는지 (§13). */}
++          <FailureNotice failure={body.failure} headline={body.headline} />
++          {/* 앱은 아무것도 지우지 않았다 (INV-3 · MH-7). */}
++          <p className="hint">{body.preservedNotice}</p>
++          {body.resolution !== null && <p className="hint">{body.resolution}</p>}
++          <AiExportButton action={body.retry} onExportForAi={onExportForAi} />
++        </>
++      )}
++    </div>
++  );
++}
++
++function AiExportButton({
++  action,
++  onExportForAi,
++}: {
++  action: AiExportAction;
++  onExportForAi: (action: AiExportAction) => void;
++}) {
++  return (
++    <button type="button" className="btn btn--secondary" onClick={() => onExportForAi(action)}>
++      {action.label}
++    </button>
++  );
++}
++
+ /**
+  * 노트 하나를 **구조 그대로** 그린다 (§9.3 · INV-9).
+  *
+diff --git a/src/screens/RecordingScreen.tsx b/src/screens/RecordingScreen.tsx
+index 6f0d230..d5b0000 100644
+--- a/src/screens/RecordingScreen.tsx
++++ b/src/screens/RecordingScreen.tsx
+@@ -188,7 +188,7 @@ export function RecordingScreen({ navigate }: ScreenProps) {
+         <input
+           id="recording-title"
+           type="text"
+-          className="field__input"
++          className="input"
+           placeholder="Untitled recording"
+           value={view.title}
+           onChange={(event) => setView((state) => editedTitle(state, event.currentTarget.value))}
+@@ -207,17 +207,40 @@ export function RecordingScreen({ navigate }: ScreenProps) {
+         <p className="recording__elapsed">{display.elapsedLabel}</p>
+       </section>
+ 
+-      <div className="recording__controls">
+-        <button type="button" className="action" disabled={!controls.record} onClick={start}>
++      {/* 주 조작 넷이 이 화면에서 상태 다음으로 크다 (§19 · 요구 10). 지금 누를 수 있는
++          것과 없는 것은 `disabled`가 가르고, 흐림으로 눈에도 갈린다 (요구 12). 어느 것을
++          누를 수 있는지 정하는 규칙은 여기 없고 `recordingControls`에 있다. */}
++      <div className="recording__controls" role="group" aria-label="Recording controls">
++        <button
++          type="button"
++          className="btn btn--primary"
++          disabled={!controls.record}
++          onClick={start}
++        >
+           Record
+         </button>
+-        <button type="button" className="action" disabled={!controls.pause} onClick={pause}>
++        <button
++          type="button"
++          className="btn btn--secondary"
++          disabled={!controls.pause}
++          onClick={pause}
++        >
+           Pause
+         </button>
+-        <button type="button" className="action" disabled={!controls.resume} onClick={resume}>
++        <button
++          type="button"
++          className="btn btn--secondary"
++          disabled={!controls.resume}
++          onClick={resume}
++        >
+           Resume
+         </button>
+-        <button type="button" className="action" disabled={!controls.stop} onClick={stop}>
++        <button
++          type="button"
++          className="btn btn--secondary"
++          disabled={!controls.stop}
++          onClick={stop}
++        >
+           Stop
+         </button>
+       </div>
+@@ -225,7 +248,7 @@ export function RecordingScreen({ navigate }: ScreenProps) {
+       <section className="recording__microphone">
+         <p className="recording__device">{microphoneLabel(view.microphone)}</p>
+         {notice !== null && <p className="hint">{notice}</p>}
+-        <button type="button" className="action" onClick={reloadDevices}>
++        <button type="button" className="btn btn--secondary" onClick={reloadDevices}>
+           Reload devices
+         </button>
+       </section>
+@@ -249,7 +272,7 @@ export function RecordingScreen({ navigate }: ScreenProps) {
+           </p>
+           <button
+             type="button"
+-            className="action"
++            className="btn btn--secondary"
+             onClick={() => navigate({ screen: 'recordings' })}
+           >
+             Show in Recordings
+diff --git a/src/screens/RecordingsScreen.tsx b/src/screens/RecordingsScreen.tsx
+index ae16570..dda9240 100644
+--- a/src/screens/RecordingsScreen.tsx
++++ b/src/screens/RecordingsScreen.tsx
+@@ -1,6 +1,8 @@
+ import { useEffect, useState } from 'react';
+ import { listRecordings } from '../ipc/commands';
++import { EmptyState } from './EmptyState';
+ import { FailureNotice } from './FailureNotice';
++import { Loading } from './Loading';
+ import {
+   LOADING_RECORDINGS,
+   failedRecordings,
+@@ -51,7 +53,8 @@ export function RecordingsScreen({ navigate }: ScreenProps) {
+   if (view.kind === 'loading') {
+     return (
+       <div className="screen">
+-        <p className="hint">Loading recordings…</p>
++        {/* 목록을 읽는 동안 화면이 멎은 것처럼 보이지 않게 한다 (요구 9). */}
++        <Loading text="Loading recordings…" />
+       </div>
+     );
+   }
+@@ -67,18 +70,27 @@ export function RecordingsScreen({ navigate }: ScreenProps) {
+   if (view.kind === 'empty') {
+     return (
+       <div className="screen">
+-        <p className="empty">No recordings yet.</p>
+-        <p className="hint">Recordings you make will be listed here.</p>
+-        <button type="button" className="action" onClick={() => navigate({ screen: 'recording' })}>
+-          New Recording
+-        </button>
++        {/* 빈 상태 하나 — 녹음이 아직 없다. 고장이 아니므로 경고색도 테두리도 없고,
++            여기서 할 수 있는 일 하나가 그 아래에 있다 (요구 9). */}
++        <EmptyState
++          title="No recordings yet."
++          body="Recordings you make will be listed here."
++        >
++          <button
++            type="button"
++            className="btn btn--primary"
++            onClick={() => navigate({ screen: 'recording' })}
++          >
++            New Recording
++          </button>
++        </EmptyState>
+       </div>
+     );
+   }
+ 
+   return (
+     <div className="screen">
+-      <ul className="list">
++      <ul className="list" aria-label="Recordings">
+         {view.items.map((item) => (
+           <li key={item.id}>
+             <button
+diff --git a/src/screens/SettingsScreen.tsx b/src/screens/SettingsScreen.tsx
+index df814e9..4b9d02c 100644
+--- a/src/screens/SettingsScreen.tsx
++++ b/src/screens/SettingsScreen.tsx
+@@ -14,9 +14,14 @@ import {
+   AI_BASE_URL_NOTICE,
+   AI_BASE_URL_PLACEHOLDER,
+   AI_CHECK_USES_SAVED_SETTINGS,
++  AI_IS_OPTIONAL_TEXT,
+   AI_NOT_CHECKED_TEXT,
++  AI_SECTION_TITLE,
+   AI_SETTINGS_UNAFFECTED_NOTICE,
++  AI_WITHOUT_A_PROVIDER_TEXT,
+   CHECKING_AI_PROVIDER_TEXT,
++  CONNECTED_PROVIDER_TEXT,
++  CONNECTED_PROVIDER_TITLE,
+   NOTHING_LEAVES_THIS_DEVICE,
+   aiModelNotice,
+   aiModelOptions,
+@@ -28,6 +33,7 @@ import {
+   checkedAiProvider,
+   confirmedAiModels,
+   failedAiCheck,
++  localProviderSetups,
+   type AiConnection,
+   type AiSettingsSnapshot,
+ } from './aiProviderSettings';
+@@ -37,7 +43,9 @@ import {
+   microphoneOptions,
+   resolveDefaultMicrophone,
+ } from './defaultMicrophone';
++import { EmptyState } from './EmptyState';
+ import { FailureNotice } from './FailureNotice';
++import { Loading } from './Loading';
+ import {
+   CHECKING_NOTION_TEXT,
+   HOW_TO_SET_A_DESTINATION,
+@@ -89,7 +97,13 @@ import {
+  * 지금 전사할 수 없다는 것은 여기서 보이는 **제품 상태**이며, 그 사실 때문에 자동 전사 토글이
+  * 뒤집히지 않는다 — 사용자가 켠 값은 켜진 채로 남는다 (ADR-0007 §8.2.3).
+  *
+- * AI Provider 그룹은 **고르기 · 연결 확인 · 모델 선택 · 전송 경계 표시** 넷이다 (Phase 4).
++ * AI 그룹은 **두 부분**이다 (Phase 5.5 요구 7 · `docs/ADR-0010` §4.3). 앞은 `Connected
++ * provider` — **고르기 · 연결 확인 · 모델 선택 · 전송 경계 표시** 넷이며 Phase 4가 만든 그대로다.
++ * 뒤는 스스로 설치해서 쓰는 로컬 provider에 대한 안내이고, 거기에는 편집할 값도 버튼도 없다.
++ * **재배치이지 삭제가 아니다** — provider 추상화도 adapter도 이 화면의 어느 경로도 줄지
++ * 않았다 (MH-8). 뒤로 가는 이유는 그것이 기본 AI 경험이 아니라 선택지 하나이기 때문이며,
++ * 그 부분의 이름과 로컬 표시는 provider 목록에서 온다 — 화면이 벤더를 새로 적지 않는다 (INV-9).
++ *
+  * 연결 확인은 사용자가 눌러야 나가며, 화면을 열자마자 서버를 찾아 나서지 않는다. 확인이
+  * 어떻게 끝나든 — 응답이 없든 모델이 없든 확인 자체가 거절되든 — **그 결과는 나머지 설정의
+  * 저장 경로에 닿지 않는다** (INV-8). AI 상태를 `SettingsView`가 아니라 별도의 state로 들고
+@@ -221,7 +235,7 @@ export function SettingsScreen() {
+   if (view.kind === 'loading') {
+     return (
+       <div className="screen">
+-        <p className="hint">Loading settings…</p>
++        <Loading text="Loading settings…" />
+       </div>
+     );
+   }
+@@ -360,7 +374,7 @@ export function SettingsScreen() {
+           <input
+             id="recordings-directory"
+             type="text"
+-            className="field__input"
++            className="input"
+             placeholder="Not set"
+             value={form.recordingsDirectory}
+             onChange={(event) => edit({ recordingsDirectory: event.currentTarget.value })}
+@@ -372,7 +386,7 @@ export function SettingsScreen() {
+           <span className="field__label">Default microphone</span>
+           <select
+             id="default-microphone"
+-            className="field__input"
++            className="select"
+             value={form.defaultMicrophone}
+             onChange={(event) => edit({ defaultMicrophone: event.currentTarget.value })}
+           >
+@@ -394,6 +408,7 @@ export function SettingsScreen() {
+           <input
+             id="automatic-processing"
+             type="checkbox"
++            className="toggle__input"
+             checked={form.automaticProcessing}
+             onChange={(event) => edit({ automaticProcessing: event.currentTarget.checked })}
+           />
+@@ -409,7 +424,7 @@ export function SettingsScreen() {
+           <input
+             id="transcription-model"
+             type="text"
+-            className="field__input"
++            className="input"
+             placeholder="Not set"
+             value={form.transcriptionModel}
+             onChange={(event) => edit({ transcriptionModel: event.currentTarget.value })}
+@@ -420,6 +435,7 @@ export function SettingsScreen() {
+           <input
+             id="automatic-transcription"
+             type="checkbox"
++            className="toggle__input"
+             checked={form.automaticTranscription}
+             onChange={(event) => edit({ automaticTranscription: event.currentTarget.checked })}
+           />
+@@ -437,117 +453,157 @@ export function SettingsScreen() {
+       </section>
+ 
+       <section className="group">
+-        <h2 className="group__title">AI Provider</h2>
+-
+-        <label className="field" htmlFor="ai-provider">
+-          <span className="field__label">Provider</span>
+-          <select
+-            id="ai-provider"
+-            className="field__input"
+-            value={form.aiProvider}
+-            onChange={(event) => edit({ aiProvider: event.currentTarget.value })}
+-          >
+-            {/* 저장된 값을 이 앱이 모르면 그 항목이 목록에 함께 있다 — 그래서 고른 값이
+-                말없이 다른 provider로 보이지 않는다 (`aiProviderChoices`). */}
+-            {aiProviderChoices(form.aiProvider).map((choice) => (
+-              <option key={choice.value} value={choice.value}>
+-                {choice.label}
+-              </option>
+-            ))}
+-          </select>
+-        </label>
+-
+-        {/* 전송 경계 (§12 · INV-5 · INV-6). 문구는 provider의 locality 값에서 나온다. */}
+-        {transfer === null ? (
+-          <p className="hint">{NOTHING_LEAVES_THIS_DEVICE}</p>
+-        ) : (
+-          <>
+-            <p className="hint">{transfer.headline}</p>
+-            <p className="hint">{transfer.transcriptText}</p>
+-            <p className="hint">{transfer.audioText}</p>
+-          </>
+-        )}
+-
+-        {providerChosen && (
+-          <>
+-            <label className="field" htmlFor="ai-base-url">
+-              <span className="field__label">Address (host and port)</span>
+-              <input
+-                id="ai-base-url"
+-                type="text"
+-                className="field__input"
+-                placeholder={AI_BASE_URL_PLACEHOLDER}
+-                value={form.aiBaseUrl}
+-                onChange={(event) => edit({ aiBaseUrl: event.currentTarget.value })}
+-              />
+-            </label>
+-            <p className="hint">{AI_BASE_URL_NOTICE}</p>
+-
+-            <button
+-              type="button"
+-              className="action"
+-              disabled={connection.kind === 'checking'}
+-              onClick={checkProvider}
++        <h2 className="group__title">{AI_SECTION_TITLE}</h2>
++
++        {/* 구역 전체가 선택이라는 사실이 먼저 온다 (INV-8). 그래서 아래의 어느 것도
++            "아직 안 한 일"로 읽히지 않는다. */}
++        <p className="hint">{AI_IS_OPTIONAL_TEXT}</p>
++        <p className="hint">{AI_WITHOUT_A_PROVIDER_TEXT}</p>
++
++        <section className="group__part">
++          <h3 className="group__subtitle">{CONNECTED_PROVIDER_TITLE}</h3>
++          <p className="hint">{CONNECTED_PROVIDER_TEXT}</p>
++
++          <label className="field" htmlFor="ai-provider">
++            <span className="field__label">Provider</span>
++            <select
++              id="ai-provider"
++              className="select"
++              value={form.aiProvider}
++              onChange={(event) => edit({ aiProvider: event.currentTarget.value })}
+             >
+-              {connection.kind === 'checking' ? 'Checking…' : 'Check the AI provider'}
+-            </button>
+-            <p className="hint">{AI_CHECK_USES_SAVED_SETTINGS}</p>
+-            {staleCheck && (
+-              <p className="hint">
+-                The AI settings above have changed since the last save, so this result is about the
+-                saved ones.
+-              </p>
+-            )}
+-
+-            {/* 실행 중 · 모델 없음 · 미실행 · 확인 거절이 서로 다른 값으로 온다. 화면은
+-                그것을 다시 뭉치지 않는다 (`AiConnection`). */}
+-            <p className="hint">{connection.text}</p>
+-            {connection.kind === 'notConfigured' && <p className="hint">{connection.resolution}</p>}
+-            {connection.kind === 'noModels' && <p className="hint">{connection.resolution}</p>}
+-            {connection.kind === 'notRunning' && (
+-              <>
+-                <p className="hint">{connection.resolution}</p>
+-                {connection.failure !== null && (
+-                  <FailureNotice failure={connection.failure} onRetry={checkProvider} />
+-                )}
+-              </>
+-            )}
+-            {connection.kind === 'checkFailed' && (
+-              <FailureNotice failure={connection.failure} onRetry={checkProvider} />
+-            )}
+-
+-            <label className="field" htmlFor="ai-model">
+-              <span className="field__label">Model</span>
+-              <select
+-                id="ai-model"
+-                className="field__input"
+-                value={form.aiModel}
+-                onChange={(event) => edit({ aiModel: event.currentTarget.value })}
++              {/* 저장된 값을 이 앱이 모르면 그 항목이 목록에 함께 있다 — 그래서 고른 값이
++                  말없이 다른 provider로 보이지 않는다 (`aiProviderChoices`). */}
++              {aiProviderChoices(form.aiProvider).map((choice) => (
++                <option key={choice.value} value={choice.value}>
++                  {choice.label}
++                </option>
++              ))}
++            </select>
++          </label>
++
++          {/* 전송 경계 (§12 · INV-5 · INV-6). 문구는 provider의 locality 값에서 나온다. */}
++          {transfer === null ? (
++            <p className="hint">{NOTHING_LEAVES_THIS_DEVICE}</p>
++          ) : (
++            <>
++              <p className="hint">{transfer.headline}</p>
++              <p className="hint">{transfer.transcriptText}</p>
++              <p className="hint">{transfer.audioText}</p>
++            </>
++          )}
++
++          {providerChosen && (
++            <>
++              <label className="field" htmlFor="ai-base-url">
++                <span className="field__label">Address (host and port)</span>
++                <input
++                  id="ai-base-url"
++                  type="text"
++                  className="input"
++                  placeholder={AI_BASE_URL_PLACEHOLDER}
++                  value={form.aiBaseUrl}
++                  onChange={(event) => edit({ aiBaseUrl: event.currentTarget.value })}
++                />
++              </label>
++              <p className="hint">{AI_BASE_URL_NOTICE}</p>
++
++              <button
++                type="button"
++                className="btn btn--secondary"
++                disabled={connection.kind === 'checking'}
++                onClick={checkProvider}
+               >
+-                {/* 목록은 확인이 돌려준 것이다. 저장된 모델이 지금 없으면 그 항목도 함께
+-                    남는다 — 고른 값이 말없이 다른 모델로 바뀌지 않는다. */}
+-                {aiModelOptions(form.aiModel, confirmedAiModels(connection)).map((option) => (
+-                  <option key={option.value} value={option.value}>
+-                    {option.label}
+-                  </option>
+-                ))}
+-              </select>
+-            </label>
+-            {modelNotice !== null && <p className="hint">{modelNotice}</p>}
+-          </>
+-        )}
+-
+-        {/* AI 쪽이 어떻게 끝나든 나머지 설정은 그대로 저장된다 (INV-8). */}
+-        <p className="hint">{AI_SETTINGS_UNAFFECTED_NOTICE}</p>
++                {connection.kind === 'checking' ? 'Checking…' : 'Check the AI provider'}
++              </button>
++              <p className="hint">{AI_CHECK_USES_SAVED_SETTINGS}</p>
++              {staleCheck && (
++                <p className="hint">
++                  The AI settings above have changed since the last save, so this result is about
++                  the saved ones.
++                </p>
++              )}
++
++              {/* 실행 중 · 모델 없음 · 미실행 · 확인 거절이 서로 다른 값으로 온다. 화면은
++                  그것을 다시 뭉치지 않는다 (`AiConnection`). 물어보는 동안에는 응답을
++                  기다리는 중이라는 사실이 보인다 — 대답이 없는 주소일 수도 있다 (요구 9). */}
++              {connection.kind === 'checking' ? (
++                <Loading text={connection.text} live />
++              ) : (
++                <p className="hint">{connection.text}</p>
++              )}
++              {connection.kind === 'notConfigured' && (
++                <p className="hint">{connection.resolution}</p>
++              )}
++              {connection.kind === 'noModels' && <p className="hint">{connection.resolution}</p>}
++              {connection.kind === 'notRunning' && (
++                <>
++                  <p className="hint">{connection.resolution}</p>
++                  {connection.failure !== null && (
++                    <FailureNotice failure={connection.failure} onRetry={checkProvider} />
++                  )}
++                </>
++              )}
++              {connection.kind === 'checkFailed' && (
++                <FailureNotice failure={connection.failure} onRetry={checkProvider} />
++              )}
++
++              <label className="field" htmlFor="ai-model">
++                <span className="field__label">Model</span>
++                <select
++                  id="ai-model"
++                  className="select"
++                  value={form.aiModel}
++                  onChange={(event) => edit({ aiModel: event.currentTarget.value })}
++                >
++                  {/* 목록은 확인이 돌려준 것이다. 저장된 모델이 지금 없으면 그 항목도 함께
++                      남는다 — 고른 값이 말없이 다른 모델로 바뀌지 않는다. */}
++                  {aiModelOptions(form.aiModel, confirmedAiModels(connection)).map((option) => (
++                    <option key={option.value} value={option.value}>
++                      {option.label}
++                    </option>
++                  ))}
++                </select>
++              </label>
++              {modelNotice !== null && <p className="hint">{modelNotice}</p>}
++            </>
++          )}
++
++          {/* AI 쪽이 어떻게 끝나든 나머지 설정은 그대로 저장된다 (INV-8). */}
++          <p className="hint">{AI_SETTINGS_UNAFFECTED_NOTICE}</p>
++        </section>
++
++        {/* 스스로 설치해서 쓰는 provider는 **뒤에** 온다 (요구 7 · ADR-0010 §4.3). 여기에는
++            고르는 자리도 확인 버튼도 없다 — 그것은 전부 위 부분에 그대로 있고 (MH-8), 이
++            부분이 하는 일은 그 선택지 하나가 무엇이고 어떤 위치에 있는지 말하는 것뿐이다.
++            제목의 이름과 로컬 표시는 provider 목록에서 온다 (INV-9). */}
++        {localProviderSetups(form.aiProvider).map((setup) => (
++          <section className="group__part" key={setup.id}>
++            <h3 className="group__subtitle">{setup.title}</h3>
++            <p className="hint">{setup.standing}</p>
++            <p className="hint">{setup.text}</p>
++            <p className="hint">{setup.statusText}</p>
++            <p className="hint">{setup.howToTurnOn}</p>
++          </section>
++        ))}
+       </section>
+ 
+       <section className="group">
+         <h2 className="group__title">Notion</h2>
+ 
+         {/* 저장돼 있는가 — 그것이 화면이 token에 대해 아는 전부다 (INV-7). 저장된 값이
+-            없는 것은 오류가 아니라 상태이므로 담담한 문장 한 줄로 보인다 (INV-8). */}
+-        <p className="hint">{tokenNotice.text}</p>
+-        {tokenNotice.resolution !== null && <p className="hint">{tokenNotice.resolution}</p>}
++            없는 것은 오류가 아니라 상태이므로 담담한 문장 한 줄로 보인다 (INV-8).
++            빈 상태 다섯 — Notion이 아직 설정되지 않았다. 다른 네 자리와 같은 모양을 쓰며
++            경고색도 테두리도 없다 (요구 9). 무엇을 저장했는지 판정하는 것은 여기가 아니라
++            `notionTokenState`이고, 화면은 그 값에 맞는 모양을 고를 뿐이다. */}
++        {tokenState === 'notStored' ? (
++          <EmptyState title={tokenNotice.text} body={tokenNotice.resolution} />
++        ) : (
++          <>
++            <p className="hint">{tokenNotice.text}</p>
++            {tokenNotice.resolution !== null && <p className="hint">{tokenNotice.resolution}</p>}
++          </>
++        )}
+ 
+         <label className="field" htmlFor="notion-token">
+           <span className="field__label">Integration token</span>
+@@ -556,7 +612,7 @@ export function SettingsScreen() {
+           <input
+             id="notion-token"
+             type="password"
+-            className="field__input"
++            className="input"
+             placeholder={TOKEN_INPUT_PLACEHOLDER}
+             autoComplete="off"
+             ref={tokenInput}
+@@ -566,15 +622,16 @@ export function SettingsScreen() {
+ 
+         <button
+           type="button"
+-          className="action"
++          className="btn btn--secondary"
+           disabled={tokenBusy !== null}
+           onClick={saveToken}
+         >
+           {tokenBusy === 'save' ? 'Saving the token…' : 'Save the token'}
+         </button>
++        {/* 저장된 것을 없애는 동작이므로 다른 버튼과 같은 무게로 두지 않는다 (§19). */}
+         <button
+           type="button"
+-          className="action"
++          className="btn btn--danger"
+           disabled={tokenBusy !== null}
+           onClick={removeToken}
+         >
+@@ -597,7 +654,7 @@ export function SettingsScreen() {
+           <input
+             id="notion-parent-page"
+             type="text"
+-            className="field__input"
++            className="input"
+             placeholder="Not set"
+             value={form.notionParentPageId}
+             onChange={(event) => edit({ notionParentPageId: event.currentTarget.value })}
+@@ -608,7 +665,7 @@ export function SettingsScreen() {
+ 
+         <button
+           type="button"
+-          className="action"
++          className="btn btn--secondary"
+           disabled={notion.kind === 'checking'}
+           onClick={checkNotion}
+         >
+@@ -623,8 +680,14 @@ export function SettingsScreen() {
+         )}
+ 
+         {/* 성공 · token 없음 · 인증 실패 · 권한 없는 destination · 네트워크 없음 · 확인 거절이
+-            서로 다른 값으로 온다. 화면은 그것을 다시 뭉치지 않는다 (`NotionConnectionView`). */}
+-        <p className="hint">{notion.text}</p>
++            서로 다른 값으로 온다. 화면은 그것을 다시 뭉치지 않는다 (`NotionConnectionView`).
++            물어보는 동안에는 기다리는 중이라는 사실이 보인다 — 왕복이므로 즉시 끝나지
++            않는다 (요구 9). */}
++        {notion.kind === 'checking' ? (
++          <Loading text={notion.text} live />
++        ) : (
++          <p className="hint">{notion.text}</p>
++        )}
+         {notion.kind === 'noToken' && <p className="hint">{notion.resolution}</p>}
+         {notion.kind === 'connected' && notion.destinationNotice !== null && (
+           <p className="hint">{notion.destinationNotice}</p>
+@@ -643,13 +706,23 @@ export function SettingsScreen() {
+         <p className="hint">{NOTION_SETTINGS_UNAFFECTED_NOTICE}</p>
+       </section>
+ 
+-      {/* 설정은 한 벌이므로 저장도 한 번이다. */}
++      {/* 설정은 한 벌이므로 저장도 한 번이다. 이 화면의 primary는 이것 하나다 (§19). */}
+       <section className="group">
+-        <button type="button" className="action" disabled={saving} onClick={() => save(form)}>
++        <button
++          type="button"
++          className="btn btn--primary"
++          disabled={saving}
++          onClick={() => save(form)}
++        >
+           {saving ? 'Saving…' : 'Save'}
+         </button>
+         <p className="hint">Saves every setting on this screen.</p>
+-        {saved && <p className="hint">Saved.</p>}
++        {/* 저장됐다는 사실도 글자로 말한다 — 색만으로 말하는 자리를 두지 않는다 (요구 12). */}
++        {saved && (
++          <p className="hint" role="status">
++            Saved.
++          </p>
++        )}
+         {failure !== null && <FailureNotice failure={failure} onRetry={() => save(form)} />}
+       </section>
+     </div>
+ M src/App.css
+ M src/App.tsx
+ M src/ipc/commands.ts
+ M src/ipc/types.ts
+ M src/screens/FailureNotice.tsx
+ M src/screens/RecordingDetailScreen.tsx
+ M src/screens/RecordingScreen.tsx
+ M src/screens/RecordingsScreen.tsx
+ M src/screens/SettingsScreen.tsx
+ M src/screens/aiProviderSettings.test.ts
+ M src/screens/aiProviderSettings.ts
+?? src/platform/
+?? src/screens/EmptyState.tsx
+?? src/screens/Loading.tsx
+?? src/screens/aiHandoffView.test.ts
+?? src/screens/aiHandoffView.ts
+?? src/screens/copyView.test.ts
+?? src/screens/copyView.ts

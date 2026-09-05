@@ -1,0 +1,61 @@
+# Settings에서 Ollama를 '선택적 · 로컬 · 고급'으로 재배치한다
+# Runtime이 PLAN-20260904T075433Z 승인 시점에 생성했다 (proposal P6). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-060
+status: DONE
+
+request: |-
+  `src/screens/SettingsScreen.tsx`의 AI 구역을 Goal의 개념 그룹(`General · Transcription · AI(연결된 provider · Ollama—로컬/선택) · Notion · About`)에 맞게 재배치한다. **Ollama를 지우지 않는다.** Phase 4의 provider 추상화(`ai/provider.rs` · `ai/ollama/` · provider 설정 영속화 · 연결 확인 · 모델 선택 · 로컬/외부 표시)를 그대로 두고, Settings에서 **선택적 · 로컬 · 고급에 해당하는 위치와 언어로 옮긴다** — 기본 AI 경험처럼 맨 앞에 서 있지 않게 하고, 설정하지 않은 상태가 결함이 아니라 정상으로 읽히게 한다. 문구는 기존 제품 언어와 일관되게 맞춘다. **새 cloud provider를 붙이지 않는다** (OpenAI · Claude · Gemini · Codex 어느 것도). 표현 규칙은 기존 규약대로 순수 모듈(`src/screens/aiProviderSettings.ts` · `settingsView.ts`)에 두고 컴포넌트는 그리기만 한다. 벤더 이름은 provider가 스스로 말한 값에서만 오고 (INV-9), core/domain과 command payload · frontend 타입에 벤더 고유 개념을 새로 만들지 않는다 — `tests/ipc-boundary.test.ts`의 벤더 부재 검사가 그대로 통과해야 한다. Settings의 나머지 구역(Recording · Transcription · Notion)의 동작을 바꾸지 않는다. 이 Task는 배치와 언어를 바꾸는 일이지 provider 동작을 바꾸는 일이 아니다.
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-055
+
+stop_condition:
+  gates: [build, lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 2
+
+acceptance_criteria:
+  - id: AC-1
+    description: |-
+      build Gate가 통과한다.
+    verification:
+      type: gate
+      ref: build
+  - id: AC-2
+    description: |-
+      lint Gate가 통과한다.
+    verification:
+      type: gate
+      ref: lint
+  - id: AC-3
+    description: |-
+      test Gate가 통과하고, 기존 provider 설정 · 연결 확인 · 모델 선택 테스트가 계속 통과한다 (MH-8).
+    verification:
+      type: gate
+      ref: test
+  - id: AC-4
+    description: |-
+      `src-tauri/src/ai/` 아래의 provider 추상화와 Ollama adapter가 삭제되지 않았고 동작이 바뀌지 않았다.
+    verification:
+      type: verifier
+      instruction: |-
+        src-tauri diff를 확인한다. adapter나 계약이 삭제·축소됐으면 실패다.
+  - id: AC-5
+    description: |-
+      Settings의 AI 구역이 '연결된 provider'와 'Ollama — 로컬 · 선택'으로 나뉘고, Ollama가 기본 AI 경험이 아니라 선택적·고급 항목으로 배치·서술돼 있다. 새 cloud provider가 추가되지 않았다.
+    verification:
+      type: verifier
+  - id: AC-6
+    description: |-
+      표현 규칙이 순수 모듈에 있고, core/domain · payload · frontend 타입에 벤더 고유 개념이 새로 생기지 않았다.
+    verification:
+      type: verifier
+
+evidence: []
+
+failure_memo: []

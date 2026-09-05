@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { listRecordings } from '../ipc/commands';
+import { EmptyState } from './EmptyState';
 import { FailureNotice } from './FailureNotice';
+import { Loading } from './Loading';
 import {
   LOADING_RECORDINGS,
   failedRecordings,
@@ -51,7 +53,8 @@ export function RecordingsScreen({ navigate }: ScreenProps) {
   if (view.kind === 'loading') {
     return (
       <div className="screen">
-        <p className="hint">Loading recordings…</p>
+        {/* 목록을 읽는 동안 화면이 멎은 것처럼 보이지 않게 한다 (요구 9). */}
+        <Loading text="Loading recordings…" />
       </div>
     );
   }
@@ -67,18 +70,27 @@ export function RecordingsScreen({ navigate }: ScreenProps) {
   if (view.kind === 'empty') {
     return (
       <div className="screen">
-        <p className="empty">No recordings yet.</p>
-        <p className="hint">Recordings you make will be listed here.</p>
-        <button type="button" className="action" onClick={() => navigate({ screen: 'recording' })}>
-          New Recording
-        </button>
+        {/* 빈 상태 하나 — 녹음이 아직 없다. 고장이 아니므로 경고색도 테두리도 없고,
+            여기서 할 수 있는 일 하나가 그 아래에 있다 (요구 9). */}
+        <EmptyState
+          title="No recordings yet."
+          body="Recordings you make will be listed here."
+        >
+          <button
+            type="button"
+            className="btn btn--primary"
+            onClick={() => navigate({ screen: 'recording' })}
+          >
+            New Recording
+          </button>
+        </EmptyState>
       </div>
     );
   }
 
   return (
     <div className="screen">
-      <ul className="list">
+      <ul className="list" aria-label="Recordings">
         {view.items.map((item) => (
           <li key={item.id}>
             <button

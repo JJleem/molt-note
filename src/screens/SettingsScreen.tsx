@@ -14,9 +14,14 @@ import {
   AI_BASE_URL_NOTICE,
   AI_BASE_URL_PLACEHOLDER,
   AI_CHECK_USES_SAVED_SETTINGS,
+  AI_IS_OPTIONAL_TEXT,
   AI_NOT_CHECKED_TEXT,
+  AI_SECTION_TITLE,
   AI_SETTINGS_UNAFFECTED_NOTICE,
+  AI_WITHOUT_A_PROVIDER_TEXT,
   CHECKING_AI_PROVIDER_TEXT,
+  CONNECTED_PROVIDER_TEXT,
+  CONNECTED_PROVIDER_TITLE,
   NOTHING_LEAVES_THIS_DEVICE,
   aiModelNotice,
   aiModelOptions,
@@ -28,6 +33,7 @@ import {
   checkedAiProvider,
   confirmedAiModels,
   failedAiCheck,
+  localProviderSetups,
   type AiConnection,
   type AiSettingsSnapshot,
 } from './aiProviderSettings';
@@ -37,7 +43,9 @@ import {
   microphoneOptions,
   resolveDefaultMicrophone,
 } from './defaultMicrophone';
+import { EmptyState } from './EmptyState';
 import { FailureNotice } from './FailureNotice';
+import { Loading } from './Loading';
 import {
   CHECKING_NOTION_TEXT,
   HOW_TO_SET_A_DESTINATION,
@@ -89,7 +97,13 @@ import {
  * 지금 전사할 수 없다는 것은 여기서 보이는 **제품 상태**이며, 그 사실 때문에 자동 전사 토글이
  * 뒤집히지 않는다 — 사용자가 켠 값은 켜진 채로 남는다 (ADR-0007 §8.2.3).
  *
- * AI Provider 그룹은 **고르기 · 연결 확인 · 모델 선택 · 전송 경계 표시** 넷이다 (Phase 4).
+ * AI 그룹은 **두 부분**이다 (Phase 5.5 요구 7 · `docs/ADR-0010` §4.3). 앞은 `Connected
+ * provider` — **고르기 · 연결 확인 · 모델 선택 · 전송 경계 표시** 넷이며 Phase 4가 만든 그대로다.
+ * 뒤는 스스로 설치해서 쓰는 로컬 provider에 대한 안내이고, 거기에는 편집할 값도 버튼도 없다.
+ * **재배치이지 삭제가 아니다** — provider 추상화도 adapter도 이 화면의 어느 경로도 줄지
+ * 않았다 (MH-8). 뒤로 가는 이유는 그것이 기본 AI 경험이 아니라 선택지 하나이기 때문이며,
+ * 그 부분의 이름과 로컬 표시는 provider 목록에서 온다 — 화면이 벤더를 새로 적지 않는다 (INV-9).
+ *
  * 연결 확인은 사용자가 눌러야 나가며, 화면을 열자마자 서버를 찾아 나서지 않는다. 확인이
  * 어떻게 끝나든 — 응답이 없든 모델이 없든 확인 자체가 거절되든 — **그 결과는 나머지 설정의
  * 저장 경로에 닿지 않는다** (INV-8). AI 상태를 `SettingsView`가 아니라 별도의 state로 들고
@@ -221,7 +235,7 @@ export function SettingsScreen() {
   if (view.kind === 'loading') {
     return (
       <div className="screen">
-        <p className="hint">Loading settings…</p>
+        <Loading text="Loading settings…" />
       </div>
     );
   }
@@ -360,7 +374,7 @@ export function SettingsScreen() {
           <input
             id="recordings-directory"
             type="text"
-            className="field__input"
+            className="input"
             placeholder="Not set"
             value={form.recordingsDirectory}
             onChange={(event) => edit({ recordingsDirectory: event.currentTarget.value })}
@@ -372,7 +386,7 @@ export function SettingsScreen() {
           <span className="field__label">Default microphone</span>
           <select
             id="default-microphone"
-            className="field__input"
+            className="select"
             value={form.defaultMicrophone}
             onChange={(event) => edit({ defaultMicrophone: event.currentTarget.value })}
           >
@@ -394,6 +408,7 @@ export function SettingsScreen() {
           <input
             id="automatic-processing"
             type="checkbox"
+            className="toggle__input"
             checked={form.automaticProcessing}
             onChange={(event) => edit({ automaticProcessing: event.currentTarget.checked })}
           />
@@ -409,7 +424,7 @@ export function SettingsScreen() {
           <input
             id="transcription-model"
             type="text"
-            className="field__input"
+            className="input"
             placeholder="Not set"
             value={form.transcriptionModel}
             onChange={(event) => edit({ transcriptionModel: event.currentTarget.value })}
@@ -420,6 +435,7 @@ export function SettingsScreen() {
           <input
             id="automatic-transcription"
             type="checkbox"
+            className="toggle__input"
             checked={form.automaticTranscription}
             onChange={(event) => edit({ automaticTranscription: event.currentTarget.checked })}
           />
@@ -437,117 +453,157 @@ export function SettingsScreen() {
       </section>
 
       <section className="group">
-        <h2 className="group__title">AI Provider</h2>
+        <h2 className="group__title">{AI_SECTION_TITLE}</h2>
 
-        <label className="field" htmlFor="ai-provider">
-          <span className="field__label">Provider</span>
-          <select
-            id="ai-provider"
-            className="field__input"
-            value={form.aiProvider}
-            onChange={(event) => edit({ aiProvider: event.currentTarget.value })}
-          >
-            {/* 저장된 값을 이 앱이 모르면 그 항목이 목록에 함께 있다 — 그래서 고른 값이
-                말없이 다른 provider로 보이지 않는다 (`aiProviderChoices`). */}
-            {aiProviderChoices(form.aiProvider).map((choice) => (
-              <option key={choice.value} value={choice.value}>
-                {choice.label}
-              </option>
-            ))}
-          </select>
-        </label>
+        {/* 구역 전체가 선택이라는 사실이 먼저 온다 (INV-8). 그래서 아래의 어느 것도
+            "아직 안 한 일"로 읽히지 않는다. */}
+        <p className="hint">{AI_IS_OPTIONAL_TEXT}</p>
+        <p className="hint">{AI_WITHOUT_A_PROVIDER_TEXT}</p>
 
-        {/* 전송 경계 (§12 · INV-5 · INV-6). 문구는 provider의 locality 값에서 나온다. */}
-        {transfer === null ? (
-          <p className="hint">{NOTHING_LEAVES_THIS_DEVICE}</p>
-        ) : (
-          <>
-            <p className="hint">{transfer.headline}</p>
-            <p className="hint">{transfer.transcriptText}</p>
-            <p className="hint">{transfer.audioText}</p>
-          </>
-        )}
+        <section className="group__part">
+          <h3 className="group__subtitle">{CONNECTED_PROVIDER_TITLE}</h3>
+          <p className="hint">{CONNECTED_PROVIDER_TEXT}</p>
 
-        {providerChosen && (
-          <>
-            <label className="field" htmlFor="ai-base-url">
-              <span className="field__label">Address (host and port)</span>
-              <input
-                id="ai-base-url"
-                type="text"
-                className="field__input"
-                placeholder={AI_BASE_URL_PLACEHOLDER}
-                value={form.aiBaseUrl}
-                onChange={(event) => edit({ aiBaseUrl: event.currentTarget.value })}
-              />
-            </label>
-            <p className="hint">{AI_BASE_URL_NOTICE}</p>
-
-            <button
-              type="button"
-              className="action"
-              disabled={connection.kind === 'checking'}
-              onClick={checkProvider}
+          <label className="field" htmlFor="ai-provider">
+            <span className="field__label">Provider</span>
+            <select
+              id="ai-provider"
+              className="select"
+              value={form.aiProvider}
+              onChange={(event) => edit({ aiProvider: event.currentTarget.value })}
             >
-              {connection.kind === 'checking' ? 'Checking…' : 'Check the AI provider'}
-            </button>
-            <p className="hint">{AI_CHECK_USES_SAVED_SETTINGS}</p>
-            {staleCheck && (
-              <p className="hint">
-                The AI settings above have changed since the last save, so this result is about the
-                saved ones.
-              </p>
-            )}
+              {/* 저장된 값을 이 앱이 모르면 그 항목이 목록에 함께 있다 — 그래서 고른 값이
+                  말없이 다른 provider로 보이지 않는다 (`aiProviderChoices`). */}
+              {aiProviderChoices(form.aiProvider).map((choice) => (
+                <option key={choice.value} value={choice.value}>
+                  {choice.label}
+                </option>
+              ))}
+            </select>
+          </label>
 
-            {/* 실행 중 · 모델 없음 · 미실행 · 확인 거절이 서로 다른 값으로 온다. 화면은
-                그것을 다시 뭉치지 않는다 (`AiConnection`). */}
-            <p className="hint">{connection.text}</p>
-            {connection.kind === 'notConfigured' && <p className="hint">{connection.resolution}</p>}
-            {connection.kind === 'noModels' && <p className="hint">{connection.resolution}</p>}
-            {connection.kind === 'notRunning' && (
-              <>
-                <p className="hint">{connection.resolution}</p>
-                {connection.failure !== null && (
-                  <FailureNotice failure={connection.failure} onRetry={checkProvider} />
-                )}
-              </>
-            )}
-            {connection.kind === 'checkFailed' && (
-              <FailureNotice failure={connection.failure} onRetry={checkProvider} />
-            )}
+          {/* 전송 경계 (§12 · INV-5 · INV-6). 문구는 provider의 locality 값에서 나온다. */}
+          {transfer === null ? (
+            <p className="hint">{NOTHING_LEAVES_THIS_DEVICE}</p>
+          ) : (
+            <>
+              <p className="hint">{transfer.headline}</p>
+              <p className="hint">{transfer.transcriptText}</p>
+              <p className="hint">{transfer.audioText}</p>
+            </>
+          )}
 
-            <label className="field" htmlFor="ai-model">
-              <span className="field__label">Model</span>
-              <select
-                id="ai-model"
-                className="field__input"
-                value={form.aiModel}
-                onChange={(event) => edit({ aiModel: event.currentTarget.value })}
+          {providerChosen && (
+            <>
+              <label className="field" htmlFor="ai-base-url">
+                <span className="field__label">Address (host and port)</span>
+                <input
+                  id="ai-base-url"
+                  type="text"
+                  className="input"
+                  placeholder={AI_BASE_URL_PLACEHOLDER}
+                  value={form.aiBaseUrl}
+                  onChange={(event) => edit({ aiBaseUrl: event.currentTarget.value })}
+                />
+              </label>
+              <p className="hint">{AI_BASE_URL_NOTICE}</p>
+
+              <button
+                type="button"
+                className="btn btn--secondary"
+                disabled={connection.kind === 'checking'}
+                onClick={checkProvider}
               >
-                {/* 목록은 확인이 돌려준 것이다. 저장된 모델이 지금 없으면 그 항목도 함께
-                    남는다 — 고른 값이 말없이 다른 모델로 바뀌지 않는다. */}
-                {aiModelOptions(form.aiModel, confirmedAiModels(connection)).map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            {modelNotice !== null && <p className="hint">{modelNotice}</p>}
-          </>
-        )}
+                {connection.kind === 'checking' ? 'Checking…' : 'Check the AI provider'}
+              </button>
+              <p className="hint">{AI_CHECK_USES_SAVED_SETTINGS}</p>
+              {staleCheck && (
+                <p className="hint">
+                  The AI settings above have changed since the last save, so this result is about
+                  the saved ones.
+                </p>
+              )}
 
-        {/* AI 쪽이 어떻게 끝나든 나머지 설정은 그대로 저장된다 (INV-8). */}
-        <p className="hint">{AI_SETTINGS_UNAFFECTED_NOTICE}</p>
+              {/* 실행 중 · 모델 없음 · 미실행 · 확인 거절이 서로 다른 값으로 온다. 화면은
+                  그것을 다시 뭉치지 않는다 (`AiConnection`). 물어보는 동안에는 응답을
+                  기다리는 중이라는 사실이 보인다 — 대답이 없는 주소일 수도 있다 (요구 9). */}
+              {connection.kind === 'checking' ? (
+                <Loading text={connection.text} live />
+              ) : (
+                <p className="hint">{connection.text}</p>
+              )}
+              {connection.kind === 'notConfigured' && (
+                <p className="hint">{connection.resolution}</p>
+              )}
+              {connection.kind === 'noModels' && <p className="hint">{connection.resolution}</p>}
+              {connection.kind === 'notRunning' && (
+                <>
+                  <p className="hint">{connection.resolution}</p>
+                  {connection.failure !== null && (
+                    <FailureNotice failure={connection.failure} onRetry={checkProvider} />
+                  )}
+                </>
+              )}
+              {connection.kind === 'checkFailed' && (
+                <FailureNotice failure={connection.failure} onRetry={checkProvider} />
+              )}
+
+              <label className="field" htmlFor="ai-model">
+                <span className="field__label">Model</span>
+                <select
+                  id="ai-model"
+                  className="select"
+                  value={form.aiModel}
+                  onChange={(event) => edit({ aiModel: event.currentTarget.value })}
+                >
+                  {/* 목록은 확인이 돌려준 것이다. 저장된 모델이 지금 없으면 그 항목도 함께
+                      남는다 — 고른 값이 말없이 다른 모델로 바뀌지 않는다. */}
+                  {aiModelOptions(form.aiModel, confirmedAiModels(connection)).map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {modelNotice !== null && <p className="hint">{modelNotice}</p>}
+            </>
+          )}
+
+          {/* AI 쪽이 어떻게 끝나든 나머지 설정은 그대로 저장된다 (INV-8). */}
+          <p className="hint">{AI_SETTINGS_UNAFFECTED_NOTICE}</p>
+        </section>
+
+        {/* 스스로 설치해서 쓰는 provider는 **뒤에** 온다 (요구 7 · ADR-0010 §4.3). 여기에는
+            고르는 자리도 확인 버튼도 없다 — 그것은 전부 위 부분에 그대로 있고 (MH-8), 이
+            부분이 하는 일은 그 선택지 하나가 무엇이고 어떤 위치에 있는지 말하는 것뿐이다.
+            제목의 이름과 로컬 표시는 provider 목록에서 온다 (INV-9). */}
+        {localProviderSetups(form.aiProvider).map((setup) => (
+          <section className="group__part" key={setup.id}>
+            <h3 className="group__subtitle">{setup.title}</h3>
+            <p className="hint">{setup.standing}</p>
+            <p className="hint">{setup.text}</p>
+            <p className="hint">{setup.statusText}</p>
+            <p className="hint">{setup.howToTurnOn}</p>
+          </section>
+        ))}
       </section>
 
       <section className="group">
         <h2 className="group__title">Notion</h2>
 
         {/* 저장돼 있는가 — 그것이 화면이 token에 대해 아는 전부다 (INV-7). 저장된 값이
-            없는 것은 오류가 아니라 상태이므로 담담한 문장 한 줄로 보인다 (INV-8). */}
-        <p className="hint">{tokenNotice.text}</p>
-        {tokenNotice.resolution !== null && <p className="hint">{tokenNotice.resolution}</p>}
+            없는 것은 오류가 아니라 상태이므로 담담한 문장 한 줄로 보인다 (INV-8).
+            빈 상태 다섯 — Notion이 아직 설정되지 않았다. 다른 네 자리와 같은 모양을 쓰며
+            경고색도 테두리도 없다 (요구 9). 무엇을 저장했는지 판정하는 것은 여기가 아니라
+            `notionTokenState`이고, 화면은 그 값에 맞는 모양을 고를 뿐이다. */}
+        {tokenState === 'notStored' ? (
+          <EmptyState title={tokenNotice.text} body={tokenNotice.resolution} />
+        ) : (
+          <>
+            <p className="hint">{tokenNotice.text}</p>
+            {tokenNotice.resolution !== null && <p className="hint">{tokenNotice.resolution}</p>}
+          </>
+        )}
 
         <label className="field" htmlFor="notion-token">
           <span className="field__label">Integration token</span>
@@ -556,7 +612,7 @@ export function SettingsScreen() {
           <input
             id="notion-token"
             type="password"
-            className="field__input"
+            className="input"
             placeholder={TOKEN_INPUT_PLACEHOLDER}
             autoComplete="off"
             ref={tokenInput}
@@ -566,15 +622,16 @@ export function SettingsScreen() {
 
         <button
           type="button"
-          className="action"
+          className="btn btn--secondary"
           disabled={tokenBusy !== null}
           onClick={saveToken}
         >
           {tokenBusy === 'save' ? 'Saving the token…' : 'Save the token'}
         </button>
+        {/* 저장된 것을 없애는 동작이므로 다른 버튼과 같은 무게로 두지 않는다 (§19). */}
         <button
           type="button"
-          className="action"
+          className="btn btn--danger"
           disabled={tokenBusy !== null}
           onClick={removeToken}
         >
@@ -597,7 +654,7 @@ export function SettingsScreen() {
           <input
             id="notion-parent-page"
             type="text"
-            className="field__input"
+            className="input"
             placeholder="Not set"
             value={form.notionParentPageId}
             onChange={(event) => edit({ notionParentPageId: event.currentTarget.value })}
@@ -608,7 +665,7 @@ export function SettingsScreen() {
 
         <button
           type="button"
-          className="action"
+          className="btn btn--secondary"
           disabled={notion.kind === 'checking'}
           onClick={checkNotion}
         >
@@ -623,8 +680,14 @@ export function SettingsScreen() {
         )}
 
         {/* 성공 · token 없음 · 인증 실패 · 권한 없는 destination · 네트워크 없음 · 확인 거절이
-            서로 다른 값으로 온다. 화면은 그것을 다시 뭉치지 않는다 (`NotionConnectionView`). */}
-        <p className="hint">{notion.text}</p>
+            서로 다른 값으로 온다. 화면은 그것을 다시 뭉치지 않는다 (`NotionConnectionView`).
+            물어보는 동안에는 기다리는 중이라는 사실이 보인다 — 왕복이므로 즉시 끝나지
+            않는다 (요구 9). */}
+        {notion.kind === 'checking' ? (
+          <Loading text={notion.text} live />
+        ) : (
+          <p className="hint">{notion.text}</p>
+        )}
         {notion.kind === 'noToken' && <p className="hint">{notion.resolution}</p>}
         {notion.kind === 'connected' && notion.destinationNotice !== null && (
           <p className="hint">{notion.destinationNotice}</p>
@@ -643,13 +706,23 @@ export function SettingsScreen() {
         <p className="hint">{NOTION_SETTINGS_UNAFFECTED_NOTICE}</p>
       </section>
 
-      {/* 설정은 한 벌이므로 저장도 한 번이다. */}
+      {/* 설정은 한 벌이므로 저장도 한 번이다. 이 화면의 primary는 이것 하나다 (§19). */}
       <section className="group">
-        <button type="button" className="action" disabled={saving} onClick={() => save(form)}>
+        <button
+          type="button"
+          className="btn btn--primary"
+          disabled={saving}
+          onClick={() => save(form)}
+        >
           {saving ? 'Saving…' : 'Save'}
         </button>
         <p className="hint">Saves every setting on this screen.</p>
-        {saved && <p className="hint">Saved.</p>}
+        {/* 저장됐다는 사실도 글자로 말한다 — 색만으로 말하는 자리를 두지 않는다 (요구 12). */}
+        {saved && (
+          <p className="hint" role="status">
+            Saved.
+          </p>
+        )}
         {failure !== null && <FailureNotice failure={failure} onRetry={() => save(form)} />}
       </section>
     </div>

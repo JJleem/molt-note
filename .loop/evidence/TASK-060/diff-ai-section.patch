@@ -1,0 +1,560 @@
+diff --git a/src/screens/SettingsScreen.tsx b/src/screens/SettingsScreen.tsx
+index df814e9..58c8726 100644
+--- a/src/screens/SettingsScreen.tsx
++++ b/src/screens/SettingsScreen.tsx
+@@ -14,9 +14,14 @@ import {
+   AI_BASE_URL_NOTICE,
+   AI_BASE_URL_PLACEHOLDER,
+   AI_CHECK_USES_SAVED_SETTINGS,
++  AI_IS_OPTIONAL_TEXT,
+   AI_NOT_CHECKED_TEXT,
++  AI_SECTION_TITLE,
+   AI_SETTINGS_UNAFFECTED_NOTICE,
++  AI_WITHOUT_A_PROVIDER_TEXT,
+   CHECKING_AI_PROVIDER_TEXT,
++  CONNECTED_PROVIDER_TEXT,
++  CONNECTED_PROVIDER_TITLE,
+   NOTHING_LEAVES_THIS_DEVICE,
+   aiModelNotice,
+   aiModelOptions,
+@@ -28,6 +33,7 @@ import {
+   checkedAiProvider,
+   confirmedAiModels,
+   failedAiCheck,
++  localProviderSetups,
+   type AiConnection,
+   type AiSettingsSnapshot,
+ } from './aiProviderSettings';
+@@ -89,7 +95,13 @@ import {
+  * 지금 전사할 수 없다는 것은 여기서 보이는 **제품 상태**이며, 그 사실 때문에 자동 전사 토글이
+  * 뒤집히지 않는다 — 사용자가 켠 값은 켜진 채로 남는다 (ADR-0007 §8.2.3).
+  *
+- * AI Provider 그룹은 **고르기 · 연결 확인 · 모델 선택 · 전송 경계 표시** 넷이다 (Phase 4).
++ * AI 그룹은 **두 부분**이다 (Phase 5.5 요구 7 · `docs/ADR-0010` §4.3). 앞은 `Connected
++ * provider` — **고르기 · 연결 확인 · 모델 선택 · 전송 경계 표시** 넷이며 Phase 4가 만든 그대로다.
++ * 뒤는 스스로 설치해서 쓰는 로컬 provider에 대한 안내이고, 거기에는 편집할 값도 버튼도 없다.
++ * **재배치이지 삭제가 아니다** — provider 추상화도 adapter도 이 화면의 어느 경로도 줄지
++ * 않았다 (MH-8). 뒤로 가는 이유는 그것이 기본 AI 경험이 아니라 선택지 하나이기 때문이며,
++ * 그 부분의 이름과 로컬 표시는 provider 목록에서 온다 — 화면이 벤더를 새로 적지 않는다 (INV-9).
++ *
+  * 연결 확인은 사용자가 눌러야 나가며, 화면을 열자마자 서버를 찾아 나서지 않는다. 확인이
+  * 어떻게 끝나든 — 응답이 없든 모델이 없든 확인 자체가 거절되든 — **그 결과는 나머지 설정의
+  * 저장 경로에 닿지 않는다** (INV-8). AI 상태를 `SettingsView`가 아니라 별도의 state로 들고
+@@ -437,108 +449,134 @@ export function SettingsScreen() {
+       </section>
+ 
+       <section className="group">
+-        <h2 className="group__title">AI Provider</h2>
+-
+-        <label className="field" htmlFor="ai-provider">
+-          <span className="field__label">Provider</span>
+-          <select
+-            id="ai-provider"
+-            className="field__input"
+-            value={form.aiProvider}
+-            onChange={(event) => edit({ aiProvider: event.currentTarget.value })}
+-          >
+-            {/* 저장된 값을 이 앱이 모르면 그 항목이 목록에 함께 있다 — 그래서 고른 값이
+-                말없이 다른 provider로 보이지 않는다 (`aiProviderChoices`). */}
+-            {aiProviderChoices(form.aiProvider).map((choice) => (
+-              <option key={choice.value} value={choice.value}>
+-                {choice.label}
+-              </option>
+-            ))}
+-          </select>
+-        </label>
+-
+-        {/* 전송 경계 (§12 · INV-5 · INV-6). 문구는 provider의 locality 값에서 나온다. */}
+-        {transfer === null ? (
+-          <p className="hint">{NOTHING_LEAVES_THIS_DEVICE}</p>
+-        ) : (
+-          <>
+-            <p className="hint">{transfer.headline}</p>
+-            <p className="hint">{transfer.transcriptText}</p>
+-            <p className="hint">{transfer.audioText}</p>
+-          </>
+-        )}
+-
+-        {providerChosen && (
+-          <>
+-            <label className="field" htmlFor="ai-base-url">
+-              <span className="field__label">Address (host and port)</span>
+-              <input
+-                id="ai-base-url"
+-                type="text"
+-                className="field__input"
+-                placeholder={AI_BASE_URL_PLACEHOLDER}
+-                value={form.aiBaseUrl}
+-                onChange={(event) => edit({ aiBaseUrl: event.currentTarget.value })}
+-              />
+-            </label>
+-            <p className="hint">{AI_BASE_URL_NOTICE}</p>
+-
+-            <button
+-              type="button"
+-              className="action"
+-              disabled={connection.kind === 'checking'}
+-              onClick={checkProvider}
++        <h2 className="group__title">{AI_SECTION_TITLE}</h2>
++
++        {/* 구역 전체가 선택이라는 사실이 먼저 온다 (INV-8). 그래서 아래의 어느 것도
++            "아직 안 한 일"로 읽히지 않는다. */}
++        <p className="hint">{AI_IS_OPTIONAL_TEXT}</p>
++        <p className="hint">{AI_WITHOUT_A_PROVIDER_TEXT}</p>
++
++        <section className="group__part">
++          <h3 className="group__subtitle">{CONNECTED_PROVIDER_TITLE}</h3>
++          <p className="hint">{CONNECTED_PROVIDER_TEXT}</p>
++
++          <label className="field" htmlFor="ai-provider">
++            <span className="field__label">Provider</span>
++            <select
++              id="ai-provider"
++              className="field__input"
++              value={form.aiProvider}
++              onChange={(event) => edit({ aiProvider: event.currentTarget.value })}
+             >
+-              {connection.kind === 'checking' ? 'Checking…' : 'Check the AI provider'}
+-            </button>
+-            <p className="hint">{AI_CHECK_USES_SAVED_SETTINGS}</p>
+-            {staleCheck && (
+-              <p className="hint">
+-                The AI settings above have changed since the last save, so this result is about the
+-                saved ones.
+-              </p>
+-            )}
+-
+-            {/* 실행 중 · 모델 없음 · 미실행 · 확인 거절이 서로 다른 값으로 온다. 화면은
+-                그것을 다시 뭉치지 않는다 (`AiConnection`). */}
+-            <p className="hint">{connection.text}</p>
+-            {connection.kind === 'notConfigured' && <p className="hint">{connection.resolution}</p>}
+-            {connection.kind === 'noModels' && <p className="hint">{connection.resolution}</p>}
+-            {connection.kind === 'notRunning' && (
+-              <>
+-                <p className="hint">{connection.resolution}</p>
+-                {connection.failure !== null && (
+-                  <FailureNotice failure={connection.failure} onRetry={checkProvider} />
+-                )}
+-              </>
+-            )}
+-            {connection.kind === 'checkFailed' && (
+-              <FailureNotice failure={connection.failure} onRetry={checkProvider} />
+-            )}
+-
+-            <label className="field" htmlFor="ai-model">
+-              <span className="field__label">Model</span>
+-              <select
+-                id="ai-model"
+-                className="field__input"
+-                value={form.aiModel}
+-                onChange={(event) => edit({ aiModel: event.currentTarget.value })}
++              {/* 저장된 값을 이 앱이 모르면 그 항목이 목록에 함께 있다 — 그래서 고른 값이
++                  말없이 다른 provider로 보이지 않는다 (`aiProviderChoices`). */}
++              {aiProviderChoices(form.aiProvider).map((choice) => (
++                <option key={choice.value} value={choice.value}>
++                  {choice.label}
++                </option>
++              ))}
++            </select>
++          </label>
++
++          {/* 전송 경계 (§12 · INV-5 · INV-6). 문구는 provider의 locality 값에서 나온다. */}
++          {transfer === null ? (
++            <p className="hint">{NOTHING_LEAVES_THIS_DEVICE}</p>
++          ) : (
++            <>
++              <p className="hint">{transfer.headline}</p>
++              <p className="hint">{transfer.transcriptText}</p>
++              <p className="hint">{transfer.audioText}</p>
++            </>
++          )}
++
++          {providerChosen && (
++            <>
++              <label className="field" htmlFor="ai-base-url">
++                <span className="field__label">Address (host and port)</span>
++                <input
++                  id="ai-base-url"
++                  type="text"
++                  className="field__input"
++                  placeholder={AI_BASE_URL_PLACEHOLDER}
++                  value={form.aiBaseUrl}
++                  onChange={(event) => edit({ aiBaseUrl: event.currentTarget.value })}
++                />
++              </label>
++              <p className="hint">{AI_BASE_URL_NOTICE}</p>
++
++              <button
++                type="button"
++                className="action"
++                disabled={connection.kind === 'checking'}
++                onClick={checkProvider}
+               >
+-                {/* 목록은 확인이 돌려준 것이다. 저장된 모델이 지금 없으면 그 항목도 함께
+-                    남는다 — 고른 값이 말없이 다른 모델로 바뀌지 않는다. */}
+-                {aiModelOptions(form.aiModel, confirmedAiModels(connection)).map((option) => (
+-                  <option key={option.value} value={option.value}>
+-                    {option.label}
+-                  </option>
+-                ))}
+-              </select>
+-            </label>
+-            {modelNotice !== null && <p className="hint">{modelNotice}</p>}
+-          </>
+-        )}
+-
+-        {/* AI 쪽이 어떻게 끝나든 나머지 설정은 그대로 저장된다 (INV-8). */}
+-        <p className="hint">{AI_SETTINGS_UNAFFECTED_NOTICE}</p>
++                {connection.kind === 'checking' ? 'Checking…' : 'Check the AI provider'}
++              </button>
++              <p className="hint">{AI_CHECK_USES_SAVED_SETTINGS}</p>
++              {staleCheck && (
++                <p className="hint">
++                  The AI settings above have changed since the last save, so this result is about
++                  the saved ones.
++                </p>
++              )}
++
++              {/* 실행 중 · 모델 없음 · 미실행 · 확인 거절이 서로 다른 값으로 온다. 화면은
++                  그것을 다시 뭉치지 않는다 (`AiConnection`). */}
++              <p className="hint">{connection.text}</p>
++              {connection.kind === 'notConfigured' && (
++                <p className="hint">{connection.resolution}</p>
++              )}
++              {connection.kind === 'noModels' && <p className="hint">{connection.resolution}</p>}
++              {connection.kind === 'notRunning' && (
++                <>
++                  <p className="hint">{connection.resolution}</p>
++                  {connection.failure !== null && (
++                    <FailureNotice failure={connection.failure} onRetry={checkProvider} />
++                  )}
++                </>
++              )}
++              {connection.kind === 'checkFailed' && (
++                <FailureNotice failure={connection.failure} onRetry={checkProvider} />
++              )}
++
++              <label className="field" htmlFor="ai-model">
++                <span className="field__label">Model</span>
++                <select
++                  id="ai-model"
++                  className="field__input"
++                  value={form.aiModel}
++                  onChange={(event) => edit({ aiModel: event.currentTarget.value })}
++                >
++                  {/* 목록은 확인이 돌려준 것이다. 저장된 모델이 지금 없으면 그 항목도 함께
++                      남는다 — 고른 값이 말없이 다른 모델로 바뀌지 않는다. */}
++                  {aiModelOptions(form.aiModel, confirmedAiModels(connection)).map((option) => (
++                    <option key={option.value} value={option.value}>
++                      {option.label}
++                    </option>
++                  ))}
++                </select>
++              </label>
++              {modelNotice !== null && <p className="hint">{modelNotice}</p>}
++            </>
++          )}
++
++          {/* AI 쪽이 어떻게 끝나든 나머지 설정은 그대로 저장된다 (INV-8). */}
++          <p className="hint">{AI_SETTINGS_UNAFFECTED_NOTICE}</p>
++        </section>
++
++        {/* 스스로 설치해서 쓰는 provider는 **뒤에** 온다 (요구 7 · ADR-0010 §4.3). 여기에는
++            고르는 자리도 확인 버튼도 없다 — 그것은 전부 위 부분에 그대로 있고 (MH-8), 이
++            부분이 하는 일은 그 선택지 하나가 무엇이고 어떤 위치에 있는지 말하는 것뿐이다.
++            제목의 이름과 로컬 표시는 provider 목록에서 온다 (INV-9). */}
++        {localProviderSetups(form.aiProvider).map((setup) => (
++          <section className="group__part" key={setup.id}>
++            <h3 className="group__subtitle">{setup.title}</h3>
++            <p className="hint">{setup.standing}</p>
++            <p className="hint">{setup.text}</p>
++            <p className="hint">{setup.statusText}</p>
++            <p className="hint">{setup.howToTurnOn}</p>
++          </section>
++        ))}
+       </section>
+ 
+       <section className="group">
+diff --git a/src/screens/aiProviderSettings.test.ts b/src/screens/aiProviderSettings.test.ts
+index 4b990ab..0635f1b 100644
+--- a/src/screens/aiProviderSettings.test.ts
++++ b/src/screens/aiProviderSettings.test.ts
+@@ -12,18 +12,24 @@ import type { AiProviderStatus, Settings } from '../ipc/types';
+ import {
+   AI_BASE_URL_NOTICE,
+   AI_CHECK_FAILED_TEXT,
++  AI_IS_OPTIONAL_TEXT,
+   AI_NOT_CHECKED_TEXT,
++  AI_SECTION_TITLE,
+   AI_PROVIDER_HAS_NO_MODELS_TEXT,
+   AI_PROVIDER_NOT_RUNNING_TEXT,
+   AI_PROVIDER_RUNNING_TEXT,
+   AI_SETTINGS_UNAFFECTED_NOTICE,
++  AI_WITHOUT_A_PROVIDER_TEXT,
+   AUDIO_IS_NEVER_SENT,
++  CONNECTED_PROVIDER_TEXT,
++  CONNECTED_PROVIDER_TITLE,
+   MISSING_AI_MODEL_NOTICE,
+   MISSING_AI_MODEL_SUFFIX,
+   NO_AI_MODEL,
+   NO_AI_MODEL_CHOSEN_NOTICE,
+   NO_AI_PROVIDER,
+   NO_AI_PROVIDER_TEXT,
++  OPTIONAL_TITLE_SUFFIX,
+   UNKNOWN_AI_PROVIDER_LABEL,
+   aiModelNotice,
+   aiModelOptions,
+@@ -35,6 +41,7 @@ import {
+   checkedAiProvider,
+   confirmedAiModels,
+   failedAiCheck,
++  localProviderSetups,
+   type AiConnection,
+ } from './aiProviderSettings';
+ import {
+@@ -144,6 +151,106 @@ describe('provider 선택지', () => {
+   });
+ });
+ 
++describe('구역의 두 부분 (요구 7 · ADR-0010 §4.3)', () => {
++  /** 이 앱이 고르게 하지 않는 벤더들. 재배치가 새 provider를 데려오지 않았다는 것을 본다. */
++  const OTHER_VENDORS = /openai|gpt|anthropic|claude|gemini|codex|groq|mistral|huggingface/i;
++
++  it('스스로 세우는 provider의 이름과 로컬 표시가 provider 목록에서 나온다 (INV-9 · INV-5)', () => {
++    // 벤더 이름을 두 번째로 적는 자리를 만들지 않는다. 제목은 선택지 label 그대로에
++    // '선택'이라는 표시만 붙은 것이어야 한다.
++    const setups = localProviderSetups(NO_AI_PROVIDER);
++
++    expect(setups.length).toBeGreaterThan(0);
++    for (const setup of setups) {
++      const choice = aiProviderChoices(NO_AI_PROVIDER).find((one) => one.value === setup.id);
++
++      expect(choice, '목록에 없는 provider가 이 부분에 있다').toBeDefined();
++      expect(choice?.locality).toBe('local');
++      expect(setup.title).toBe(`${choice?.label}${OPTIONAL_TITLE_SUFFIX}`);
++      expect(setup.title).toContain('runs on this device');
++    }
++  });
++
++  it('재배치가 새 provider를 데려오지 않았다 (요구 8)', () => {
++    const values = aiProviderChoices(NO_AI_PROVIDER).map((choice) => choice.value);
++    const setups = localProviderSetups(NO_AI_PROVIDER);
++
++    // 고를 수 있는 것은 그대로다 — 이 부분은 목록에서 걸러 오기만 한다.
++    for (const setup of setups) {
++      expect(values).toContain(setup.id);
++    }
++    // 그리고 어느 문장도 다른 벤더를 부르지 않는다 (MH-6).
++    for (const setup of setups) {
++      for (const sentence of [
++        setup.title,
++        setup.standing,
++        setup.text,
++        setup.statusText,
++        setup.howToTurnOn,
++      ]) {
++        expect(sentence).not.toMatch(OTHER_VENDORS);
++      }
++    }
++  });
++
++  it('선택이고 고급이라는 것이 자리가 아니라 문장으로 있다 (요구 7)', () => {
++    const [setup] = localProviderSetups(NO_AI_PROVIDER);
++
++    expect(setup.standing).toMatch(/optional/i);
++    expect(setup.standing).toMatch(/advanced/i);
++    // 설치와 실행의 주체가 사용자이고, 앱이 그것을 필요로 하지 않는다는 사실.
++    expect(setup.text).toMatch(/yourself/i);
++    expect(setup.text).toMatch(/does not need it/i);
++    // 켜라는 요구가 아니라 켜는 방법이다.
++    expect(setup.howToTurnOn).toMatch(/to use it/i);
++  });
++
++  it('고르지 않은 상태가 결함이 아니라 정상으로 적힌다 (INV-8)', () => {
++    const [notChosen] = localProviderSetups(NO_AI_PROVIDER);
++    const [chosen] = localProviderSetups('ollama');
++
++    expect(notChosen.chosen).toBe(false);
++    expect(chosen.chosen).toBe(true);
++    // 두 상태의 문장이 다르다 — 화면이 둘을 같은 말로 뭉치지 않는다.
++    expect(notChosen.statusText).not.toBe(chosen.statusText);
++    // 그리고 고르지 않은 쪽이 오류의 언어를 쓰지 않는다.
++    expect(notChosen.statusText).not.toMatch(/error|failed|must|required|missing/i);
++    expect(notChosen.statusText).toMatch(/nothing in the app is waiting/i);
++  });
++
++  it('고른 값이 무엇이든 이 부분이 값을 바꾸지 않는다', () => {
++    // 여기에는 편집할 값도 누를 버튼도 없다 — 고른 provider가 바뀌면 달라지는 것은
++    // '지금 고른 것인가'와 그 문장뿐이다 (MH-8).
++    const notChosen = localProviderSetups(NO_AI_PROVIDER)[0];
++    const chosen = localProviderSetups('ollama')[0];
++    const unknown = localProviderSetups('어떤-다른-provider')[0];
++
++    expect(unknown.chosen).toBe(false);
++    for (const other of [chosen, unknown]) {
++      expect(other.id).toBe(notChosen.id);
++      expect(other.title).toBe(notChosen.title);
++      expect(other.standing).toBe(notChosen.standing);
++      expect(other.text).toBe(notChosen.text);
++      expect(other.howToTurnOn).toBe(notChosen.howToTurnOn);
++    }
++  });
++
++  it('구역 전체가 선택이라는 사실이 먼저 오고, provider 없이도 쓸 길이 있다고 말한다', () => {
++    // 구역의 이름은 특정 provider의 이름이 아니다.
++    expect(AI_SECTION_TITLE).not.toMatch(/ollama/i);
++    expect(AI_SECTION_TITLE).not.toMatch(OTHER_VENDORS);
++
++    expect(AI_IS_OPTIONAL_TEXT).toMatch(/optional/i);
++    // 첫 부분은 '연결된 provider'이고, 고르지 않은 것이 고칠 일이 아니라고 적혀 있다.
++    expect(CONNECTED_PROVIDER_TITLE).toMatch(/connected provider/i);
++    expect(CONNECTED_PROVIDER_TEXT).toMatch(/normal state/i);
++    // provider가 없어도 AI를 쓸 길이 있다는 사실. 벤더를 부르지 않는다 (MH-1 · MH-2 · MH-6).
++    expect(AI_WITHOUT_A_PROVIDER_TEXT).toMatch(/ai chat you already use/i);
++    expect(AI_WITHOUT_A_PROVIDER_TEXT).not.toMatch(OTHER_VENDORS);
++    expect(AI_WITHOUT_A_PROVIDER_TEXT).not.toMatch(/ollama/i);
++  });
++});
++
+ describe('전송 경계 (§12 · INV-5 · INV-6)', () => {
+   it('로컬과 외부의 문구가 서로 다르다', () => {
+     const local = aiTransferNotice('local');
+diff --git a/src/screens/aiProviderSettings.ts b/src/screens/aiProviderSettings.ts
+index f109705..746a4ff 100644
+--- a/src/screens/aiProviderSettings.ts
++++ b/src/screens/aiProviderSettings.ts
+@@ -28,6 +28,23 @@
+  * 지우지 않는다.** `defaultMicrophone.ts`가 없어진 장치에 대해 이미 같은 규칙을 따르고 있고,
+  * 이유도 같다 — 조용히 바꾸면 무엇이 바뀐 것인지 말할 수 없게 된다.
+  *
++ * ## 구역은 두 부분이다 — 연결된 provider · 스스로 세우는 로컬 provider
++ *
++ * ```text
++ * Connected provider          무엇을 골랐는가 · 어디에 연결하는가 · 응답하는가 · 어떤 모델인가
++ * <이름> — 로컬 · 선택        스스로 설치해서 쓰는 provider 하나에 대한 안내
++ * ```
++ *
++ * 둘로 나누는 이유는 `phase-prompt/05.5` 요구 7 · `docs/ADR-0010` §4.3이다 — 스스로 설치해야
++ * 하는 로컬 provider는 **기본 AI 경험이 아니라 선택지 하나이며**, 그 사실이 자리와 문구에
++ * 드러나야 한다. 뒤쪽에 놓이고, 켜라는 요구 대신 **켜는 방법**만 적으며, 켜지 않은 상태를
++ * 결함이 아니라 정상으로 말한다 (INV-8). **삭제가 아니라 재배치다** — 고르고 확인하고 모델을
++ * 고르는 경로는 위 부분에 그대로 있다 (MH-8).
++ *
++ * 그 부분의 **이름과 로컬/외부 표시는 {@link SELECTABLE_AI_PROVIDERS}에서 나온다** — 벤더
++ * 이름을 두 번째로 적는 자리를 만들지 않는다 (INV-9). 그래서 이 구역에 새 provider가 생기지
++ * 않으며, 목록에 없는 벤더는 여기에도 없다.
++ *
+  * ## AI가 안 되는 것이 나머지를 막지 않는다 (INV-8)
+  *
+  * 이 모듈이 만드는 값 중 어떤 것도 {@link SettingsView}가 아니다. 저장 경로가 보는 것은 폼
+@@ -458,3 +475,110 @@ export const AI_BASE_URL_PLACEHOLDER = 'Leave empty to use the built-in address'
+  */
+ export const AI_BASE_URL_NOTICE =
+   'Where the provider is listening, as host and port. Leave it empty and the app connects to its built-in address for that provider.';
++
++// --- 구역의 두 부분 (phase-prompt/05.5 요구 7 · 10 · docs/ADR-0010 §4.3) ------------------
++
++/** 구역 전체의 이름. 특정 provider의 이름이 아니다 — 그것은 아래 부분의 것이다. */
++export const AI_SECTION_TITLE = 'AI';
++
++/** 이 구역 전체가 선택이라는 사실 (INV-8). 맨 앞에 있어서 나머지를 그 아래에서 읽게 한다. */
++export const AI_IS_OPTIONAL_TEXT =
++  'AI notes are optional. Recording, transcription, Markdown export, and Notion all work with nothing set here.';
++
++/**
++ * provider가 없어도 AI를 쓸 수 있다는 사실 (MH-1 · MH-2 · `aiHandoffView.ts`).
++ *
++ * **벤더를 부르지 않는다** (MH-6). 그리고 그 버튼을 이 화면에 옮겨 오지 않는다 — 그것은
++ * 녹음 하나에 대한 동작이므로 녹음 화면에 있고, 여기서는 그것이 있다는 사실만 말한다.
++ */
++export const AI_WITHOUT_A_PROVIDER_TEXT =
++  'With nothing set here you can still take a recording to the AI chat you already use — those buttons are on the recording itself.';
++
++/** 첫 부분의 이름 — 고르고 · 확인하고 · 모델을 고르는 자리 (Phase 4가 만든 그대로다). */
++export const CONNECTED_PROVIDER_TITLE = 'Connected provider';
++
++/** 그 부분이 무엇인가. 고르지 않은 상태를 **고칠 것으로 말하지 않는다** (INV-8). */
++export const CONNECTED_PROVIDER_TEXT =
++  'A provider connected here writes notes for you inside the app. Leaving it unset is a normal state, not something to fix.';
++
++/**
++ * 스스로 설치해서 쓰는 provider 하나에 대한 안내.
++ *
++ * **provider 동작이 아니라 자리와 언어다.** 여기에는 편집할 값도 누를 버튼도 없다 — 고르는
++ * 것도 확인하는 것도 모델을 고르는 것도 전부 위 부분(`Connected provider`)에 그대로 있다
++ * (MH-8). 이 값이 하는 일은 그 선택지 하나가 **무엇이고 어떤 위치에 있는지**를 말하는 것뿐이다.
++ */
++export interface LocalProviderSetup {
++  /** 저장되는 식별자. 위 목록의 항목과 같은 값이다. */
++  readonly id: string;
++  /**
++   * 이 부분의 제목.
++   *
++   * 이름과 로컬/외부 표시가 {@link SELECTABLE_AI_PROVIDERS}에서 그대로 오고, 여기에 선택이라는
++   * 표시가 붙는다 — 벤더 이름도 locality 문구도 이 자리에서 새로 지어내지 않는다 (INV-5 · INV-9).
++   */
++  readonly title: string;
++  /** 선택이고 고급이라는 사실. **자리나 색이 아니라 문장으로 말한다.** */
++  readonly standing: string;
++  /** 무엇인가. 벤더가 아니라 **성질**을 말한다 (MH-6). */
++  readonly text: string;
++  /** 지금 이것이 고른 provider인가. */
++  readonly chosen: boolean;
++  /** 그래서 지금 어떤 상태인가. 고르지 않은 것은 결함이 아니다 (INV-8). */
++  readonly statusText: string;
++  /** 켜려면 무엇을 하는가. **켜라는 요구가 아니라 방법이다.** */
++  readonly howToTurnOn: string;
++}
++
++/** 제목에 붙는 선택 표시. locality 표시 뒤에 온다. */
++export const OPTIONAL_TITLE_SUFFIX = ' · optional';
++
++/** 이 부분이 어떤 위치에 있는가 (요구 7). */
++export const SELF_HOSTED_STANDING_TEXT =
++  'Optional and advanced. It is one way to fill the provider above, not something the app needs.';
++
++/**
++ * 스스로 세우는 provider가 무엇인가.
++ *
++ * **벤더를 설명하지 않는다** — 설치하고 띄우는 주체가 사용자라는 것은 `local`인 provider의
++ * 성질이며, 그 성질이 이 문장의 내용 전부다 (MH-6 · INV-9).
++ */
++export const SELF_HOSTED_PROVIDER_TEXT =
++  'You install and run it on this machine yourself. Molt Note does not install it, does not start it, and does not need it to work.';
++
++/** 켜는 방법. 위 부분을 가리키므로 같은 컨트롤이 두 벌이 되지 않는다. */
++export const HOW_TO_TURN_ON_A_LOCAL_PROVIDER =
++  'To use it: install and start it yourself, then choose it in the provider list above and save. The check above then asks the saved provider whether it answers.';
++
++/** 고르지 않았다. **담담한 사실이다** (INV-8). */
++export const LOCAL_PROVIDER_NOT_CHOSEN_TEXT =
++  'It is not the provider right now. Nothing in the app is waiting for it.';
++
++/** 골랐다. 그래서 위 부분의 확인과 모델 목록이 이것에 대한 것이 된다. */
++export const LOCAL_PROVIDER_CHOSEN_TEXT =
++  'It is the provider right now, so the controls above check it and list its models.';
++
++/**
++ * 스스로 설치해서 쓰는 로컬 provider들에 대한 안내 (요구 7).
++ *
++ * 목록은 {@link SELECTABLE_AI_PROVIDERS}에서 **`local`인 것만** 걸러 온다. 그래서 이 함수는
++ * 새 provider를 만들지 않으며 (요구 8), 위 목록에 없는 벤더가 여기에 나타날 방법도 없다.
++ * 외부 provider가 언젠가 생기더라도 그것은 "스스로 설치해서 쓰는 것"이 아니므로 이 부분의
++ * 문장이 그것에 대해 말하지 않는다.
++ */
++export function localProviderSetups(chosen: string): readonly LocalProviderSetup[] {
++  return SELECTABLE_AI_PROVIDERS.filter((provider) => provider.locality === 'local').map(
++    (provider) => {
++      const isChosen = provider.id === chosen;
++      return {
++        id: provider.id,
++        title: `${provider.name} — ${LOCALITY_CHOICE_LABEL[provider.locality]}${OPTIONAL_TITLE_SUFFIX}`,
++        standing: SELF_HOSTED_STANDING_TEXT,
++        text: SELF_HOSTED_PROVIDER_TEXT,
++        chosen: isChosen,
++        statusText: isChosen ? LOCAL_PROVIDER_CHOSEN_TEXT : LOCAL_PROVIDER_NOT_CHOSEN_TEXT,
++        howToTurnOn: HOW_TO_TURN_ON_A_LOCAL_PROVIDER,
++      };
++    },
++  );
++}

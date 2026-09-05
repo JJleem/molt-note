@@ -1,0 +1,61 @@
+# Copy AI Prompt · Copy Transcript · Export for AI의 command 경계와 IPC 계약
+# Runtime이 PLAN-20260904T075433Z 승인 시점에 생성했다 (proposal P3). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-057
+status: DONE
+
+request: |-
+  P2의 순수 산출물을 화면이 쓸 수 있도록 **Tauri command 경계와 frontend IPC 계약**을 만든다. ADR-0010이 정한 이름으로 command를 열고 `src-tauri/src/lib.rs`에 등록하며, `src/ipc/commands.ts`와 `src/ipc/types.ts`에 타입 있는 client를 더한다. 각 command는 저장소에서 **`Recording.current_transcript_id`가 가리키는 Transcript만** 읽는다 (§7.2 · MH-5) — 실패했거나 대체된 옛 version을 고르는 경로를 만들지 않는다. Export for AI는 Phase 5가 만든 자리(`AppDataDirectory::ensure_exports_dir` · `export::file::write_new`)를 재사용해 파일 하나를 더하며, 이미 있는 파일을 덮어쓰지 않고 실제로 쓰인 경로를 돌려준다. **어떤 경로도 저장소에 쓰지 않는다** — 실패해도 Recording · Transcript · AINote · 기존 export는 그대로다 (MH-7 · INV-3). provider 설정도 `ai::provider`도 이 경계에 들어오지 않는다 — provider가 없다는 이유로 거절할 수단 자체가 없어야 한다 (MH-1 · MH-2). 실패는 §13의 `Failure`로 돌려주고, 새 `FailureKind`를 만들면 frontend union에도 함께 더한다(`tests/ipc-boundary.test.ts`가 양방향을 검사한다). **`tests/ipc-boundary.test.ts`의 `REGISTERED_COMMANDS` 목록과 `outOfScope` 정규식(`export(?!_markdown\b)`)은 새 이름에서 반드시 깨진다** — 그것은 범위 초과를 잡는 의도된 tripwire이므로, 이 Phase가 실제로 연 이름만 **의식적으로** 목록에 더하고 왜 늘었는지 주석으로 남긴다. 검사를 느슨하게 바꾸거나 삭제하지 않는다. 저장된 것을 고치거나 지우는 이름은 여전히 늘지 않아야 한다.
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-056
+
+stop_condition:
+  gates: [build, lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 2
+
+acceptance_criteria:
+  - id: AC-1
+    description: |-
+      build · lint · test Gate가 모두 통과한다.
+    verification:
+      type: gate
+      ref: test
+  - id: AC-2
+    description: |-
+      frontend 타입 검사와 번들이 통과한다 (`npm run build`).
+    verification:
+      type: gate
+      ref: build
+  - id: AC-3
+    description: |-
+      lint Gate가 통과한다 (ESLint + clippy).
+    verification:
+      type: gate
+      ref: lint
+  - id: AC-4
+    description: |-
+      `tests/ipc-boundary.test.ts`의 command 목록이 이 Phase가 실제로 연 이름만큼만 늘었고, 왜 늘었는지가 주석으로 남아 있다. 기존 검사(SQL 부재 · invoke 호출자 하나 · 벤더 부재 · token 단방향 · 실패 종류 일치)가 느슨해지지 않았다.
+    verification:
+      type: verifier
+      instruction: |-
+        tests/ipc-boundary.test.ts의 diff를 읽고, 정규식이나 assert를 무르게 만든 변경이 있는지 본다. 있으면 실패다.
+  - id: AC-5
+    description: |-
+      새 command 경로가 current Transcript만 고르고(MH-5), 저장소에 쓰는 코드가 없으며(MH-7), provider 설정을 보지 않는다(MH-1 · MH-2).
+    verification:
+      type: verifier
+  - id: AC-6
+    description: |-
+      Export for AI가 기존 exports 디렉터리 경계와 `write_new`를 재사용하고 기존 파일을 덮어쓰지 않으며, 실제로 쓰인 경로를 화면에 돌려준다.
+    verification:
+      type: verifier
+
+evidence: []
+
+failure_memo: []

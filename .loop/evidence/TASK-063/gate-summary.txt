@@ -1,0 +1,23 @@
+TASK-063 — Gate self-check (advisory · Runtime이 Worker 종료 후 독립적으로 다시 돌린다)
+
+명령:
+  node tools/loop-runtime/loopctl.mjs self-check test build lint
+
+결과 (2026-09-06):
+  [test]  npm run test    PASS  exit=0  5.5s
+  [build] npm run build   PASS  exit=0  1.1s
+  [lint]  npm run lint    PASS  exit=0  2.2s
+  Self-check: all gates passed
+
+test Gate 내역:
+  vitest run                                   Test Files 25 passed (25) · Tests 468 passed (468)
+    - tests/manual-handoff-invariants.test.ts  (이 Task가 추가한 파일 · 20 tests)
+  cargo test --manifest-path src-tauri/Cargo.toml
+    - tests/manual_handoff_invariants.rs       15 passed; 0 failed (이 Task가 추가한 파일)
+    - 그 밖의 모든 통합/단위/doc 테스트         전부 ok (MH-8의 회귀 근거)
+
+build Gate: tsc && vite build — 55 modules transformed, built in 299ms
+lint Gate:  eslint . && cargo clippy --all-targets -- -D warnings — 경고 없음
+
+원문 로그(자기 검사 artifact, Runtime 소유 아님):
+  .loop-local/self-check/gates/{test,build,lint}/stdout.log · stderr.log

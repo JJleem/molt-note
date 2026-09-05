@@ -2,10 +2,13 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   aiNoteStatus,
   aiProviderStatus,
+  exportAiRequest,
   exportMarkdown,
+  getAiPrompt,
   getNotionSync,
   getRecording,
   getTranscript,
+  getTranscriptText,
   listAiNotes,
   listMissingAudio,
   notionSyncStatus,
@@ -27,6 +30,21 @@ import type {
   Transcript,
   TranscriptionStatus,
 } from '../ipc/types';
+// 이 앱에서 clipboard에 쓰는 유일한 경로 (R-4 · INV-10). 실패는 던져지지 않고 값으로 온다.
+import { copyText } from '../platform/clipboard';
+import {
+  NO_AI_EXPORT_ATTEMPT,
+  aiNoteTabLayout,
+  exportedAiRequest,
+  failedAiExport,
+  manualHandoff,
+  startedAiExport,
+  type AiExportAction,
+  type AiExportAttempt,
+  type AiExportItemView,
+  type AiNoteTabLayout,
+  type ManualHandoffView,
+} from './aiHandoffView';
 import {
   aiNoteTab,
   aiNoteTrouble,
@@ -35,6 +53,16 @@ import {
   type NoteSection,
   type NoteView,
 } from './aiNoteView';
+import {
+  NO_COPY_ATTEMPT,
+  copiedText,
+  failedCopy,
+  startedCopy,
+  type CopyAction,
+  type CopyAttempt,
+  type CopyItemView,
+} from './copyView';
+import { EmptyState } from './EmptyState';
 import {
   NO_EXPORT_ATTEMPT,
   exportPanel,
@@ -45,6 +73,7 @@ import {
   type ExportPanelView,
 } from './exportView';
 import { FailureNotice } from './FailureNotice';
+import { Loading } from './Loading';
 import {
   notionPanel,
   notionTrouble,
@@ -75,6 +104,16 @@ type Tab = (typeof TABS)[number];
 
 /** 레코드는 있는데 파일이 없을 때 Recording 탭이 말하는 것. */
 const NO_AUDIO_TEXT = 'No audio file yet.';
+
+/**
+ * 탭 하나와 그 내용을 잇는 식별자 (요구 12).
+ *
+ * 탭 이름 자체에서 만든다 — 목록과 따로 관리되는 두 번째 표가 생기면 탭이 하나 늘 때 조용히
+ * 어긋난다. **탭 구성을 바꾸지 않으므로** 여기서 만드는 것은 이름의 다른 표기일 뿐이다.
+ */
+const slug = (name: Tab) => name.toLowerCase().replace(/\s+/g, '-');
+const tabId = (name: Tab) => `tab-${slug(name)}`;
+const panelId = (name: Tab) => `panel-${slug(name)}`;
 
 /**
  * 전사가 도는 동안 상태를 다시 물어보는 간격(밀리초).
@@ -166,6 +205,15 @@ export function RecordingDetailScreen({ route, goBack }: ScreenProps) {
 
   /** 이 화면이 건 Markdown export 한 번 (§11). 상태를 물어보는 규약을 쓰지 않는다. */
   const [exportAttempt, setExportAttempt] = useState<ExportAttempt>(NO_EXPORT_ATTEMPT);
+  /**
+   * 이 화면이 건 복사 한 번 (요구 A-1 · A-2). 두 복사 자리 중 하나에만 해당한다.
+   *
+   * **AI provider와 아무 상관이 없다** — 이 값이 만들어지는 경로에 provider가 들어오지 않는다
+   * (MH-1 · MH-2).
+   */
+  const [copyAttempt, setCopyAttempt] = useState<CopyAttempt>(NO_COPY_ATTEMPT);
+  /** 이 화면이 건 Export for AI 한 번 (요구 3). Markdown export와 다른 자리, 다른 상태다. */
+  const [aiExportAttempt, setAiExportAttempt] = useState<AiExportAttempt>(NO_AI_EXPORT_ATTEMPT);
   /** 디스크에 남아 있는 Notion 전송 기록. 아직 읽지 못했거나 보낸 적이 없으면 `null`이다. */
   const [notionSync, setNotionSync] = useState<NotionSync | null>(null);
   /** backend가 마지막으로 알려준 Notion 전송 상태. 아직 물어보지 못했으면 `null`이다. */
@@ -410,6 +458,20 @@ export function RecordingDetailScreen({ route, goBack }: ScreenProps) {
   });
   const generatingNote = aiView.body.kind === 'generating';
 
+  // AI Note 탭의 두 줄 (요구 6). **아래 줄은 provider를 보지 않는다** — `manualHandoff`의
+  // 입력에 provider를 담을 자리가 없으므로, provider가 하나도 없어도 세 동작이 그대로 가능하다
+  // (MH-1 · MH-2). 위 줄의 상태는 `aiNoteTab`이 만든 값 그대로 실린다 (MH-8). 위계를 정하는
+  // 규칙은 여기 없고 `aiHandoffView.ts`에 있다.
+  const aiLayout = aiNoteTabLayout(
+    aiView,
+    manualHandoff({
+      recording: record,
+      mode: noteMode,
+      copy: copyAttempt,
+      aiExport: aiExportAttempt,
+    }),
+  );
+
   useEffect(() => {
     // 노트를 만드는 동안에만 되풀이해 물어본다. 상태 조회는 생성을 기다리지 않으므로
     // (`NoteGenerator::status`) 이 되풀이가 화면을 멎게 하지 않는다.
@@ -492,6 +554,50 @@ export function RecordingDetailScreen({ route, goBack }: ScreenProps) {
   };
 
   /**
+   * 이 녹음의 프롬프트나 전사 텍스트를 clipboard에 올린다 (요구 A-1 · A-2 · 5).
+   *
+   * 두 경계를 차례로 지난다 — 문자열을 만드는 것은 backend이고 (`get_ai_prompt` ·
+   * `get_transcript_text`), 그것을 clipboard에 쓰는 것은 `platform/clipboard`다. **어느 쪽이
+   * 거절해도 사용자에게는 "복사되지 않았다"는 하나의 사건이며**, 무엇 때문이었는지는 순수
+   * 모듈이 가른다 (`copyView`의 `CopyFailureCause`). 실패를 console로 흘려보내지 않는다 (§13).
+   *
+   * **AI provider가 들어오지 않는다** — 두 command 어디에도 provider 인자가 없으므로 provider가
+   * 없다는 이유로 거절당할 수단이 없다 (MH-1 · MH-2 · INV-8).
+   */
+  const beginCopy = (action: CopyAction) => {
+    const { target, recordingId: id, mode } = action;
+    setCopyAttempt(startedCopy(target, id));
+    // 프롬프트에는 mode가 실려 있고 전사에는 없다 — 그 구분은 값이 들고 있다.
+    const text = mode === null ? getTranscriptText(id) : getAiPrompt(id, mode);
+    text.then(
+      (value) =>
+        // `copyText`는 예외를 던지지 않는다. 결과가 값으로 온다 (ADR-0010 §7).
+        copyText(value).then((result) =>
+          setCopyAttempt(
+            result.ok ? copiedText(target, id) : failedCopy(target, id, result.failure),
+          ),
+        ),
+      (error: unknown) => setCopyAttempt(failedCopy(target, id, error)),
+    );
+  };
+
+  /**
+   * 이 녹음을 **AI에게 줄 문서 하나**로 내보낸다 (요구 3 · ADR-0010 §5.2).
+   *
+   * Markdown export와 같은 규약이다 — 돌아오는 것은 이미 만들어진 파일이며, 기다릴 서버도
+   * 모델도 없다. **clipboard를 전혀 쓰지 않으므로 복사가 거절되는 환경에서도 이 길은 남는다**
+   * (§7.5). 실패해도 녹음 · 전사 · 노트 · 이미 내보낸 파일은 그대로다 (INV-3 · MH-7).
+   */
+  const beginAiExport = (action: AiExportAction) => {
+    const { recordingId: id, mode } = action;
+    setAiExportAttempt(startedAiExport(id, mode));
+    exportAiRequest(id, mode).then(
+      (file) => setAiExportAttempt(exportedAiRequest(file)),
+      (error: unknown) => setAiExportAttempt(failedAiExport(id, error)),
+    );
+  };
+
+  /**
    * 이 녹음을 Notion으로 보내기 시작한다 (§10 · ADR-0009 §8).
    *
    * 돌아오는 것은 접수 사실이지 전송 결과가 아니다. **`confirmation`을 화면이 스스로 고르지
@@ -519,10 +625,11 @@ export function RecordingDetailScreen({ route, goBack }: ScreenProps) {
   if (recordingId === null) {
     return (
       <div className="screen">
-        <p className="empty">No recording selected.</p>
-        <button type="button" className="action" onClick={goBack}>
-          Back
-        </button>
+        <EmptyState title="No recording selected.">
+          <button type="button" className="btn btn--secondary" onClick={goBack}>
+            Back
+          </button>
+        </EmptyState>
       </div>
     );
   }
@@ -530,7 +637,7 @@ export function RecordingDetailScreen({ route, goBack }: ScreenProps) {
   if (view.kind === 'loading') {
     return (
       <div className="screen">
-        <p className="hint">Loading recording…</p>
+        <Loading text="Loading recording…" />
       </div>
     );
   }
@@ -543,7 +650,7 @@ export function RecordingDetailScreen({ route, goBack }: ScreenProps) {
           headline="This recording could not be read."
           onRetry={retry}
         />
-        <button type="button" className="action" onClick={goBack}>
+        <button type="button" className="btn btn--secondary" onClick={goBack}>
           Back
         </button>
       </div>
@@ -553,11 +660,13 @@ export function RecordingDetailScreen({ route, goBack }: ScreenProps) {
   if (view.kind === 'notFound') {
     return (
       <div className="screen">
-        <p className="empty">This recording is no longer in the list.</p>
-        <p className="hint">{view.recordingId}</p>
-        <button type="button" className="action" onClick={goBack}>
-          Back
-        </button>
+        {/* 목록에서 사라진 것도 실패가 아니다 (INV-3 · INV-4). 어느 레코드였는지는 남긴다. */}
+        <EmptyState title="This recording is no longer in the list.">
+          <p className="t-caption">{view.recordingId}</p>
+          <button type="button" className="btn btn--secondary" onClick={goBack}>
+            Back
+          </button>
+        </EmptyState>
       </div>
     );
   }
@@ -574,7 +683,13 @@ export function RecordingDetailScreen({ route, goBack }: ScreenProps) {
       {view.kind === 'playable' ? (
         <div className="detail__player">
           {/* 파일은 asset protocol로 흐른다. 주소를 만드는 것은 ipc 모듈의 일이다. */}
-          <audio className="detail__audio" controls preload="metadata" src={view.audioSource} />
+          <audio
+            className="detail__audio"
+            controls
+            preload="metadata"
+            aria-label={`Play ${recording.title}`}
+            src={view.audioSource}
+          />
         </div>
       ) : (
         // 파일이 없다는 사실을 보여줄 뿐 아무것도 지우지 않는다 (INV-3 · INV-4).
@@ -592,13 +707,17 @@ export function RecordingDetailScreen({ route, goBack }: ScreenProps) {
         <NotionPanel panel={notionView} trouble={notionIssue} onSend={beginNotionSend} />
       </section>
 
+      {/* 탭 셋은 그대로다 — 이 Task가 바꾼 것은 여백과 활성 표시, 그리고 어느 탭이 어느
+          내용을 여는지 보조기술에도 이어 준 것뿐이다 (요구 10 · 12). */}
       <div className="tabs" role="tablist">
         {TABS.map((name) => (
           <button
             key={name}
             type="button"
             role="tab"
+            id={tabId(name)}
             aria-selected={tab === name}
+            aria-controls={panelId(name)}
             className={tab === name ? 'tabs__tab tabs__tab--active' : 'tabs__tab'}
             onClick={() => setTab(name)}
           >
@@ -607,27 +726,37 @@ export function RecordingDetailScreen({ route, goBack }: ScreenProps) {
         ))}
       </div>
 
-      {tab === 'Transcript' && (
-        <TranscriptTab tab={transcriptView} trouble={trouble} onTranscribe={beginTranscription} />
-      )}
+      <div
+        className="tabs__panel"
+        role="tabpanel"
+        id={panelId(tab)}
+        aria-labelledby={tabId(tab)}
+        tabIndex={0}
+      >
+        {tab === 'Transcript' && (
+          <TranscriptTab tab={transcriptView} trouble={trouble} onTranscribe={beginTranscription} />
+        )}
 
-      {tab === 'Recording' && (
-        <p className="hint">
-          {view.kind === 'playable'
-            ? `${view.audioFormat} · ${recording.durationLabel}`
-            : NO_AUDIO_TEXT}
-        </p>
-      )}
+        {tab === 'Recording' && (
+          <p className="hint">
+            {view.kind === 'playable'
+              ? `${view.audioFormat} · ${recording.durationLabel}`
+              : NO_AUDIO_TEXT}
+          </p>
+        )}
 
-      {tab === 'AI Note' && (
-        <AiNoteTab
-          tab={aiView}
-          trouble={aiTrouble}
-          onMode={setNoteMode}
-          onGenerate={beginAiNote}
-          onRecheck={recheckProvider}
-        />
-      )}
+        {tab === 'AI Note' && (
+          <AiNoteTab
+            layout={aiLayout}
+            trouble={aiTrouble}
+            onMode={setNoteMode}
+            onGenerate={beginAiNote}
+            onRecheck={recheckProvider}
+            onCopy={beginCopy}
+            onExportForAi={beginAiExport}
+          />
+        )}
+      </div>
     </div>
   );
 }
@@ -654,14 +783,11 @@ function ExportPanel({
     <section className="share__panel">
       <h2 className="share__title">Markdown</h2>
 
-      {body.kind === 'loading' && <p className="hint">Loading…</p>}
+      {body.kind === 'loading' && <Loading text="Loading…" />}
 
       {body.kind === 'nothingToExport' && (
         // 재료가 아직 없는 것은 실패가 아니다 (§7.2).
-        <div role="status">
-          <p className="empty">{body.text}</p>
-          <p className="hint">{body.hint}</p>
-        </div>
+        <EmptyState title={body.text} body={body.hint} />
       )}
 
       {body.kind === 'ready' && (
@@ -671,11 +797,8 @@ function ExportPanel({
         </>
       )}
 
-      {body.kind === 'exporting' && (
-        <p className="hint" aria-live="polite">
-          {body.text}
-        </p>
-      )}
+      {/* 파일을 만드는 동안 이 자리가 멎은 것처럼 보이지 않게 한다 (요구 9). */}
+      {body.kind === 'exporting' && <Loading text={body.text} live />}
 
       {body.kind === 'done' && (
         <div className="share__done" role="status">
@@ -724,7 +847,11 @@ function ExportButton({
   onExport: (recordingId: string) => void;
 }) {
   return (
-    <button type="button" className="action" onClick={() => onExport(action.recordingId)}>
+    <button
+      type="button"
+      className="btn btn--secondary"
+      onClick={() => onExport(action.recordingId)}
+    >
       {action.label}
     </button>
   );
@@ -756,20 +883,15 @@ function NotionPanel({
       <h2 className="share__title">
         Notion
         {/* 이 녹음의 Notion 상태 (§7 · 요구 9). 목록과 같은 규칙으로 만들어진 값이다. */}
-        {status !== null && <span className="share__status">{status.text}</span>}
+        {status !== null && <span className="status share__status">{status.text}</span>}
       </h2>
 
       {/* 요청이 거절된 사실은 전송 상태를 덮지 않고 그 옆에 남는다 (§13). */}
       {trouble !== null && <FailureNotice failure={trouble.failure} headline={trouble.headline} />}
 
-      {body.kind === 'loading' && <p className="hint">Loading…</p>}
+      {body.kind === 'loading' && <Loading text="Loading…" />}
 
-      {body.kind === 'nothingToSend' && (
-        <div role="status">
-          <p className="empty">{body.text}</p>
-          <p className="hint">{body.hint}</p>
-        </div>
-      )}
+      {body.kind === 'nothingToSend' && <EmptyState title={body.text} body={body.hint} />}
 
       {body.kind === 'ready' && (
         <>
@@ -778,11 +900,10 @@ function NotionPanel({
         </>
       )}
 
+      {/* 왕복이 여럿이라 오래 걸린다 (§9.2). 어디까지 갔는지가 고리 옆에 함께 있다. */}
       {body.kind === 'sending' && (
         <>
-          <p className="hint" aria-live="polite">
-            {body.text}
-          </p>
+          <Loading text={body.text} live />
           {body.progress !== null && <p className="hint">{body.progress.text}</p>}
         </>
       )}
@@ -860,7 +981,7 @@ function SendButton({
       <p className="hint">{action.outcomeText}</p>
       <button
         type="button"
-        className="action"
+        className="btn btn--secondary"
         onClick={() => onSend(action.recordingId, action.confirmation)}
       >
         {action.label}
@@ -889,27 +1010,26 @@ function TranscriptTab({
       {/* 요청이 거절된 사실은 전사 상태를 덮지 않고 그 옆에 남는다 (§13). */}
       {trouble !== null && <FailureNotice failure={trouble.failure} headline={trouble.headline} />}
 
-      {tab.kind === 'loading' && <p className="hint">Loading transcript…</p>}
+      {tab.kind === 'loading' && <Loading text="Loading transcript…" />}
 
       {tab.kind === 'none' && (
-        <>
-          <p className="empty">{tab.text}</p>
+        // 빈 상태 둘 — 아직 전사가 없다. 여기서 할 수 있는 일 하나가 그 아래에 있다.
+        <EmptyState title={tab.text}>
           <button
             type="button"
-            className="action"
+            className="btn btn--primary"
             onClick={() => onTranscribe(tab.start.recordingId)}
           >
             {tab.start.label}
           </button>
-        </>
+        </EmptyState>
       )}
 
       {(tab.kind === 'pending' || tab.kind === 'running') && (
         <>
-          {/* 상태가 바뀌는 것은 소리로도 알린다. 화면은 이 동안에도 멎지 않는다. */}
-          <p className="hint" aria-live="polite">
-            {tab.text}
-          </p>
+          {/* 상태가 바뀌는 것은 소리로도 알린다. 화면은 이 동안에도 멎지 않으며, 오래
+              걸리는 동안 그 사실이 고리와 글자로 함께 보인다 (요구 9). */}
+          <Loading text={tab.text} live />
           {/* 새 전사가 도는 동안에도 이미 있던 Transcript는 그대로 보인다 (§7.1 · INV-2). */}
           <TranscriptLines lines={tab.kept} />
         </>
@@ -937,7 +1057,7 @@ function TranscriptTab({
           {tab.resolution !== null && <p className="hint">{tab.resolution}</p>}
           <button
             type="button"
-            className="action"
+            className="btn btn--secondary"
             onClick={() => onTranscribe(tab.retry.recordingId)}
           >
             {tab.retry.label}
@@ -950,29 +1070,35 @@ function TranscriptTab({
 }
 
 /**
- * AI Note 탭 (§5 C · §9 · `phase-prompt/04` 요구 4 · 12 · 14 · 15).
+ * AI Note 탭 (§5 C · §9 · `phase-prompt/04` 요구 4 · 12 · 14 · 15 ·
+ * `phase-prompt/05.5` 요구 6).
  *
- * 일곱 상태가 서로 다른 모습을 갖는다. 어느 상태인지 정하는 규칙은 여기 없고
- * {@link aiNoteTab}에 있다 — 이 컴포넌트는 그리기만 한다.
+ * **노트를 얻는 길이 둘이고, 둘은 위아래로 놓인다** — 위는 연결된 provider가 여기서 쓰는 것,
+ * 아래는 사용자가 이미 쓰는 AI에 가져가는 것이다. **아래 줄은 provider가 하나도 없어도 완전히
+ * 쓸 수 있다** (MH-1 · MH-2). 어느 줄이 어떤 상태인지 정하는 규칙은 여기 없고
+ * {@link aiNoteTab} · {@link manualHandoff} · {@link aiNoteTabLayout}에 있다 — 이 컴포넌트는
+ * 그리기만 한다.
  *
- * **AI가 꺼져 있는 상태를 {@link FailureNotice}로 그리지 않는다** (INV-8 · §13). 그 자리에는
- * `role="alert"`도 없고 `Failure`도 없다 — 담담한 사실 몇 줄과, 다시 확인해 볼 수단뿐이다.
+ * 세 mode는 두 줄 위에 있다 (§9.5). 프롬프트와 AI-ready 문서도 같은 mode로 만들어지므로 그
+ * 선택은 어느 한 줄의 것이 아니며, **provider가 없다는 이유로 잠기지 않는다.**
  */
 function AiNoteTab({
-  tab,
+  layout,
   trouble,
   onMode,
   onGenerate,
   onRecheck,
+  onCopy,
+  onExportForAi,
 }: {
-  tab: AiNoteTabView;
+  layout: AiNoteTabLayout;
   trouble: AiNoteTrouble | null;
   onMode: (mode: NoteMode) => void;
   onGenerate: (recordingId: string, mode: NoteMode) => void;
   onRecheck: () => void;
+  onCopy: (action: CopyAction) => void;
+  onExportForAi: (action: AiExportAction) => void;
 }) {
-  const { body } = tab;
-
   return (
     <section className="note">
       {/* 요청이 거절된 사실은 노트 상태를 덮지 않고 그 옆에 남는다 (§13). */}
@@ -980,13 +1106,13 @@ function AiNoteTab({
 
       {/* 무엇을 만들 것인가 (§9.5). 지금 바꿀 수 있는지는 화면이 아니라 값이 말한다. */}
       <div className="note__modes" role="group" aria-label="Note mode">
-        {tab.modes.map((choice) => (
+        {layout.modes.map((choice) => (
           <button
             key={choice.mode}
             type="button"
             className={choice.selected ? 'note__mode note__mode--active' : 'note__mode'}
             aria-pressed={choice.selected}
-            disabled={!tab.modeSelectable}
+            disabled={!layout.modeSelectable}
             title={choice.sections}
             onClick={() => onMode(choice.mode)}
           >
@@ -995,53 +1121,91 @@ function AiNoteTab({
         ))}
       </div>
 
+      <AutomaticNote row={layout.automatic} onGenerate={onGenerate} onRecheck={onRecheck} />
+
+      {/* 위 줄은 조건이 아니다 — 둘 중 하나를 고르는 것이다. */}
+      <p className="note__or">{layout.orText}</p>
+
+      <ManualHandoff manual={layout.manual} onCopy={onCopy} onExportForAi={onExportForAi} />
+    </section>
+  );
+}
+
+/**
+ * 위 줄 — 연결된 provider가 여기서 노트를 쓴다 (§9 · `phase-prompt/04`).
+ *
+ * 일곱 상태가 서로 다른 모습을 갖는다. **이 Phase가 바꾼 것은 이 줄이 놓이는 자리와 그 위의
+ * 제목 두 줄뿐이며, 상태 표현은 그대로다** (MH-8).
+ *
+ * **AI가 꺼져 있는 상태를 {@link FailureNotice}로 그리지 않는다** (INV-8 · §13). 그 자리에는
+ * `role="alert"`도 없고 `Failure`도 없다 — 담담한 사실 몇 줄과, 다시 확인해 볼 수단과,
+ * **그것이 선택이라는 사실**뿐이다 (요구 6).
+ */
+function AutomaticNote({
+  row,
+  onGenerate,
+  onRecheck,
+}: {
+  row: AiNoteTabLayout['automatic'];
+  onGenerate: (recordingId: string, mode: NoteMode) => void;
+  onRecheck: () => void;
+}) {
+  const tab: AiNoteTabView = row.tab;
+  const { body } = tab;
+
+  return (
+    <section className="note__row">
+      <h3 className="note__row-title">{row.heading}</h3>
+      <p className="hint">{row.text}</p>
+      {/* provider가 준비되지 않은 것은 오류도 설정 요구도 아니다 — 아래 줄이 그대로 있다
+          (INV-8 · 요구 6). 그 사실이 상태보다 먼저 읽힌다. */}
+      {row.optionalNotice !== null && <p className="hint">{row.optionalNotice}</p>}
+
       {/* 전사 텍스트가 이 기기를 떠나는가 (§12 · INV-5). audio는 어느 쪽이든 나가지 않는다. */}
       {tab.provider !== null && <p className="hint">{tab.provider.label}</p>}
 
-      {body.kind === 'loading' && <p className="hint">Loading AI note…</p>}
+      {body.kind === 'loading' && <Loading text="Loading AI note…" />}
 
       {body.kind === 'disabled' && (
-        // 경고가 아니다. AI 기능이 비활성이라는 사실을 담담히 알린다 (INV-8 · §13).
-        <div className="note__off" role="status">
-          <p className="empty">{body.notice.headline}</p>
-          <p className="hint">{body.notice.text}</p>
-          <p className="hint">{body.notice.resolution}</p>
-          {/* 이 상태가 막지 않는 것 — 재생도 Transcript도 그대로다. */}
-          <p className="hint">{body.notice.unaffectedNotice}</p>
-          {body.notice.recheck !== null && (
-            <button type="button" className="action" onClick={onRecheck}>
-              {body.notice.recheck.label}
-            </button>
-          )}
+        // 빈 상태 셋 — provider가 없다. **경고가 아니다.** AI 기능이 비활성이라는 사실을
+        // 담담히 알리며, 아래 줄은 이 상태에서도 그대로 쓸 수 있다 (INV-8 · §13 · MH-1).
+        <div className="note__off">
+          <EmptyState title={body.notice.headline} body={body.notice.text}>
+            <p className="hint">{body.notice.resolution}</p>
+            {/* 이 상태가 막지 않는 것 — 재생도 Transcript도 그대로다. */}
+            <p className="hint">{body.notice.unaffectedNotice}</p>
+            {body.notice.recheck !== null && (
+              <button type="button" className="btn btn--secondary" onClick={onRecheck}>
+                {body.notice.recheck.label}
+              </button>
+            )}
+          </EmptyState>
         </div>
       )}
 
       {body.kind === 'noTranscript' && (
         // 재료가 아직 없는 것도 실패가 아니다 (§7.2).
-        <div role="status">
-          <p className="empty">{body.text}</p>
-          <p className="hint">{body.hint}</p>
-        </div>
+        <EmptyState title={body.text} body={body.hint} />
       )}
 
       {body.kind === 'none' && (
-        <>
-          <p className="empty">{body.text}</p>
+        // 빈 상태 넷 — 아직 노트가 없다. 여기서 할 수 있는 일 하나가 그 아래에 있다.
+        <EmptyState title={body.text}>
           <button
             type="button"
-            className="action"
+            className="btn btn--primary"
             onClick={() => onGenerate(body.generate.recordingId, body.generate.mode)}
           >
             {body.generate.label}
           </button>
-        </>
+        </EmptyState>
       )}
 
       {body.kind === 'generating' && (
         <>
-          <p className="hint" aria-live="polite">
-            {body.text}
-          </p>
+          {/* 로컬 모델이 노트 하나를 쓰는 데 걸리는 시간은 초 단위가 아니다 (§16.2) —
+              그동안 화면이 얼어붙은 것처럼 보이지 않게 한다 (요구 9). */}
+          <Loading text={body.text} live />
           {/* 새 생성이 도는 동안에도 이미 있던 노트는 그대로 보인다 (ADR-0008 §9.2 · INV-2). */}
           {body.kept !== null && <NoteDocument note={body.kept} />}
         </>
@@ -1053,7 +1217,7 @@ function AiNoteTab({
           {/* 다시 만들어도 지금 보고 있는 노트는 지워지지 않는다 (요구 12). */}
           <button
             type="button"
-            className="action"
+            className="btn btn--secondary"
             onClick={() => onGenerate(body.regenerate.recordingId, body.regenerate.mode)}
           >
             {body.regenerate.label}
@@ -1074,7 +1238,7 @@ function AiNoteTab({
           {body.resolution !== null && <p className="hint">{body.resolution}</p>}
           <button
             type="button"
-            className="action"
+            className="btn btn--secondary"
             onClick={() => onGenerate(body.retry.recordingId, body.retry.mode)}
           >
             {body.retry.label}
@@ -1083,6 +1247,191 @@ function AiNoteTab({
         </>
       )}
     </section>
+  );
+}
+
+/**
+ * 아래 줄 — 이미 쓰고 있는 AI로 가져간다 (`phase-prompt/05.5` 요구 3 · 6 · A-1 · A-2).
+ *
+ * 세 자리가 나란히 있고, **셋 다 AI provider 없이 동작한다** (MH-1 · MH-2). 어느 자리가 어떤
+ * 상태인지 정하는 규칙은 여기 없고 {@link manualHandoff}에 있다 — 이 컴포넌트는 그리기만 한다.
+ *
+ * **앱이 아무 데도 보내지 않는다** (MH-3). 나가는 행위의 주체는 사람이며, 그 사실이 세 자리
+ * 위에 한 줄로 있다.
+ */
+function ManualHandoff({
+  manual,
+  onCopy,
+  onExportForAi,
+}: {
+  manual: ManualHandoffView;
+  onCopy: (action: CopyAction) => void;
+  onExportForAi: (action: AiExportAction) => void;
+}) {
+  return (
+    <section className="note__row">
+      <h3 className="note__row-title">{manual.heading}</h3>
+      <p className="hint">{manual.text}</p>
+      {/* provider가 없어도 된다 · 아무것도 나가지 않는다 (MH-1 · MH-2 · MH-3 · INV-6). */}
+      <p className="hint">{manual.noProviderNotice}</p>
+      <p className="hint">{manual.localNotice}</p>
+
+      <div className="note__handoff">
+        <CopyItem item={manual.copy.prompt} onCopy={onCopy} />
+        <CopyItem item={manual.copy.transcript} onCopy={onCopy} />
+        <AiExportItem item={manual.aiExport} onExportForAi={onExportForAi} />
+      </div>
+    </section>
+  );
+}
+
+/**
+ * 복사 자리 하나 (요구 A-1 · A-2 · 5).
+ *
+ * **복사됐다는 것도 실패했다는 것도 문장으로 있다** — 색 하나로만 말하지 않는다 (§7.5 ·
+ * 요구 12). 실패했을 때는 다시 시도할 수단과, clipboard를 쓰지 않는 다른 길(Export for AI)이
+ * 함께 남는다.
+ */
+function CopyItem({
+  item,
+  onCopy,
+}: {
+  item: CopyItemView;
+  onCopy: (action: CopyAction) => void;
+}) {
+  const { body } = item;
+
+  return (
+    <div className="note__handoff-item">
+      <p className="note__handoff-title">{item.label}</p>
+
+      {body.kind === 'loading' && <Loading text="Loading…" />}
+
+      {body.kind === 'nothingToCopy' && (
+        // 재료가 아직 없는 것은 실패가 아니다 (§7.2 · MH-5).
+        <EmptyState title={body.text} body={body.hint} />
+      )}
+
+      {body.kind === 'notAsked' && (
+        <>
+          <p className="hint">{body.text}</p>
+          <CopyButton action={body.start} onCopy={onCopy} />
+        </>
+      )}
+
+      {body.kind === 'copying' && <Loading text={body.text} live />}
+
+      {body.kind === 'copied' && (
+        <div role="status">
+          {/* 색이 아니라 이 문장이 복사됐다고 말한다 (§7.5 · 요구 12). 다른 완료 표시와
+              같은 모양이며, 여기에만 쓰이는 색을 따로 두지 않는다. */}
+          <p className="share__headline">{body.headline}</p>
+          <p className="hint">{body.text}</p>
+          <CopyButton action={body.again} onCopy={onCopy} />
+        </div>
+      )}
+
+      {body.kind === 'failed' && (
+        <>
+          {/* 무엇이 실패했는지 · 원본은 안전한지 · 다시 시도할 수 있는지 (§13). */}
+          <FailureNotice failure={body.failure} headline={body.headline} />
+          {/* 복사는 읽기만 한다 — 아무것도 달라지지 않았다 (INV-3 · MH-7). */}
+          <p className="hint">{body.preservedNotice}</p>
+          {body.resolution !== null && <p className="hint">{body.resolution}</p>}
+          <CopyButton action={body.retry} onCopy={onCopy} />
+          {/* clipboard가 막혀도 남는 길 (§7.5). 실패에는 언제나 있다. */}
+          <p className="hint">
+            {body.alternative.label} — {body.alternative.text}
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
+function CopyButton({
+  action,
+  onCopy,
+}: {
+  action: CopyAction;
+  onCopy: (action: CopyAction) => void;
+}) {
+  return (
+    <button type="button" className="btn btn--secondary" onClick={() => onCopy(action)}>
+      {action.label}
+    </button>
+  );
+}
+
+/**
+ * Export for AI 자리 (요구 3).
+ *
+ * **clipboard를 전혀 쓰지 않는다** — 복사가 거절되는 환경에서도 이 길은 그대로 남는다
+ * (ADR-0010 §7.5). 만들어진 파일의 **전체 경로**는 언제나 보인다: export 위치가 설정으로
+ * 노출되지 않으므로 그것이 사용자가 파일을 찾는 유일한 길이다 (§4.1).
+ */
+function AiExportItem({
+  item,
+  onExportForAi,
+}: {
+  item: AiExportItemView;
+  onExportForAi: (action: AiExportAction) => void;
+}) {
+  const { body } = item;
+
+  return (
+    <div className="note__handoff-item">
+      <p className="note__handoff-title">{item.label}</p>
+
+      {body.kind === 'loading' && <Loading text="Loading…" />}
+
+      {body.kind === 'nothingToExport' && <EmptyState title={body.text} body={body.hint} />}
+
+      {body.kind === 'notAsked' && (
+        <>
+          <p className="hint">{body.text}</p>
+          <AiExportButton action={body.start} onExportForAi={onExportForAi} />
+        </>
+      )}
+
+      {body.kind === 'exporting' && <Loading text={body.text} live />}
+
+      {body.kind === 'done' && (
+        <div className="share__done" role="status">
+          <p className="share__headline">{body.headline}</p>
+          <p className="share__file">{body.fileName}</p>
+          {/* 어디에 만들어졌는가 (§4.1). 이 줄이 없으면 사용자는 파일을 찾지 못한다. */}
+          <p className="share__path">{body.path}</p>
+          <p className="hint">{body.text}</p>
+          <AiExportButton action={body.again} onExportForAi={onExportForAi} />
+        </div>
+      )}
+
+      {body.kind === 'failed' && (
+        <>
+          {/* 무엇이 실패했는지 · 원본은 안전한지 · 다시 시도할 수 있는지 (§13). */}
+          <FailureNotice failure={body.failure} headline={body.headline} />
+          {/* 앱은 아무것도 지우지 않았다 (INV-3 · MH-7). */}
+          <p className="hint">{body.preservedNotice}</p>
+          {body.resolution !== null && <p className="hint">{body.resolution}</p>}
+          <AiExportButton action={body.retry} onExportForAi={onExportForAi} />
+        </>
+      )}
+    </div>
+  );
+}
+
+function AiExportButton({
+  action,
+  onExportForAi,
+}: {
+  action: AiExportAction;
+  onExportForAi: (action: AiExportAction) => void;
+}) {
+  return (
+    <button type="button" className="btn btn--secondary" onClick={() => onExportForAi(action)}>
+      {action.label}
+    </button>
   );
 }
 

@@ -1,0 +1,55 @@
+# AI-ready 산출물과 Manual 프롬프트를 만드는 Rust 순수 모듈
+# Runtime이 PLAN-20260904T075433Z 승인 시점에 생성했다 (proposal P2). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-056
+status: DONE
+
+request: |-
+  ADR-0010이 확정한 형식대로, **파일도 clipboard도 네트워크도 저장소도 모르는 순수 모듈**을 `src-tauri/src/export/` 아래에 하나 만든다(예: `export/ai_request.rs`). 이 모듈이 만드는 것은 셋이다 — (1) 고른 mode(Meeting · Study · Summary)에 맞는 **Manual 프롬프트 텍스트**, (2) 외부 AI 채팅이 요청을 이해하기에 충분한 맥락(모드 · 지시 · Recording 메타데이터 · Transcript)을 담은 **AI-ready Markdown 문서 하나**, (3) 사람이 그대로 붙여 넣을 수 있는 **Transcript 텍스트**(timestamp가 유용한 곳에서는 보존한다). 세 산출물 모두 같은 입력에서 언제나 같은 문자열을 내는 결정론적 함수여야 한다(§18) — 시계도 난수도 로캘도 쓰지 않는다. 프롬프트는 `crate::ai::prompt`의 `MEETING_PROMPT` · `STUDY_PROMPT` · `SUMMARY_PROMPT` · `TRANSCRIPT_PLACEHOLDER`를 **재사용**해서 만들고, 출력이 구조화된 Markdown으로 오도록 요청하는 문구를 포함한다. **그 상수들과 `PROMPT_VERSION_*`을 고치지 않는다** — 고치면 `prompt_version_is_bound_to_the_prompt_text`가 깨지고 이미 저장된 provenance가 거짓이 된다. 두 번째 프롬프트 세트를 만들지 않는다. 문서는 `export::markdown`의 `ExportDocument`와 `format_timestamp_ms`가 정한 규칙에서 갈라져야 하고, transcript 렌더링 규칙(segment 순서 보존 · 빈 segment 처리 · segment가 없으면 raw_text)을 **복제하지 않는다** — 필요하면 기존 함수를 공용으로 끌어올려 한 자리에서 쓴다. 입력 타입에 **audio 경로도 audio 바이트도 담을 자리를 만들지 않는다**(INV-6 · MH-4). 산출물 어디에도 ChatGPT · Claude · Gemini · Ollama 같은 벤더 이름이 들어가지 않는다(MH-6). 세 산출물의 기대 문자열을 고정하는 단위 테스트를 모듈 옆에 붙이고, 결정성 · 빈 transcript · segment 없는 transcript · 세 mode 전부를 함께 본다.
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-055
+
+stop_condition:
+  gates: [lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 2
+
+acceptance_criteria:
+  - id: AC-1
+    description: |-
+      lint Gate가 통과한다 (frontend ESLint + `cargo clippy --all-targets -D warnings`).
+    verification:
+      type: gate
+      ref: lint
+  - id: AC-2
+    description: |-
+      test Gate가 통과하고, 새 순수 모듈의 단위 테스트가 세 mode의 프롬프트 · AI-ready 문서 · Transcript 텍스트의 기대 문자열과 결정성을 고정한다.
+    verification:
+      type: gate
+      ref: test
+  - id: AC-3
+    description: |-
+      `src-tauri/src/ai/prompt.rs`의 프롬프트 상수와 `PROMPT_VERSION_*` 선언값이 하나도 바뀌지 않았고, Manual 프롬프트가 그 상수를 재사용해 만들어진다. 두 번째 프롬프트 세트가 생기지 않았다.
+    verification:
+      type: verifier
+      instruction: |-
+        prompt.rs의 diff가 비어 있는지 확인하고, 새 모듈이 prompt_template 계열을 실제로 재사용하는지 본다. 프롬프트 문장을 복사해 붙인 자리가 있으면 실패다.
+  - id: AC-4
+    description: |-
+      transcript/문서 렌더링 규칙이 복제되지 않았다 — `export::markdown`의 기존 함수에서 갈라지거나 공용으로 끌어올려 한 자리에서 쓰인다.
+    verification:
+      type: verifier
+  - id: AC-5
+    description: |-
+      새 모듈의 입력 타입과 산출물에 audio 경로도 audio 바이트도 담을 자리가 없고(MH-4), 벤더 이름이 없다(MH-6). 파일·clipboard·네트워크·저장소를 쓰는 코드가 이 모듈에 없다.
+    verification:
+      type: verifier
+
+evidence: []
+
+failure_memo: []

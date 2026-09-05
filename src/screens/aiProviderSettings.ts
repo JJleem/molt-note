@@ -28,6 +28,23 @@
  * 지우지 않는다.** `defaultMicrophone.ts`가 없어진 장치에 대해 이미 같은 규칙을 따르고 있고,
  * 이유도 같다 — 조용히 바꾸면 무엇이 바뀐 것인지 말할 수 없게 된다.
  *
+ * ## 구역은 두 부분이다 — 연결된 provider · 스스로 세우는 로컬 provider
+ *
+ * ```text
+ * Connected provider          무엇을 골랐는가 · 어디에 연결하는가 · 응답하는가 · 어떤 모델인가
+ * <이름> — 로컬 · 선택        스스로 설치해서 쓰는 provider 하나에 대한 안내
+ * ```
+ *
+ * 둘로 나누는 이유는 `phase-prompt/05.5` 요구 7 · `docs/ADR-0010` §4.3이다 — 스스로 설치해야
+ * 하는 로컬 provider는 **기본 AI 경험이 아니라 선택지 하나이며**, 그 사실이 자리와 문구에
+ * 드러나야 한다. 뒤쪽에 놓이고, 켜라는 요구 대신 **켜는 방법**만 적으며, 켜지 않은 상태를
+ * 결함이 아니라 정상으로 말한다 (INV-8). **삭제가 아니라 재배치다** — 고르고 확인하고 모델을
+ * 고르는 경로는 위 부분에 그대로 있다 (MH-8).
+ *
+ * 그 부분의 **이름과 로컬/외부 표시는 {@link SELECTABLE_AI_PROVIDERS}에서 나온다** — 벤더
+ * 이름을 두 번째로 적는 자리를 만들지 않는다 (INV-9). 그래서 이 구역에 새 provider가 생기지
+ * 않으며, 목록에 없는 벤더는 여기에도 없다.
+ *
  * ## AI가 안 되는 것이 나머지를 막지 않는다 (INV-8)
  *
  * 이 모듈이 만드는 값 중 어떤 것도 {@link SettingsView}가 아니다. 저장 경로가 보는 것은 폼
@@ -458,3 +475,110 @@ export const AI_BASE_URL_PLACEHOLDER = 'Leave empty to use the built-in address'
  */
 export const AI_BASE_URL_NOTICE =
   'Where the provider is listening, as host and port. Leave it empty and the app connects to its built-in address for that provider.';
+
+// --- 구역의 두 부분 (phase-prompt/05.5 요구 7 · 10 · docs/ADR-0010 §4.3) ------------------
+
+/** 구역 전체의 이름. 특정 provider의 이름이 아니다 — 그것은 아래 부분의 것이다. */
+export const AI_SECTION_TITLE = 'AI';
+
+/** 이 구역 전체가 선택이라는 사실 (INV-8). 맨 앞에 있어서 나머지를 그 아래에서 읽게 한다. */
+export const AI_IS_OPTIONAL_TEXT =
+  'AI notes are optional. Recording, transcription, Markdown export, and Notion all work with nothing set here.';
+
+/**
+ * provider가 없어도 AI를 쓸 수 있다는 사실 (MH-1 · MH-2 · `aiHandoffView.ts`).
+ *
+ * **벤더를 부르지 않는다** (MH-6). 그리고 그 버튼을 이 화면에 옮겨 오지 않는다 — 그것은
+ * 녹음 하나에 대한 동작이므로 녹음 화면에 있고, 여기서는 그것이 있다는 사실만 말한다.
+ */
+export const AI_WITHOUT_A_PROVIDER_TEXT =
+  'With nothing set here you can still take a recording to the AI chat you already use — those buttons are on the recording itself.';
+
+/** 첫 부분의 이름 — 고르고 · 확인하고 · 모델을 고르는 자리 (Phase 4가 만든 그대로다). */
+export const CONNECTED_PROVIDER_TITLE = 'Connected provider';
+
+/** 그 부분이 무엇인가. 고르지 않은 상태를 **고칠 것으로 말하지 않는다** (INV-8). */
+export const CONNECTED_PROVIDER_TEXT =
+  'A provider connected here writes notes for you inside the app. Leaving it unset is a normal state, not something to fix.';
+
+/**
+ * 스스로 설치해서 쓰는 provider 하나에 대한 안내.
+ *
+ * **provider 동작이 아니라 자리와 언어다.** 여기에는 편집할 값도 누를 버튼도 없다 — 고르는
+ * 것도 확인하는 것도 모델을 고르는 것도 전부 위 부분(`Connected provider`)에 그대로 있다
+ * (MH-8). 이 값이 하는 일은 그 선택지 하나가 **무엇이고 어떤 위치에 있는지**를 말하는 것뿐이다.
+ */
+export interface LocalProviderSetup {
+  /** 저장되는 식별자. 위 목록의 항목과 같은 값이다. */
+  readonly id: string;
+  /**
+   * 이 부분의 제목.
+   *
+   * 이름과 로컬/외부 표시가 {@link SELECTABLE_AI_PROVIDERS}에서 그대로 오고, 여기에 선택이라는
+   * 표시가 붙는다 — 벤더 이름도 locality 문구도 이 자리에서 새로 지어내지 않는다 (INV-5 · INV-9).
+   */
+  readonly title: string;
+  /** 선택이고 고급이라는 사실. **자리나 색이 아니라 문장으로 말한다.** */
+  readonly standing: string;
+  /** 무엇인가. 벤더가 아니라 **성질**을 말한다 (MH-6). */
+  readonly text: string;
+  /** 지금 이것이 고른 provider인가. */
+  readonly chosen: boolean;
+  /** 그래서 지금 어떤 상태인가. 고르지 않은 것은 결함이 아니다 (INV-8). */
+  readonly statusText: string;
+  /** 켜려면 무엇을 하는가. **켜라는 요구가 아니라 방법이다.** */
+  readonly howToTurnOn: string;
+}
+
+/** 제목에 붙는 선택 표시. locality 표시 뒤에 온다. */
+export const OPTIONAL_TITLE_SUFFIX = ' · optional';
+
+/** 이 부분이 어떤 위치에 있는가 (요구 7). */
+export const SELF_HOSTED_STANDING_TEXT =
+  'Optional and advanced. It is one way to fill the provider above, not something the app needs.';
+
+/**
+ * 스스로 세우는 provider가 무엇인가.
+ *
+ * **벤더를 설명하지 않는다** — 설치하고 띄우는 주체가 사용자라는 것은 `local`인 provider의
+ * 성질이며, 그 성질이 이 문장의 내용 전부다 (MH-6 · INV-9).
+ */
+export const SELF_HOSTED_PROVIDER_TEXT =
+  'You install and run it on this machine yourself. Molt Note does not install it, does not start it, and does not need it to work.';
+
+/** 켜는 방법. 위 부분을 가리키므로 같은 컨트롤이 두 벌이 되지 않는다. */
+export const HOW_TO_TURN_ON_A_LOCAL_PROVIDER =
+  'To use it: install and start it yourself, then choose it in the provider list above and save. The check above then asks the saved provider whether it answers.';
+
+/** 고르지 않았다. **담담한 사실이다** (INV-8). */
+export const LOCAL_PROVIDER_NOT_CHOSEN_TEXT =
+  'It is not the provider right now. Nothing in the app is waiting for it.';
+
+/** 골랐다. 그래서 위 부분의 확인과 모델 목록이 이것에 대한 것이 된다. */
+export const LOCAL_PROVIDER_CHOSEN_TEXT =
+  'It is the provider right now, so the controls above check it and list its models.';
+
+/**
+ * 스스로 설치해서 쓰는 로컬 provider들에 대한 안내 (요구 7).
+ *
+ * 목록은 {@link SELECTABLE_AI_PROVIDERS}에서 **`local`인 것만** 걸러 온다. 그래서 이 함수는
+ * 새 provider를 만들지 않으며 (요구 8), 위 목록에 없는 벤더가 여기에 나타날 방법도 없다.
+ * 외부 provider가 언젠가 생기더라도 그것은 "스스로 설치해서 쓰는 것"이 아니므로 이 부분의
+ * 문장이 그것에 대해 말하지 않는다.
+ */
+export function localProviderSetups(chosen: string): readonly LocalProviderSetup[] {
+  return SELECTABLE_AI_PROVIDERS.filter((provider) => provider.locality === 'local').map(
+    (provider) => {
+      const isChosen = provider.id === chosen;
+      return {
+        id: provider.id,
+        title: `${provider.name} — ${LOCALITY_CHOICE_LABEL[provider.locality]}${OPTIONAL_TITLE_SUFFIX}`,
+        standing: SELF_HOSTED_STANDING_TEXT,
+        text: SELF_HOSTED_PROVIDER_TEXT,
+        chosen: isChosen,
+        statusText: isChosen ? LOCAL_PROVIDER_CHOSEN_TEXT : LOCAL_PROVIDER_NOT_CHOSEN_TEXT,
+        howToTurnOn: HOW_TO_TURN_ON_A_LOCAL_PROVIDER,
+      };
+    },
+  );
+}

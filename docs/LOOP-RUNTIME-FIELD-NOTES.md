@@ -2516,6 +2516,131 @@ EXEC-20260904T065048Z-TASK-052   RECOVERY_AMBIGUOUS · attempts 0 · LLM 0 · $0
 ---
 
 
+## OBS-026 — provider 사용 한도(429)가 `PROCESS_CRASH`로 분류돼, 재시도 예산을 3초에 태우고 STALLED로 끝났다
+
+**Date:** 2026-09-06
+
+**Project phase / Goal:** Molt Note Phase 5.5 — Manual AI Handoff + UI Foundation
+
+**Plan / Task / Run:** PLAN-20260904T075433Z · TASK-065 ·
+RUN-20260905T160901Z-TASK-065 · RUN-20260905T160902Z-TASK-065
+
+**Execution:** EXEC-20260905T160901Z-TASK-065
+
+**Runtime stage:** Worker → Diagnose
+
+### What happened
+
+Phase의 **마지막 Task**(문서만 바꾸는 Task)가 **3초 만에** STALLED로 끝났다.
+
+```text
+Attempt 1   worker exited with code 1   duration_ms 536
+[Diagnose]  PROCESS_CRASH -> RETRY
+Attempt 2   worker exited with code 1   duration_ms 567
+[Diagnose]  PROCESS_CRASH -> RETRY
+TASK-065: STALLED  (REPEATED_IDENTICAL_FAILURE)
+Plan Result: STALLED   stop_reason: TASK_STOPPED
+총 소요 3초 · LLM 유효 호출 0 · 비용 $0.00
+```
+
+`loopctl status`가 사람에게 보여준 것은 이것이 전부다:
+
+```text
+worker: failed (PROCESS_CRASH)
+recovery: RETRY
+latest execution: STALLED  (REPEATED_IDENTICAL_FAILURE)
+```
+
+**진짜 원인은 `stdout.log`에만 있었다.**
+
+```json
+"api_error_status": 429,
+"terminal_reason": "api_error",
+"result": "You've hit your session limit · resets 4:50am (Asia/Seoul)"
+```
+
+즉 코드도 Task도 아무 문제가 없었다. **provider 사용 한도였다.**
+
+### Expected
+
+**[관측된 사실]** Runtime은 429를 `PROCESS_CRASH`로 분류했다.
+
+**세 가지가 함께 어긋난다.**
+
+1. **429는 시간이 지나면 풀리는 실패인데 즉시 재시도했다.** 두 시도의 간격이 1초 미만이라
+   두 번째도 같은 429를 받았다. 재시도가 성공할 수 없는 시점에 재시도했다.
+2. **재시도 예산 2개를 3초에 전부 소비했다.** `max_consecutive_failures`는 "같은 방식으로
+   두 번 실패하면 사람을 부른다"는 뜻인데, 여기서 소비된 두 번은 **작업 시도가 아니었다.**
+3. **`REPEATED_IDENTICAL_FAILURE`는 정확한 관찰이지만 잘못된 결론을 낳았다.** 실패가 동일한
+   이유는 "고칠 수 없는 결함이 있어서"가 아니라 **"아직 리셋 시각이 되지 않아서"**다.
+   메시지 안에 리셋 시각(`4:50am`)이 문자열로 들어 있었는데도 쓰이지 않았다.
+
+**이것은 OBS-015 · OBS-023과 같은 계열의 세 번째 사례다.**
+
+```text
+OBS-015              Worker launch 실패가 이전 attempt의 TIMEOUT 분류를 물려받았다
+OBS-023 추가증거      api_error(ENOTFOUND)가 TIMEOUT으로 분류됐다        (근거 4건)
+OBS-026 (이 항목)     api_error(429 rate limit)가 PROCESS_CRASH로 분류됐다
+```
+
+세 경우 모두 **Runtime은 `worker-result.json`의 부재만 보고 원인을 구분하지 않는다.**
+그런데 원인은 매번 envelope 안에 이미 있었다 (`adapter_meta.terminal_reason` ·
+`api_error_status`). **근거가 쌓였다 — 이제 분류기의 문제로 볼 수 있다.**
+
+### Current workaround
+
+사람이 세 단계를 밟았다.
+
+```text
+1. stdout.log를 직접 열어 429를 확인한다        ← status로는 알 수 없다
+2. 리셋 시각까지 기다린다
+3. loopctl transition TASK-065 TODO
+4. loopctl execute-plan <PLAN> 재실행
+```
+
+재개 후 **첫 시도에 DONE**이 됐다 (19분 29초 · Gate PASS · Verifier PASS · $14.42).
+**결함은 없었다.**
+
+### Impact
+
+**Medium-High.** 이번에는 Phase의 마지막 Task였고 사람이 지켜보고 있어서 손실이 4시간의
+대기뿐이었다. 그러나:
+
+- **무인 실행에서는 Plan 전체가 3초 만에 STALLED로 끝난다.** 남은 Task가 몇 개든 마찬가지다
+- 사람이 `stdout.log`를 열어 보지 않으면 **"제품 코드에 문제가 있다"고 오진하기 쉽다**
+- 재시도 예산이 실제 작업 시도에 쓰이지 않고 소모된다
+
+### Possible Runtime improvement
+
+- **Diagnose가 `adapter_meta.api_error_status`와 `terminal_reason`을 읽는다.**
+  최소한 `RATE_LIMITED`를 `PROCESS_CRASH`에서 분리한다. 세 사례 모두 이 한 가지로 개선된다
+  (OBS-015 · OBS-023 · 이 항목).
+- **`RATE_LIMITED`는 재시도 예산을 소비하지 않는다.** 한도는 코드 결함이 아니다.
+- **재시도 전에 대기한다.** 429 메시지에 리셋 시각이 들어 있다. 파싱이 불안하면
+  고정 backoff라도 즉시 재시도보다 낫다.
+- **`loopctl status`에 진짜 실패 이유를 노출한다.** 지금은 분류명만 보이고 원인은
+  `stdout.log`에 있다. 사람이 파일을 열어야 알 수 있다는 것 자체가 비용이다.
+
+### Evidence
+
+```text
+.loop-local/runs/RUN-20260905T160901Z-TASK-065/stdout.log
+.loop-local/runs/RUN-20260905T160902Z-TASK-065/stdout.log
+   api_error_status=429 · terminal_reason=api_error · is_error=true
+   "You've hit your session limit · resets 4:50am (Asia/Seoul)"
+   duration_ms 536 / 567 · total_cost_usd 0 · num_turns 1
+.loop-local/plans/PLAN-20260904T075433Z/executions/PLANEXEC-20260905T160904Z.json
+   TASK-065 STALLED · attempts=2 · 3s
+재개 후: EXEC-20260905T195220Z-TASK-065  DONE · attempts=1 · 19m29s · $14.4155
+```
+
+### Status
+
+`OBSERVED` — 분류기 개선 후보. OBS-015 · OBS-023과 묶어 **하나의 원인**으로 볼 수 있다:
+**Runtime이 Worker 실패의 원인을 구분하지 않고 결과 파일의 부재만 본다.**
+
+---
+
 # Candidate Improvements
 
 실제 사용 사례가 충분히 쌓인 항목만 이 표로 승격한다.

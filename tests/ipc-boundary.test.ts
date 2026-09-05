@@ -58,11 +58,23 @@ const payloadSource = readText('../src-tauri/src/commands/payload.rs');
  * 저장된 것을 읽어 파일 하나를 더할 뿐이므로 여기서도 쓰기 이름은 늘지 않으며, 이미 있는
  * 파일을 덮어쓰지 않는다 (§4.3).
  *
- * 마지막 여섯이 같은 Phase의 **Notion 전송**이다 — 전송 시작 · 진행 상태 조회 · 저장된 전송
+ * 그다음 여섯이 같은 Phase의 **Notion 전송**이다 — 전송 시작 · 진행 상태 조회 · 저장된 전송
  * 기록 읽기 · 연결 확인 · token 저장 · token 삭제 (§10 · §5-D · ADR-0009 §8 · §10).
  * 여기서도 저장된 것을 고치거나 지우는 이름은 늘지 않는다: 지우는 하나는 이 앱이 자격증명
  * 저장소에 넣은 항목이며, 녹음 · 전사 · 노트 · 이미 만들어진 Notion 페이지를 지우는 이름은
  * 여전히 없다 (INV-3 · INV-4). **token을 돌려주는 이름도 없다** (INV-7).
+ *
+ * 마지막 셋이 Phase 5.5의 **Manual AI Handoff**다 — Manual 프롬프트 · 붙여 넣을 Transcript
+ * 텍스트 · AI-ready 문서 파일 하나 (docs/ADR-0010-manual-ai-handoff.md §8.1). 28 → 31이며,
+ * 늘어난 개수와 이름은 그 문서가 구현 전에 확정한 그대로다. **사용자 동작 하나에 이름 하나**
+ * 이므로 셋보다 적지도 많지도 않다: 하나로 묶으면 같은 전사를 세 벌 실어 나른다.
+ *
+ * 여기서도 **저장된 것을 고치거나 지우는 이름은 늘지 않았다** (INV-3 · MH-7) — 앞의 둘은
+ * 문자열을 돌려줄 뿐이고, `export_ai_request`는 Markdown export와 같은 `exports/`에 파일을
+ * 하나 더할 뿐 이미 있는 파일을 덮어쓰지 않는다 (ADR-0009 §4.3). 셋 다 `recordingId`만 받고
+ * **`transcriptId`를 받지 않는다** (§8.2 · MH-5): 실패했거나 대체된 옛 Transcript version을
+ * 고를 방법이 wire에 없다는 것이 그 표현이다. **provider나 벤더를 아는 이름도 없다**
+ * (MH-1 · MH-2 · MH-6) — AI를 하나도 설정하지 않아도 셋이 전부 동작한다.
  *
  * 이 목록에 없는 이름이 등록되면 그것은 Phase 범위가 넘쳤다는 뜻이다 — 그래서 이 검사는
  * 부분집합이 아니라 **정확히 같은 집합**을 요구한다.
@@ -96,6 +108,9 @@ const REGISTERED_COMMANDS = [
   'check_notion_connection',
   'save_notion_token',
   'delete_notion_token',
+  'get_ai_prompt',
+  'get_transcript_text',
+  'export_ai_request',
 ];
 
 /** lib.rs의 generate_handler![...]에 등록된 command 이름. */
@@ -148,9 +163,13 @@ describe('command 표면', () => {
     // 녹음 동작이 그 이름으로 새로 생기는 것은 여전히 막는다.
     // `queue`·`batch`·`schedule`은 여러 Recording 일괄 처리 큐의 이름이며 DEFERRED다 (§16).
     //
-    // **export는 `export_markdown` 하나만 열렸다.** Phase 5가 실제로 만든 것이 그 하나이며
-    // (docs/ADR-0009-notion-and-export.md §4), PDF·DOCX 같은 다른 포맷과 일괄 export는 여전히
-    // 범위 밖이다 (phase-prompt/05의 Out of Scope).
+    // **export로 열린 이름은 둘이다** — `export_markdown`(Phase 5 ·
+    // docs/ADR-0009-notion-and-export.md §4)과 `export_ai_request`(Phase 5.5 ·
+    // docs/ADR-0010-manual-ai-handoff.md §5.6). 두 번째 이름은 이 정규식을 **느슨하게 만드는
+    // 대신** 허용 목록에 그대로 적었다: 허용되는 export 이름이 둘이 됐다는 사실만 늘고, 그 밖의
+    // 어떤 export 이름도 여전히 막힌다. PDF·DOCX 같은 다른 포맷과 일괄 export는 범위 밖이며
+    // (phase-prompt/05의 Out of Scope · §16 DEFERRED), 이름 하나가 더 필요해지면 여기서 먼저
+    // 걸린다.
     //
     // **`notion`은 이제 여기 없다** — 전송 표면이 실제로 열렸기 때문이다 (§10). 그 대신 아래의
     // 'Notion 표면은 여섯뿐이다'가 그 선을 지킨다: 이름이 하나 늘면 그쪽에서 먼저 드러난다.
@@ -160,21 +179,27 @@ describe('command 표면', () => {
     // 있다. `ollama_*` 같은 이름이 등록되면 그 경계가 새어 나온 것이다. Notion은 그와 다르다 —
     // 제품이 보내기로 한 목적지 그 자체이며 (PRODUCT-SPEC §10), 고를 수 있는 provider가 아니다.
     const outOfScope =
-      /(start|stop|pause|resume)_recording|play|whisper|ollama|llama|openai|anthropic|claude|gemini|export(?!_markdown\b)|pdf|docx|queue|batch|schedule/i;
+      /(start|stop|pause|resume)_recording|play|whisper|ollama|llama|openai|anthropic|claude|gemini|export(?!_(markdown|ai_request)\b)|pdf|docx|queue|batch|schedule/i;
 
     for (const command of registeredCommands()) {
       expect(command, `${command}는 아직 만들지 않은 기능의 command다`).not.toMatch(outOfScope);
     }
   });
 
-  it('전사 표면은 한 건 시작 · 상태 조회 · 결과 읽기 셋뿐이다', () => {
+  it('전사 표면은 한 건 시작 · 상태 조회 · 결과 읽기 둘뿐이다', () => {
     // 여러 Recording 동시 전사 큐는 이 Phase의 범위 밖이다 (PRODUCT-SPEC §16 DEFERRED ·
     // phase-prompt/03의 Out of Scope). 큐가 생기면 표면에 먼저 드러난다 — 목록을 걸거나,
     // 대기열을 묻거나, 취소하는 이름이 필요해지기 때문이다.
+    //
+    // `get_transcript_text`가 넷째로 늘었다. **그것은 읽기 파생 하나이지 전사 큐가 아니다** —
+    // 저장된 current Transcript를 사람이 붙여 넣을 수 있는 문자열로 돌려줄 뿐이며
+    // (docs/ADR-0010-manual-ai-handoff.md §5.4), 전사를 시작하지도 큐에 넣지도 않는다.
+    // 큐를 막는다는 이 검사의 목적은 그대로다.
     const transcription = registeredCommands().filter((command) => /transcri/i.test(command));
 
     expect(transcription.sort()).toEqual([
       'get_transcript',
+      'get_transcript_text',
       'start_transcription',
       'transcription_status',
     ]);
@@ -215,12 +240,15 @@ describe('command 표면', () => {
     expect(mutating).toEqual([]);
   });
 
-  it('Markdown export 표면은 파일 하나를 만드는 이름 하나뿐이다', () => {
-    // 일괄 export도, export한 것을 지우거나 다시 쓰는 이름도 이 Phase의 범위 밖이다
-    // (phase-prompt/05의 Out of Scope · §16 DEFERRED). 그것이 생기면 표면에 먼저 드러난다.
+  it('export 표면은 파일 하나를 만드는 이름 둘뿐이다', () => {
+    // 이름이 하나에서 둘이 됐다 — 같은 `exports/`에 서로 다른 문서를 만드는 두 동작이기 때문이며
+    // (docs/ADR-0010-manual-ai-handoff.md §5.6), 그 둘은 파일 이름의 표식으로 구분된다.
+    // **여전히 각 이름은 파일 하나를 만들 뿐이다**: 일괄 export도, export한 것을 지우거나 다시
+    // 쓰는 이름도 범위 밖이다 (phase-prompt/05의 Out of Scope · §16 DEFERRED). 셋째 이름이
+    // 생기면 여기서 먼저 드러난다.
     const exports = registeredCommands().filter((command) => /export/i.test(command));
 
-    expect(exports).toEqual(['export_markdown']);
+    expect(exports.sort()).toEqual(['export_ai_request', 'export_markdown']);
   });
 
   it('Notion 표면은 전송 둘 · 저장된 기록 읽기 · 연결 확인 · token 둘뿐이다', () => {
