@@ -2212,6 +2212,56 @@ Phase 4 TASK-038까지 합쳐 **근거 3건**이 됐다. 공유 트리가 매번
 사실은 worktree isolation(OBS-003)을 도입할 때 **잘린 시도의 산출물 인계**를 함께 설계해야
 한다는 근거도 그만큼 강해졌다는 뜻이다.
 
+### 추가 증거 — Phase 5.5 (2026-09-04) · 재현 4건째 · **self-check 통과까지 끝낸 시도가 폐기됐다**
+
+| Task | Run | Worker가 남긴 것 | worker-result | Runtime 분류 |
+| --- | --- | --- | --- | --- |
+| TASK-060 | RUN-20260904T092924Z | `src/screens/SettingsScreen.tsx` · `aiProviderSettings.ts` · `aiProviderSettings.test.ts` + evidence 2종(`changed-files.md` · `gates.md`) | 없음 | `worker=failed` · `TIMEOUT` -> `RETRY_WITH_HINT` |
+
+```text
+process.timeout_seconds   : 1800
+process.duration_ms       : 7104251   (1시간 58분 24초 · 설정의 3.9배)
+process.signal            : SIGKILL · timed_out=true
+adapter_meta.terminal_reason : api_error · is_error=true
+adapter_meta.duration_api_ms : 486794  (8분 7초 — 실제 API 활동 시간)
+usage.provider_cost_usd      : 4.357417
+stdout.log: "API Error: Can't reach the API server — check your internet or DNS (ENOTFOUND)"
+```
+
+**이전 3건(TASK-038 · 048 · 052)과 다른 점 세 가지가 관측됐다.**
+
+**(1) 이번 Worker는 self-check까지 끝내고 그 기록을 남겼다.**
+`.loop/evidence/TASK-060/gates.md`에 build · lint · test 세 Gate가 **모두 exit 0**으로
+기록돼 있다(`Self-check: all gates passed`). Runtime이 "산출물 없음 · 실패"로 회계한 시도가
+실제로는 **세 Gate를 통과한 상태**였다. 이 세션에서 사람이 `npm run typecheck`를 다시 돌려
+exit 0을 확인했다 — 트리는 온전하다.
+
+OBS-023이 적은 개선 후보 — "결과 파일을 점진적으로 쓴다" — 에 대한 **가장 강한 근거다.**
+부분 결과를 남길 지점이 추측이 아니라 **실재했다**: self-check가 통과한 순간이다.
+그 시점에 부분 결과가 있었다면 이 시도는 실패가 아니라 **검증 대기**로 남았을 것이다.
+
+**(2) timeout 초과 집행이 다시 관측됐다** (1800s 설정 / 7104s 실행 · 3.9배).
+OBS-023의 4.8배와 성질이 같고, **두 경우 모두 `api_error`와 함께** 일어났다.
+**[가능한 설명 · 미검증]** 운영자 Mac의 sleep. **[미검증]** timeout 타이머가 monotonic clock을
+쓰는지 wall clock을 쓰는지는 OBS-023 이후로도 확인하지 않았다. 근거 2건이 됐다.
+
+**(3) `api_error` 실패가 `TIMEOUT`으로 분류된다.**
+Diagnose는 `worker-result.json` 부재만 보고 원인을 구분하지 않는다. 그런데 원인은 이미
+envelope 안에 있다 — `adapter_meta.terminal_reason=api_error`. 실제 API 활동은 8분 7초였고
+(`duration_api_ms=486794`), 1800초 timeout과는 무관한 실패다.
+
+**[관측된 사실]** 서로 다른 두 실패(무응답 / provider 연결 불가)가 같은 분류·같은 재시도
+힌트를 받는다. OBS-015가 적은 "launch 실패가 TIMEOUT 분류를 물려받는다"와 **같은 성질이며,
+`TIMEOUT` 분류가 세 번째 원인까지 흡수한 사례다.**
+
+**[가능한 개선 · 미구현]** Diagnose가 `adapter_meta.terminal_reason`을 읽으면 `TIMEOUT`과
+`PROVIDER_ERROR`를 구분할 수 있다. 구분되면 재시도 힌트의 내용이 달라진다 —
+provider 연결 실패에 "작업을 더 작게 쪼개라"는 힌트는 도움이 되지 않는다.
+또한 사람이 `stdout.log`를 열어야만 진짜 원인을 알 수 있는 현재 상태도 개선된다
+(`loopctl status`는 `worker: failed (TIMEOUT)`만 보여준다).
+
+**Status:** `OBSERVED` · 근거 4건 (TASK-038 · 048 · 052 · 060)
+
 ---
 
 ## OBS-024 — 살아 있는 Worker가 STALE로 표시된다 (heartbeat가 Worker 단계에서 갱신되지 않는다)

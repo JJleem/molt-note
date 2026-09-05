@@ -549,3 +549,137 @@ Task가 아니라 **운영자의 실행**이다.
 **네 항목이 전부 PASS가 되기 전까지 Phase 3를 "end-to-end 전사가 검증됐다"고 적지 않는다.**
 실행이 끝난 뒤 `docs/SYSTEM-MAP.md`를 갱신하는 것은 **Phase가 최종 DONE이 된 뒤 운영자의
 일이다** (`CLAUDE.local.md`) — 이 문서를 만든 Task는 SYSTEM-MAP을 건드리지 않았다.
+
+---
+
+# 부록 — 실제 실행 결과 (2026-09-05)
+
+**위 §10의 `NOT RUN` 표는 이 문서를 쓴 시점(Phase 3)의 상태다. 지우지 않는다.**
+아래는 그 이후 **운영자가 실제로 실행한 결과**이며, `A-TRANS-001`에 대한 첫 실측 답이다.
+
+## 실행 조건
+
+```text
+실행 날짜        2026-09-05
+실행자           운영자 (사람이 직접 녹음 · 실행)
+기기             Apple M5 · 물리 10코어
+오디오           capture-1788522158.wav
+                 48 kHz · 모노 · 16-bit PCM · 400 MB · 1시간 12분 51초
+                 한국어 대화 (3인 · 실제 회의)
+```
+
+## 결과 1 — 제품 경로는 **FAIL**했다
+
+앱(`npm run tauri dev`)으로 실행한 전사는 **사용 불가능한 결과**를 냈다.
+
+```text
+관측된 language     en          ← 한국어 음성인데 영어
+소요                약 26분
+segment             1,711
+고유 문장            59  (3.4%)
+한글이 나온 줄        0
+최다 반복            1,063회 (62.1%)  But I was like, "What are you doing?"
+상위 2문장           86.7%
+```
+
+00:28:10 ~ 00:56:55 약 30분간 같은 문장 하나만 출력됐다. 전사가 아니라 디코딩 붕괴다.
+
+**원인 (코드에서 확인됨).** `src-tauri/src/transcription/whisper.rs`는 언어를 설정하지 않는다
+(`set_language` · `set_detect_language` 모두 호출 없음). whisper.cpp 기본값은 자동 감지가
+아니다:
+
+```c
+// whisper.cpp/src/whisper.cpp:5943 — whisper_full_default_params
+/*.language        =*/ "en",
+/*.detect_language =*/ false,
+```
+
+그러므로 DB에 남은 `language = en`은 **감지 결과가 아니라 아무도 바꾸지 않은 기본값**이다.
+
+반복 방지 장치는 정상이었다 — whisper.cpp 기본값에 `no_context = true`,
+`temperature_inc = 0.2`, `entropy_thold = 2.4`, `logprob_thold = -1.0`이 모두 켜져 있다.
+붕괴는 디코더 설정 문제가 아니라 **틀린 언어를 강제한 결과**다.
+
+## 결과 2 — 조건을 바꾸면 **PASS**한다
+
+같은 오디오를 저장소 밖의 검증용 도구로 다시 전사했다
+(제품 코드를 고치지 않고 조건만 바꿔 원인을 분리하기 위해서다).
+
+```text
+변경 1   params.set_language(Some("ko"))
+변경 2   whisper-rs features = ["metal"]        (Spec §14.4가 이미 적어 둔 것)
+변경 3   120초 청크 분할 + 청크마다 state 재생성 + 연속 반복 3회 초과 차단
+모델     ggml-large-v3-turbo.bin (1.5 GB)
+```
+
+```text
+소요                6.0분        (72.85분 오디오 · 실시간의 약 12배)
+segment             1,749
+고유 문장            1,643 (94.0%)
+최다 반복            10회
+한글 출력            정상
+```
+
+**세 변경의 기여도 (부분 실측):**
+
+| 조건 | 모델 | 소요 | 결과 |
+| --- | --- | --- | --- |
+| 언어 미설정 (제품 현재) | base | 약 26분 | 영어 붕괴 · 고유 3.4% |
+| `ko` + Metal | base | **1.3분** | 한국어 · 다만 반복 27% 잔존 |
+| `ko` + Metal | large-v3-turbo | 6.1분 | 한국어 · 반복 구간 2곳 잔존 |
+| `ko` + Metal + 청크분할 | large-v3-turbo | **6.0분** | 한국어 · 고유 94% |
+
+## 결과 3 — Metal 실측 (Spec §14.4의 미검증 항목)
+
+```text
+Metal 미사용 (제품 현재)   build.rs가 GGML_METAL=OFF를 명시 · CPU + Accelerate만
+Metal 사용                 GPU name: Apple M5 · use gpu = 1 · backends = 3
+base 모델 72분 전사        26분 → 1.3분
+```
+
+**[관측된 사실]** 위 26분은 **붕괴한 디코딩의 소요 시간**이므로 순수 Metal 효과로 읽으면
+안 된다. 언어 수정과 Metal 활성화가 함께 적용된 값이다. **두 요인을 분리한 측정은 하지
+않았다.**
+
+## 결과 4 — 모델 크기 (PRODUCT-SPEC:838의 UNVERIFIED 항목)
+
+Spec은 "한국어+영어 혼용 1시간 녹음에 `large-v3` / `large-v3-turbo`가 현실적"이라고 적고
+**UNVERIFIED · Phase 3에서 실측한다**고 표시했다. 그 실측 결과다.
+
+```text
+ggml-base (142 MB)            한국어는 나오지만 구어체에서 자주 무너진다
+                              (언어 수정 후에도 반복 27% 잔존)
+ggml-large-v3-turbo (1.5 GB)  실사용 가능한 품질. 72분에 6분.
+```
+
+**결론: `base`는 한국어 대화에 부족하다. `large-v3-turbo`는 충분하다.**
+이것으로 Spec:838의 추론이 **이 기기·이 오디오에 한해 확인됐다.**
+
+## 결과 5 — 무음 구간의 환각
+
+`00:57 ~ 01:08` 약 10분(화자들이 자리를 비운 구간)에서 whisper가 학습 데이터의 잔재를
+출력했다 — `한글자막 by 한효정`, `고추장은 너무 맛있게 잘 먹었습니다`,
+`모종 입력을 제거합니다` 등.
+
+청크 분할과 반복 차단으로 양은 크게 줄었으나 **완전히 사라지지 않았다.**
+VAD(음성 구간 검출)는 이번 실행에 포함하지 않았다. **[미검증 · 다음 후보]**
+
+## §10 표에 대한 답
+
+| 항목 | 결과 |
+| --- | --- |
+| 실행 날짜 | 2026-09-05 |
+| 사용한 모델 파일 | `ggml-base.bin` · `ggml-large-v3-turbo.bin` |
+| 오디오 | `capture-1788522158.wav` · 1:12:51 · 한국어 3인 대화 |
+| PASS-1 segments + timestamp가 보인다 | **PASS** |
+| PASS-2 engine = `whisper-rs/0.16` · model = 지정한 파일 | **PASS** |
+| PASS-3 timestamp 자릿수 | **PASS** — centisecond (1/100초) |
+| PASS-4 재시작 후에도 남아 있다 | **PASS** — DB `transcripts` · `transcript_segments` 1,711행 |
+| 관측된 `language` 값 | **`en`** — 설정되지 않은 기본값이며 **결함이다** |
+
+**엔진 경로 자체는 동작한다 (PASS-1~4).** 그러나 **언어가 설정되지 않아 한국어 사용자에게는
+제품이 동작하지 않는다.** 이 결함의 수정은 `phase-prompt/05.6-transcription-correctness-and-reach.md`가
+맡는다.
+
+**`A-TRANS-001`은 이 실행으로 해소되지 않는다.** 제품 경로가 고쳐지고 사람이 다시 확인할
+때까지 열려 있다.
