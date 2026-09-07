@@ -1,0 +1,59 @@
+# 구현 결과를 ADR에 되적고, 사람이 판정할 실행 절차와 결과 칸을 준비한다 (문서 전용)
+# Runtime이 PLAN-20260907T074302Z 승인 시점에 생성했다 (proposal P6). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-091
+status: DONE
+
+request: |-
+  문서만 바꾸는 Task다 — 소스 · 설정 · 의존성 · 테스트를 건드리지 않는다. 둘을 한다. (1) `docs/ADR-0007-transcription-engine.md`에 **구현 결과 절을 덧붙인다**(§19가 §17에 대해 한 것과 같은 형태다): P1이 정한 규칙이 실제로 어디에 구현됐는가(순수 모듈의 경로 · `whisper.rs`가 그것을 부르는 자리) · 계획과 달라진 것과 그 이유(특히 `whisper-rs` 0.16의 실제 API가 P1의 서술과 달랐다면 그 사실을 여기 되적는다) · 자동 테스트가 무엇을 판정하고 무엇을 판정하지 **못하는가**(모델도 오디오도 없으므로 고유 문장 비율은 판정하지 못한다) · `A-TRANS-001`이 이 Phase 뒤에 어떤 상태인가(여전히 사람의 실행으로만 닫힌다). 기존 절을 지우거나 다시 쓰지 않는다. (2) `docs/PHASE-3-TRANSCRIPTION-SMOKE-TEST.md`에 **새 부록을 덧붙여** 사람이 이 Phase의 성공 기준 1을 판정하는 절차와 빈 결과 칸을 만든다: 대상은 `capture-1788522158.wav`(1:12:51 · -25.8 dBFS)이며 조건은 제품 경로(`npm run tauri dev`) · 언어 `ko` · 모델 `ggml-large-v3-turbo.bin`으로 2026-09-05 실험과 같게 맞춘다 · 재는 값은 §부록2-3이 이미 정한 것과 **같은 방법**(총 segment 수 · n · u · u/n · r · r/n · 최다 반복 문장 · 소요 시간)이어야 하고 새 계산법을 만들지 않는다 · 비교 기준선은 9/5의 고유 94.0% · 6.0분과 9/5 제품 경로의 3.4%다 · Human Review 항목(한국어로 읽히는가 · 청크 경계에서 시각이 되감기지 않는가 · 문장이 잘리거나 중복되지 않는가 · 소요 시간이 6.0분과 크게 다르지 않은가)을 사람이 답할 칸으로 둔다 · `capture-1788746454.wav`는 **목표 수치를 세우지 않고 관측만 기록하는 칸**으로 따로 둔다. 결과 칸은 전부 `[미측정]`으로 두고 **추정으로 채우지 않는다** — §부록2-4가 세운 선례 그대로이며, 이 Task가 절차를 적었다는 사실이 측정이 수행됐다는 뜻이 아님을 명시한다. 원본 오디오는 읽기 전용이며 이 절차에 원본을 쓰기로 여는 단계가 없다는 것도 적는다(INV-1).
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-089
+  - TASK-090
+
+stop_condition:
+  gates: []
+  requires_verifier: true
+  max_consecutive_failures: 2
+
+acceptance_criteria:
+  - id: P6-AC1
+    description: |-
+      ADR-0007의 구현 결과 절이 실제 저장소 상태와 일치한다 — 적힌 모듈 경로와 호출 자리가 실재하고, P1의 규칙과 다르게 구현된 부분이 있으면 그 차이와 이유가 적혀 있다.
+    verification:
+      type: verifier
+      instruction: |-
+        문서가 가리키는 파일과 함수를 실제로 열어 존재와 역할을 대조한다.
+  - id: P6-AC2
+    description: |-
+      자동 검증이 판정하지 못하는 것(고유 문장 비율 · 한국어 가독성 · 소요 시간 · 청크 경계의 자연스러움)이 명시되어 있고, 구현이 들어왔다는 사실이 성공 기준 1이 충족됐다는 뜻으로 읽히지 않는다.
+    verification:
+      type: verifier
+  - id: P6-AC3
+    description: |-
+      smoke test 문서의 새 부록이 대상 파일 · 조건 · 측정 방법 · 기준선 · Human Review 항목을 담고 있고, 측정 방법이 §부록2-3이 이미 정한 것과 같다. 결과 칸은 전부 `[미측정]`이며 추정값이 들어가 있지 않다.
+    verification:
+      type: verifier
+  - id: P6-AC4
+    description: |-
+      `capture-1788746454.wav`가 목표 수치 없이 관측 전용 칸으로 분리되어 있다.
+    verification:
+      type: verifier
+  - id: P6-AC5
+    description: |-
+      기존 문서 기록이 보존됐다 — 두 문서 모두 새 절/부록을 덧붙이는 형태이며, P5의 정정을 포함해 앞선 기록이 지워지지 않았다.
+    verification:
+      type: verifier
+  - id: P6-AC6
+    description: |-
+      문서 전용이다 — 소스 · 설정 · 의존성 · 테스트가 이 Task에서 바뀌지 않았다.
+    verification:
+      type: verifier
+
+evidence: []
+
+failure_memo: []

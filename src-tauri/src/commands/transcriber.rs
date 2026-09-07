@@ -37,9 +37,12 @@ use tauri::Manager;
 use crate::db::{self, settings};
 use crate::domain::{Failure, FailureKind, RecordingId};
 use crate::platform::app_data_dir::AppDataDirectory;
-use crate::transcription::{run, ModelChoice, TranscriptionEngine, WhisperEngine};
+use crate::transcription::{
+    milliseconds_from_centiseconds, run, LanguageChoice, ModelChoice, Progress,
+    TranscriptionEngine, WhisperEngine,
+};
 
-use super::payload::TranscriptionStatusPayload;
+use super::payload::{PartialLinePayload, TranscriptionStatusPayload};
 
 /// 전사 한 건이 있을 수 있는 상태. **네 가지가 전부다.**
 ///
@@ -79,6 +82,11 @@ pub struct Transcriber {
     app_data_dir: Result<AppDataDirectory, Failure>,
     /// 지금 상태 한 값. 배경 스레드와 공유한다.
     state: Arc<Mutex<TranscriptionState>>,
+    /// 도는 동안 나온 문장을 담아 두는 자리 (`transcription::progress`).
+    ///
+    /// **엔진과 같은 자리를 가리킨다.** 실제 엔진만 조각 단위로 돌므로 보고하는 것도
+    /// 그 구현뿐이고, test double을 넣으면 이 값은 비어 있는 채로 정상 동작한다.
+    progress: Progress,
 }
 
 impl Transcriber {
@@ -88,10 +96,13 @@ impl Transcriber {
         R: tauri::Runtime,
         M: Manager<R>,
     {
+        let progress = Progress::new();
+
         Self {
-            engine: Arc::new(WhisperEngine::new()),
+            engine: Arc::new(WhisperEngine::new().reporting_to(progress.clone())),
             app_data_dir: AppDataDirectory::from_manager(manager).map_err(Into::into),
             state: Arc::new(Mutex::new(TranscriptionState::Idle)),
+            progress,
         }
     }
 
@@ -107,6 +118,7 @@ impl Transcriber {
             engine: Arc::new(engine),
             app_data_dir: Ok(app_data_dir),
             state: Arc::new(Mutex::new(TranscriptionState::Idle)),
+            progress: Progress::new(),
         }
     }
 
@@ -148,7 +160,12 @@ impl Transcriber {
         drop(state);
 
         self.spawn(recording_id.to_string(), app_data_dir);
-        Ok(TranscriptionStatusPayload::running(recording_id))
+        // 접수 시점에는 아직 아무것도 나오지 않았다. 미리보기는 비어 있고 진행률은 **모른다**.
+        Ok(TranscriptionStatusPayload::running(
+            recording_id,
+            Vec::new(),
+            None,
+        ))
     }
 
     /// 지금 전사가 어떤 상태인지.
@@ -159,7 +176,13 @@ impl Transcriber {
         Ok(match &*self.state()? {
             TranscriptionState::Idle => TranscriptionStatusPayload::idle(),
             TranscriptionState::Running { recording_id } => {
-                TranscriptionStatusPayload::running(recording_id)
+                // **도는 동안에만 미리보기를 낸다.** 끝난 뒤의 값은 Transcript가 말한다.
+                let snapshot = self.progress.snapshot();
+                TranscriptionStatusPayload::running(
+                    recording_id,
+                    preview_lines(&snapshot),
+                    snapshot.fraction(),
+                )
             }
             TranscriptionState::Done {
                 recording_id,
@@ -219,15 +242,22 @@ impl Transcriber {
 /// 목록 조회 같은 다른 command가 함께 멈춘다. 같은 DB 파일에 대한 두 번째 연결이므로
 /// 쓰기가 겹칠 수 있고, 그때 즉시 실패하지 않고 기다리는 것은 [`crate::db::open`]이 정한다.
 ///
-/// ## 어떤 모델을 쓸지는 **전사를 시작할 때 설정에서 읽는다** (ADR-0007 §8.2 · TASK-029)
+/// ## 어떤 모델을 쓸지 · 무슨 언어로 들을지는 **전사를 시작할 때 설정에서 읽는다**
+/// (ADR-0007 §8.2 · §17.1.4 · TASK-029 · TASK-068)
 ///
-/// 앱을 켤 때 한 번 읽어 들고 있지 않는 이유는 하나다 — 사용자가 설정에서 모델을 고른 뒤
-/// 앱을 다시 시작해야 한다면, 고친 값이 반영되지 않는 구간이 생긴다.
+/// 앱을 켤 때 한 번 읽어 들고 있지 않는 이유는 하나다 — 사용자가 설정에서 모델이나 언어를
+/// 고른 뒤 앱을 다시 시작해야 한다면, 고친 값이 반영되지 않는 구간이 생긴다.
 ///
-/// 읽은 값을 여기서 파일 하나로 해석하지는 않는다. **경로를 짓는 자리는 여전히
-/// [`crate::transcription::model`] 하나이며** (INV-10), 이 함수는 설정 값과 모델 디렉터리를
-/// [`ModelChoice`]로 묶어 넘기기만 한다. 고른 모델이 없는 상태는 조용한 skip이 아니라
-/// §13의 정의된 실패(`transcriptionModelMissing`)로 화면에 도달한다.
+/// **두 값은 같은 자리에서 한 번에 읽는다.** 설정을 두 번 읽으면 그 사이에 저장된 값이
+/// 반쪽만 반영된 전사가 나올 수 있다.
+///
+/// 읽은 값을 여기서 해석하지는 않는다. **경로를 짓는 자리는 여전히
+/// [`crate::transcription::model`] 하나이고** (INV-10) **언어를 실제 엔진 호출로 옮기는 자리는
+/// [`crate::transcription::whisper`] 하나이며** (§17.1.4-4), 이 함수는 설정 값을
+/// [`ModelChoice`]와 [`LanguageChoice`]로 묶어 넘기기만 한다. 고른 모델이 없는 상태는 조용한
+/// skip이 아니라 §13의 정의된 실패(`transcriptionModelMissing`)로 화면에 도달한다.
+/// **고른 언어가 없는 상태는 실패가 아니라 [`LanguageChoice::Detect`]다** — 고르지 않음은
+/// 영어가 아니라 자동 감지다 (§17.1.4-1).
 ///
 /// 전사의 순서와 영속화 규칙은 여기에 없다 — 그것을 아는 자리는
 /// [`crate::transcription::run`] 하나다.
@@ -238,7 +268,9 @@ fn transcribe_one(
 ) -> Result<run::Completed, Failure> {
     let mut connection = db::open_in(app_data_dir)?;
     let models_dir = app_data_dir.models_dir();
-    let configured = settings::load(&connection)?.transcription_model;
+    let settings = settings::load(&connection)?;
+    let language = LanguageChoice::from_setting(settings.transcription_language.as_deref());
+    let configured = settings.transcription_model;
 
     run::transcribe(
         &mut connection,
@@ -248,6 +280,7 @@ fn transcribe_one(
             models_dir: &models_dir,
             configured: configured.as_deref(),
         },
+        &language,
     )
 }
 
@@ -270,4 +303,21 @@ fn already_running(running: &str, requested: &str) -> Failure {
     };
 
     failure.with_detail(format!("runningRecordingId={running}"))
+}
+
+/// 미리보기 줄을 화면이 쓰는 단위로 옮긴다.
+///
+/// **변환 계수를 여기서 정하지 않는다** — `parse`가 가진 것 하나를 그대로 부른다
+/// (ADR-0007 §10). 넘치는 시각은 조용히 뺀다: 틀린 시각을 보여 주지 않는다.
+fn preview_lines(snapshot: &crate::transcription::ProgressSnapshot) -> Vec<PartialLinePayload> {
+    snapshot
+        .lines
+        .iter()
+        .filter_map(|line| {
+            Some(PartialLinePayload {
+                start_ms: milliseconds_from_centiseconds(line.start_centiseconds)?,
+                text: line.text.clone(),
+            })
+        })
+        .collect()
 }

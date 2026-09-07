@@ -1,0 +1,56 @@
+# 전사가 설정된 언어를 실제로 쓴다 — 영어 강제를 없앤다
+# Runtime이 PLAN-20260905T201413Z 승인 시점에 생성했다 (proposal P3). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-068
+status: DONE
+
+request: |-
+  이 Phase의 첫 번째 성공 기준을 실행 경로에 반영한다. **어떤 언어로 전사할 것인가가 엔진 경계에 값으로 도달해야 한다** — `src-tauri/src/transcription/whisper.rs` 안에서 설정을 읽지 않는다(그 파일은 §13이 정한 교체 지점 하나이며 저장소도 설정도 알지 않는다). 순서는 이렇다: `src-tauri/src/commands/transcriber.rs`가 전사를 시작할 때 이미 `settings::load`로 모델 값을 읽고 있으므로 언어 값도 같은 자리에서 읽어, `transcription::run::transcribe`를 지나 `TranscriptionEngine`의 입력으로 넘어간다(`ModelChoice`처럼 값을 받아 넘기기만 하는 형태든, 전사 입력 타입에 실어 보내든 좋다 — 어느 쪽이든 `whisper.rs`가 스스로 정책을 정하지 않아야 한다). `whisper.rs`는 받은 값에 따라 `FullParams`에 `set_language`와 `set_detect_language`를 실제로 부른다: 고른 언어가 있으면 그 언어를 지정하고, 고르지 않았으면 감지를 켜서 whisper.cpp의 기본값 `"en"`이 더 이상 조용히 쓰이지 않게 한다. 두 함수의 정확한 시그니처는 `whisper-rs` 0.16의 실제 API에서 확인한다 — 문서를 짐작해 쓰지 않으며, 틀리면 Rust Gate가 컴파일 실패로 드러낸다. `set_translate(false)`는 그대로 둔다(번역이 아니라 전사다). `Transcript.language`는 **여전히 엔진이 보고한 값**이다 — 설정 값을 결과에 베껴 넣지 않고, 엔진이 말하지 못하면 지어내지 않는다(`parse::normalize`의 규약 그대로). `src-tauri/src/transcription/testing.rs`의 test double이 넘어온 언어 선택을 관측할 수 있어야 하며, '고르지 않음이면 감지, 고르면 지정'이 실제 whisper 없이 판정되는 단위 테스트로 고정돼야 한다. 모듈 문서와 주석은 이 파일들의 기존 밀도를 따라 갱신한다 — 특히 `whisper.rs` 상단의 파라미터 설명이 실제와 어긋난 채 남지 않게 한다.
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-067
+
+stop_condition:
+  gates: [build, lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 2
+
+acceptance_criteria:
+  - id: AC1
+    description: |-
+      `npm run lint`가 통과한다(clippy가 `whisper-rs` API 사용을 실제로 컴파일한다).
+    verification:
+      type: gate
+      ref: lint
+  - id: AC2
+    description: |-
+      `npm run test`가 통과한다.
+    verification:
+      type: gate
+      ref: test
+  - id: AC3
+    description: |-
+      `npm run build`가 통과한다.
+    verification:
+      type: gate
+      ref: build
+  - id: AC4
+    description: |-
+      언어 선택이 엔진 경계에 값으로 도달하며, test double이 그것을 관측하는 테스트가 있다 — 고르지 않았을 때는 감지, 골랐을 때는 그 언어 지정으로 갈린다.
+    verification:
+      type: verifier
+      instruction: |-
+        테스트가 실제 whisper 없이 그 갈림을 판정하는지, 그리고 `whisper.rs`가 설정이나 저장소를 직접 읽지 않는지 확인한다.
+  - id: AC5
+    description: |-
+      `whisper.rs`가 `set_language`와 `set_detect_language`를 실제로 부르고, `Transcript.language`는 여전히 엔진이 보고한 값이다(설정 값을 결과로 베껴 넣지 않는다). `set_translate(false)`가 유지된다.
+    verification:
+      type: verifier
+
+evidence: []
+
+failure_memo: []

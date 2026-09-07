@@ -2401,9 +2401,43 @@ EXEC-20260904T034150Z-TASK-045                 이후 정상 DONE — 오탐이�
 EXEC-20260904T055314Z-TASK-050                 이후 정상 DONE
 ```
 
+### 추가 근거 3 — stale 주장이 1407초까지 자랐고, 그 Worker는 29분 뒤 통과했다 (2026-09-07)
+
+**Plan / Task / Execution:** PLAN-20260905T201413Z · TASK-073 ·
+EXEC-20260907T055932Z-TASK-073
+
+앞의 두 건은 512초 / 9분대였다. 이번에는 stale 주장이 **1407초(23분)** 까지 자랐고,
+`stage`는 여전히 `starting`이었다.
+
+```text
+ACTIVE EXECUTION
+  TASK-073   STALE
+    no heartbeat for 1407s (limit 300s)   stage: starting
+    the runtime stopped updating this marker; `loopctl execute TASK-073` will reclaim it
+```
+
+같은 시각 `ps`는 Worker와 Plan 루프가 **둘 다 살아 있음**을 보여줬다.
+
+```text
+PID 63994  2:59PM  0:30.50  claude --print ... RUN-20260907T055932Z-TASK-073
+PID 49225  2:39PM           loopctl execute-plan PLAN-20260905T201413Z
+```
+
+**그 Worker는 총 29분 16초 만에 attempt 1로 DONE했다** (Gate PASS · Verifier PASS).
+회수했다면 29분과 그 비용을 버렸을 것이다.
+
+**[관측된 사실]** stale 주장의 크기는 Worker의 건강과 무관했다. 1407초는 300초 한계의
+4.7배지만 그 실행은 정상이었다. **경과 시간을 신뢰도로 읽을 수 없다** — 오래된 stale일수록
+진짜일 것 같지만, 이 근거는 그 반대를 보여준다. Worker 단계가 길수록 stale 숫자가 커질
+뿐이다.
+
+**Impact 재평가: 근거 3건.** 위 "Possible Runtime improvement"의 두 번째 항목
+(**기록된 `pid`로 프로세스 생존을 확인한 뒤 STALE을 말한다**)이 세 건 모두를 해소한다 —
+세 번 다 marker에 pid가 있었고, 세 번 다 그 pid가 살아 있었고, 세 번 다 이후 DONE했다.
+
 ### Status
 
-`OBSERVED`
+`OBSERVED` (근거 3건 · 오탐률 3/3)
 
 ---
 
@@ -2638,6 +2672,205 @@ OBS-026 (이 항목)     api_error(429 rate limit)가 PROCESS_CRASH로 분류됐
 
 `OBSERVED` — 분류기 개선 후보. OBS-015 · OBS-023과 묶어 **하나의 원인**으로 볼 수 있다:
 **Runtime이 Worker 실패의 원인을 구분하지 않고 결과 파일의 부재만 본다.**
+
+### 추가 증거 — 같은 날 Phase 5.6에서 재현 (2026-09-06 · 2건째)
+
+**약 4시간 뒤 같은 일이 다시 일어났고, 이번에는 실제 작업이 폐기됐다.**
+
+```text
+Task            TASK-068 (전사가 설정된 언어를 실제로 쓴다 — 이 Phase의 핵심 Task)
+Attempt 1       RUN-20260906T011604Z · 2분 44초 · num_turns=26 · $1.8659  ← 작업 중이었다
+                api_error_status=429 "You've hit your session limit · resets 2:50pm"
+Attempt 2       RUN-20260906T011849Z · 1.3초 · num_turns=1 · $0.00
+                같은 429
+[Diagnose]      PROCESS_CRASH -> RETRY  (2회)
+TASK-068        STALLED (REPEATED_IDENTICAL_FAILURE) · attempts=2 · 2m46s
+Plan Result     STALLED · Plan 전체 정지
+```
+
+**첫 사례(TASK-065)와 다른 점이 하나 있고, 그것이 더 나쁘다.**
+
+TASK-065는 첫 턴에 429를 받아 잃은 것이 없었다. TASK-068은 **26턴 동안 실제로 일하다가
+중간에 한도에 걸렸다.** 그 시점까지의 $1.87과 2분 44초는 회수되지 않았고, 곧바로 이어진
+attempt 2가 **1.3초 만에 같은 429로 죽으면서 재시도 예산을 마저 태웠다.**
+
+즉 429가 온 뒤의 즉시 재시도는 **도움이 되지 않을 뿐 아니라, 남은 한 번의 기회를 없앤다.**
+
+**[관측된 사실]** 두 사례 모두 `api_error_status=429`이고 메시지에 리셋 시각이 들어 있었다
+(`4:50am` · `2:50pm`). 두 번 모두 Runtime은 그 값을 쓰지 않았다.
+
+**복구는 첫 사례와 동일했다** — 사람이 `stdout.log`를 열어 429를 확인하고, 리셋 시각을
+기다리고, `transition TASK-068 TODO` 후 재실행. 트리에는 attempt 1의 산출물이 남지 않아
+(아직 탐색 단계였다) 이어받을 것도 없었다.
+
+**Impact 재평가: Medium-High -> High.** 하루 안에 2건이고, 두 번째는 Plan의 **핵심 Task**를
+멈췄으며 실제 작업 비용을 잃었다. 무인 실행이었다면 Plan은 여기서 끝났을 것이다.
+
+### 전체 집계 — 2026-09-06 하루 (5건)
+
+Phase 5.6을 하루에 걸쳐 실행하면서 **같은 일이 다섯 번** 일어났다. 표로 남긴다.
+
+| Task | Attempt 1 | Attempt 2 | 리셋 시각 | 잃은 작업 |
+| --- | --- | --- | --- | --- |
+| TASK-065 | 0.5초 · 1턴 · $0 | 0.5초 · 1턴 · $0 | 4:50am | 없음 |
+| TASK-068 | 2분44초 · 26턴 · **$1.87** | 1.3초 · 1턴 · $0 | 2:50pm | **26턴** |
+| TASK-069 | 5분 · 39턴 · **$2.84** | 1초 · 1턴 · $0 | 7:50pm | **39턴** |
+| TASK-071 | — · 1턴 · $0 | — · 1턴 · $0 | 12:50am | 없음 |
+| TASK-072 | 16초 · 1턴 · $0 | — · 1턴 · $0 | 5:50am | 없음 |
+
+**리셋 간격은 약 5시간이다** (`4:50am → 2:50pm → 7:50pm → 12:50am → 5:50am`).
+한 세션 창에서 이 프로젝트의 Task는 **1~2개**가 한계였다.
+
+**다섯 번 모두 동일한 형태다.**
+
+```text
+Attempt 1   실제로 일하다가(또는 첫 턴에) 429
+Attempt 2   1초 내외에 같은 429          ← 재시도 예산만 소모
+Diagnose    PROCESS_CRASH -> RETRY (2회)
+결과        STALLED (REPEATED_IDENTICAL_FAILURE) · Plan 전체 정지
+복구        사람이 stdout.log 확인 -> 리셋 대기 -> transition TODO -> execute-plan
+```
+
+**두 번(TASK-068 · 069)은 진행 중이던 작업을 잃었다.** 합계 65턴 · $4.71.
+그 시도들은 산출물을 트리에 남기지 못한 채 죽었고, attempt 2가 즉시 실패하면서
+재시도 기회도 함께 사라졌다.
+
+**[관측된 사실]** 429 응답에는 매번 리셋 시각이 문자열로 들어 있었다. Runtime은 다섯 번 모두
+그 값을 쓰지 않고 즉시 재시도했다.
+
+### 추가 근거 6 — 같은 429가 **Verifier 단계**에서 났고, 결과가 달랐다 (2026-09-07)
+
+**Plan / Task / Run:** PLAN-20260907T032843Z · TASK-077 ·
+RUN-20260907T035331Z-TASK-077
+
+**Execution:** EXEC-20260907T035331Z-TASK-077 (→ EXEC-20260907T040953Z-TASK-077로 대체됨)
+
+**Runtime stage:** Verifier → Diagnose
+
+앞의 다섯 건은 전부 Worker 단계였다. 이번에는 **Worker가 성공하고 Gate까지 통과한 뒤**
+Verifier가 429로 죽었다.
+
+```text
+worker    REVIEW  (성공 · 36턴 · $2.91)
+gate      PASS    (build · lint · test)
+verifier  FAIL    8.6초 · api_error_status 429
+                  "You've hit your session limit · resets 3:50pm (Asia/Seoul)"
+diagnose  PROCESS_CRASH -> NEEDS_HUMAN
+stop      NEEDS_HUMAN
+```
+
+**Worker 단계와 달라진 점 세 가지.**
+
+| | Worker 단계 (근거 1~5) | Verifier 단계 (이번) |
+| --- | --- | --- |
+| 재시도 | 2회 즉시 소모 → STALLED | **재시도 없음** → 곧바로 NEEDS_HUMAN |
+| 잃은 것 | 진행 중이던 작업 (2건에서 65턴 · $4.71) | **없음** — Worker 산출물은 트리에 있고 Gate도 통과한 상태로 남았다 |
+| 복구 | `transition TODO` → `execute-plan` | `verify --rerun` |
+
+**Diagnose가 이번에는 정확한 안내를 냈다.**
+
+```text
+"The verifier process exited with code 1, so the implementation was never judged.
+ Re-run `loopctl verify --rerun` rather than re-running the worker."
+```
+
+`diagnosis.json`이 subject 일치도 함께 기록했다 (`bound_to == current == bc5d7661…`,
+`matches: true`). 사람은 이 두 가지 덕에 **Worker를 다시 돌리지 않아도 된다**는 것을 바로 알
+수 있었다. 리셋 후 `verify --rerun` 한 번(66.8초 · $2.25)에 PASS했고, Runtime은 그것을
+`EXEC-20260907T040953Z-TASK-077`로 기록하면서 이전 execution을 그대로 보존했다.
+
+**[관측된 사실]** 이 분류(`PROCESS_CRASH`)는 Worker 단계에서는 재시도 예산을 태웠고,
+Verifier 단계에서는 태우지 않았다. **같은 원인(429)이 어느 단계에서 나느냐에 따라 피해가
+다르다.** 429를 별도 분류로 다루자는 개선 후보는 Worker 단계에서 이득이 크고, Verifier
+단계에서는 "사람을 부르지 않고 리셋 시각까지 기다렸다가 `verify`를 다시 돌린다" 쪽이 이득이다.
+
+**[미확정]** Gate 단계에서 429가 나는 경우는 아직 관측되지 않았다. Gate는 LLM을 부르지
+않으므로 이 경로가 존재하는지 자체가 확인되지 않았다 — 없다고 단정하지 않는다.
+
+**Impact 재평가: High -> High (근거 6건 · 확정적 · 3개 단계 중 2개에서 관측).**
+Field-Test Principle의 `관찰 -> 반복 근거 -> 개선 후보` 단계에서, 이 항목은
+**반복 근거가 충분히 쌓였다.** 개선 후보는 위 "Possible Runtime improvement"에 있으며,
+이번 근거는 거기에 **단계별로 다른 처리가 필요하다**는 조건을 하나 더한다.
+
+---
+
+## OBS-027 — 중단된 Task를 되살리는 데 매번 사람의 `transition`이 필요하다 (하루 6회)
+
+**Date:** 2026-09-06 ~ 2026-09-07
+
+**Project phase / Goal:** Molt Note Phase 5.5 · 5.6
+
+**Runtime stage:** 복구 경로 전체
+
+### What happened
+
+**OBS-020이 기록한 경로를 하루에 여섯 번 반복했다.**
+
+| Task | 중단 원인 | `execute <TASK>` 결과 | 최종 복구 |
+| --- | --- | --- | --- |
+| TASK-060 | 전날 api_error | `RECOVERY_AMBIGUOUS` | `transition TODO` |
+| TASK-065 | 429 | (STALLED에서 바로) | `transition TODO` |
+| TASK-068 | 429 · harness kill | `RECOVERY_AMBIGUOUS` | `transition TODO` |
+| TASK-069 | harness kill · 429 | `RECOVERY_AMBIGUOUS` | `transition TODO` |
+| TASK-071 | 429 | (STALLED에서 바로) | `transition TODO` |
+| TASK-072 | 429 | (STALLED에서 바로) | `transition TODO` |
+
+**여섯 번 모두 최종 해법이 같았다 — `loopctl transition <TASK> TODO`.**
+
+`execute <TASK>`는 stale 마커를 회수하지만, 그 다음에 **반드시** 두 메시지 중 하나로 멈췄다.
+
+```text
+"TASK-069 is IN_PROGRESS but has no completed worker run;
+ the runtime cannot tell whether a worker is still executing."
+
+"Worker process exited with code 1. The working tree has changed since this
+ attempt, so a retry would be layered onto unrelated changes."
+```
+
+### Expected
+
+**두 판단 모두 옳다.** Runtime은 모르는 것을 모른다고 말했고, fail-closed했다.
+이 항목은 **오판의 기록이 아니라 반복 비용의 기록이다.**
+
+문제는 **결론이 매번 같다는 것**이다. 여섯 번 모두 사람이 한 일은 동일했고,
+그 일은 판단이 아니라 절차였다.
+
+**[관측된 사실]** `execute <TASK>`가 안내한 회수 경로(`... will reclaim it`)는
+**한 번도 단독으로 복구를 끝내지 못했다.** 항상 `transition`이 뒤따라야 했다.
+
+**[가능한 개선 · 미검증]** 산출물이 없는 중단(worker run 0건 · 트리 변경 없음)은
+`transition TODO`와 동등하다. 그 경우를 Runtime이 스스로 판정할 수 있다면
+여섯 번의 사람 개입 중 최소 세 번(TASK-065 · 071 · 072 — attempt가 첫 턴에 죽어
+산출물이 전혀 없던 경우)은 사라진다.
+
+**다만 나머지 세 번(060 · 068 · 069)은 자동화하면 안 된다.** 트리가 바뀌었거나
+Worker가 실제로 일하다 죽은 경우이며, 그때의 fail-closed는 이 Runtime의 가치다.
+
+### Current workaround
+
+```bash
+loopctl transition <TASK> TODO
+loopctl execute-plan <PLAN>
+```
+
+### Impact
+
+**Medium.** 한 번의 비용은 작지만(명령 2개) **무인 실행을 불가능하게 만든다.**
+오늘 Phase 5.6은 사람이 여섯 번 개입해서 6/10까지 왔다.
+
+### Evidence
+
+```text
+EXEC-20260906T060428Z-TASK-068   RECOVERY_AMBIGUOUS · attempts=1 · 0s · LLM 0
+EXEC-20260906T061516Z-TASK-069   RECOVERY_AMBIGUOUS · attempts=0 · 0s · LLM 0
+EXEC-20260905T152808Z-TASK-060   RECOVERY_AMBIGUOUS · attempts=1 · 0s · LLM 0
+   세 Execution 모두 LLM 호출 0 · 비용 $0 — 회수 시도 자체는 싸다. 비용은 사람의 시간이다.
+```
+
+### Status
+
+`OBSERVED` — OBS-020의 재현. 근거 6건. 개선 후보는 **산출물 없는 중단에 한정**한다.
+
 
 ---
 

@@ -35,8 +35,8 @@ use molt_note_lib::domain::{
 };
 use molt_note_lib::platform::app_data_dir::AppDataDirectory;
 use molt_note_lib::transcription::{
-    engine_failed, ensure_usable, ModelFile, RawSegment, RawTranscription, TranscriptionEngine,
-    TranscriptionInput,
+    engine_failed, ensure_usable, LanguageChoice, ModelFile, RawSegment, RawTranscription,
+    TranscriptionEngine, TranscriptionInput,
 };
 
 /// 모델 디렉터리에 두는 자리표시자 파일의 이름. 실제 모델이 아니다.
@@ -134,6 +134,7 @@ impl TranscriptionEngine for GatedEngine {
         &self,
         input: &TranscriptionInput,
         model: &ModelFile,
+        _language: &LanguageChoice,
     ) -> Result<RawTranscription, Failure> {
         self.inner
             .calls

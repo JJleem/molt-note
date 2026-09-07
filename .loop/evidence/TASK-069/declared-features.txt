@@ -1,0 +1,64 @@
+TASK-069 — crate가 **선언한 feature 목록**을 cargo의 기록에서 읽는다
+작업 디렉터리: /Users/molt/orca/projects/molt-note
+관측 시각: 2026-09-06 (이 Run)
+
+ADR-0007 §17.2.2가 1번으로 요구한 것 —
+  "`Cargo.toml`을 고치기 전에 `whisper-rs` 0.16.0의 `[features]`를 직접 읽는다"
+— 은 이 Task의 앞선 Worker 실행이 **읽지 못했다**고 기록했다
+(`metal-feature-verification.md` §1: registry source 접근 차단 · 네트워크 없음 · cargo metadata 불가).
+
+그 세 경로는 이 Run에서도 여전히 막혀 있다. 확인한 것은 **네 번째 경로**다:
+cargo가 컴파일할 때 fingerprint에 남기는 `declared_features` 필드는
+**cargo가 그 crate의 manifest를 파싱해 얻은 feature 표 그대로**다.
+이 파일들은 이 저장소의 `src-tauri/target/` 안에 있으므로 읽을 수 있었다.
+
+주의: 이것은 crate의 `Cargo.toml` 파일 자체를 연 것이 아니라,
+**cargo가 그 파일을 읽고 기록한 결과**를 연 것이다. 이 구분은 §3.2에서 유지한다.
+
+--------------------------------------------------------------------------------
+1) whisper-rs 0.16.0  (metal을 켠 뒤의 fingerprint)
+   $ cat src-tauri/target/debug/.fingerprint/whisper-rs-2c6df6183aa4345e/lib-whisper_rs.json
+--------------------------------------------------------------------------------
+{"rustc":10088478398040096810,"features":"[\"_gpu\", \"default\", \"metal\"]","declared_features":"[\"_gpu\", \"coreml\", \"cuda\", \"default\", \"hipblas\", \"intel-sycl\", \"log_backend\", \"metal\", \"openblas\", \"openmp\", \"raw-api\", \"test-with-tiny-model\", \"tracing_backend\", \"vulkan\"]","target":12777960116553310662,"profile":5347358027863023418,"path":17025834823338480432,"deps":[[15739308555537015869,"whisper_rs_sys",false,5697998308971598596],[17063029396349771805,"build_script_build",false,17655507063271179712]],"local":[{"CheckDepInfo":{"dep_info":"debug/.fingerprint/whisper-rs-2c6df6183aa4345e/dep-lib-whisper_rs","checksum":false}}],"rustflags":[],"config":8247474407144887393,"compile_kind":0}
+
+   읽기 쉽게 편 것:
+
+   declared_features (whisper-rs 0.16.0):
+     _gpu · coreml · cuda · default · hipblas · intel-sycl · log_backend ·
+     metal · openblas · openmp · raw-api · test-with-tiny-model · tracing_backend · vulkan
+
+   features (실제로 켜진 것):
+     _gpu · default · metal
+
+--------------------------------------------------------------------------------
+2) whisper-rs-sys 0.15.0  (metal을 켠 뒤의 fingerprint)
+   $ cat src-tauri/target/debug/.fingerprint/whisper-rs-sys-7f1b7ef590cc7566/lib-whisper_rs_sys.json
+--------------------------------------------------------------------------------
+{"rustc":10088478398040096810,"features":"[\"metal\"]","declared_features":"[\"coreml\", \"cuda\", \"force-debug\", \"hipblas\", \"intel-sycl\", \"metal\", \"openblas\", \"openmp\", \"vulkan\"]","target":2074273459174730754,"profile":8276155916380437441,"path":5513652484880735914,"deps":[[15739308555537015869,"build_script_build",false,14301788892543897628]],"local":[{"CheckDepInfo":{"dep_info":"debug/.fingerprint/whisper-rs-sys-7f1b7ef590cc7566/dep-lib-whisper_rs_sys","checksum":false}}],"rustflags":[],"config":8247474407144887393,"compile_kind":0}
+
+   declared_features (whisper-rs-sys 0.15.0):
+     coreml · cuda · force-debug · hipblas · intel-sycl · metal · openblas · openmp · vulkan
+
+   features (실제로 켜진 것):
+     metal
+
+--------------------------------------------------------------------------------
+3) 이 목록에서 직접 읽히는 것
+--------------------------------------------------------------------------------
+- `metal` 은 두 crate 모두에 **선언된 feature 이름이다.** 철자가 정확히 이것이다.
+- Metal 을 켜는 이름 후보는 이 목록에 **하나뿐이다** — `metal` 말고 Metal 관련 이름이 없다.
+  (ADR-0007 §17.2.2가 "유일한/최선의 이름인지 확인하지 않았다"로 남겼던 자리가 좁혀졌다.)
+- `coreml` · `openmp` 는 **별개의 선언된 feature**이며 이 Task 는 켜지 않았다.
+  Task 가 "하나씩 확인한다"고 적은 그것이다. 켜진 목록에 없다 (§1 · §2의 `features` 필드).
+- `whisper-rs` 의 `metal` 이 `_gpu` 를 함께 켠다 — 우리가 준 이름은 하나인데
+  켜진 집합에 `_gpu` 가 있다. `_gpu` 도 선언된 feature 목록 안에 있다.
+- `whisper-rs-sys` 에 `metal` 로 전파됐다 (§2의 `features`:["metal"]).
+
+--------------------------------------------------------------------------------
+4) 이 파일이 말하지 않는 것
+--------------------------------------------------------------------------------
+- 각 feature 가 **무엇을 하는지**는 말하지 않는다. 이름 목록일 뿐이다.
+  `metal` 이 실제로 무엇을 바꾸는지는 빌드 산출물로 판정했다
+  (`metal-feature-verification.md` §2.3~§2.7 — GGML_METAL:BOOL=ON · libggml-metal.a · 링크 지시).
+- 런타임에 GPU 가 실제로 쓰이는지는 말하지 않는다. 이 Task 는 추론을 돌리지 않았다.
+- 속도에 대해 아무 말도 하지 않는다. 측정하지 않았다.

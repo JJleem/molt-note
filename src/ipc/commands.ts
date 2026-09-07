@@ -1,7 +1,7 @@
 /**
  * 프론트엔드가 부를 수 있는 동작의 전부.
  *
- * `src-tauri/src/lib.rs`가 등록한 서른한 개 command와 1:1이며, 그 밖의 경로는 없다 —
+ * `src-tauri/src/lib.rs`가 등록한 서른두 개 command와 1:1이며, 그 밖의 경로는 없다 —
  * **임의의 질의를 보낼 수단이 없다.** 저장소를 아는 코드는 Rust 안에만 있고, Notion으로
  * 나가는 요청을 만드는 코드도 마찬가지다 — webview에는 그 통로가 없다
  * (`docs/ADR-0001-local-persistence.md` · `docs/ADR-0009-notion-and-export.md` §5 ·
@@ -24,7 +24,9 @@ import type {
   AiNote,
   AiNoteStatus,
   AiProviderStatus,
+  ExportedAiRequest,
   ExportedFile,
+  HandoffText,
   InputDevice,
   MissingAudio,
   NewRecording,
@@ -51,7 +53,9 @@ export type {
   AiProviderState,
   AiProviderStatus,
   CaptureReport,
+  ExportedAiRequest,
   ExportedFile,
+  HandoffText,
   InputDevice,
   MeetingNote,
   MissingAudio,
@@ -64,6 +68,7 @@ export type {
   NotionSendStatus,
   NotionSync,
   NotionTokenStatus,
+  PortionOf,
   ProcessingStatus,
   Recording,
   SessionState,
@@ -73,6 +78,7 @@ export type {
   StructuredNote,
   StudyNote,
   SummaryNote,
+  TextSize,
   Transcript,
   TranscriptSegment,
   TranscriptionState,
@@ -369,9 +375,21 @@ export function exportMarkdown(recordingId: string): Promise<ExportedFile> {
  *
  * 아직 전사 내용이 없는 녹음이면 실패한다 — 본문 없는 프롬프트를 만드는 대신 무엇이 필요한지
  * 말한다 (§13). 어떤 실패에서도 녹음 · 전사 · 노트 · 이미 내보낸 파일은 그대로다 (INV-3 · MH-7).
+ *
+ * **이름이 늘지 않았다. 넓어졌을 뿐이다** (`phase-prompt/05.6` 성공 기준 4 · ADR-0010 §8.1의
+ * "사용자 동작 하나에 이름 하나"). 늘어난 것은 인자 하나(`portion` — 가져갈 조각)와 돌아오는
+ * 값의 모양이다: 문자열 대신 {@link HandoffText}가 오며, 거기에는 **산출물 전체의 크기**와
+ * **이 조각이 몇 번째 중 몇 번째인가**가 함께 실려 있다. 그래서 화면은 크기를 짐작하지 않고,
+ * 잘린 것을 온전한 것이라고 말할 수단도 없다.
+ *
+ * `portion`은 **1부터** 센다. 없는 조각을 달라고 하면 빈 텍스트가 아니라 실패가 온다.
  */
-export function getAiPrompt(recordingId: string, mode: NoteMode): Promise<string> {
-  return call<string>('get_ai_prompt', { recordingId, mode });
+export function getAiPrompt(
+  recordingId: string,
+  mode: NoteMode,
+  portion: number,
+): Promise<HandoffText> {
+  return call<HandoffText>('get_ai_prompt', { recordingId, mode, portion });
 }
 
 /**
@@ -383,9 +401,12 @@ export function getAiPrompt(recordingId: string, mode: NoteMode): Promise<string
  *
  * `mode`를 보내지 않는다 — 같은 전사에서 언제나 같은 문자열이 온다. current Transcript만
  * 쓴다는 것도 {@link getAiPrompt}와 같다 (MH-5).
+ *
+ * 크기와 나눔도 {@link getAiPrompt}와 **같은 규칙**이다 — 72분 녹음에서 가장 큰 산출물이
+ * 이것이며, 여기서만 크기를 말하지 않으면 사용자는 같은 자리에서 다시 조용히 실패한다 (R-5).
  */
-export function getTranscriptText(recordingId: string): Promise<string> {
-  return call<string>('get_transcript_text', { recordingId });
+export function getTranscriptText(recordingId: string, portion: number): Promise<HandoffText> {
+  return call<HandoffText>('get_transcript_text', { recordingId, portion });
 }
 
 /**
@@ -401,9 +422,43 @@ export function getTranscriptText(recordingId: string): Promise<string> {
  *
  * **clipboard를 전혀 쓰지 않는다.** 복사가 거절되는 환경에서도 이 길은 그대로 남는다
  * (ADR-0010 §7.5) — 사용자는 만들어진 파일을 자기 AI 채팅에 첨부하거나 열어서 복사한다.
+ *
+ * **문서가 예산을 넘으면 조각마다 파일 하나다** (`phase-prompt/05.6` 성공 기준 4). 한 번 부르면
+ * 조각 하나가 파일이 되고, 돌아오는 값이 그것이 몇 번째인가를 말한다 ({@link ExportedAiRequest}).
+ * 네 조각짜리 문서는 네 번 불러 네 파일이 되며, **그중 어느 것도 앞서 쓴 파일을 덮어쓰지
+ * 않는다** — 파일 이름이 조각의 자리를 함께 말한다 (`…-ai-request-part-2-of-4.md`).
  */
-export function exportAiRequest(recordingId: string, mode: NoteMode): Promise<ExportedFile> {
-  return call<ExportedFile>('export_ai_request', { recordingId, mode });
+export function exportAiRequest(
+  recordingId: string,
+  mode: NoteMode,
+  portion: number,
+): Promise<ExportedAiRequest> {
+  return call<ExportedAiRequest>('export_ai_request', { recordingId, mode, portion });
+}
+
+/**
+ * 이미 만들어진 파일이 **놓인 자리를 연다** (`phase-prompt/05.6` 성공 기준 2 · R-4).
+ *
+ * **파일을 만들지도 고치지도 지우지도 않는다.** 그래서 export 표면은 여전히 파일 하나를 만드는
+ * 이름 둘이며 ({@link exportMarkdown} · {@link exportAiRequest}), 이 이름이 여는 것은 그 둘이
+ * 이미 만들어 둔 파일이다.
+ *
+ * 경로를 글자로 보여 주는 것은 그대로다 — **이것은 그 대체가 아니라 추가다.** macOS에서
+ * `~/Library`는 Finder 기본 숨김이라 경로를 알아도 걸어 들어갈 수 없다는 것이 2026-09-05의
+ * 실사용에서 드러났고, 그래서 여는 수단이 화면에 함께 있다.
+ *
+ * **이 함수로 아무 경로나 열 수 없다.** 무엇을 열어도 되는지 정하는 것은 backend이며, 열리는
+ * 것은 그 앱이 자기 `exports/` 아래에 있다고 확인한 파일뿐이다 — 그 밖의 경로는 거절되고 그
+ * 사실이 {@link Failure}로 온다 (`src-tauri/src/commands/saved_file.rs` · PRODUCT-SPEC §12).
+ * 저장된 녹음의 재생에서 열리는 자리를 backend가 정하는 것과 같은 규약이다
+ * ({@link recordingAudioSource}).
+ *
+ * **어느 OS에서 무엇을 부르는지 화면은 알지 않는다** (INV-10). 그 지식은 backend의 platform
+ * 경계 하나에 있고, 열 수 없는 시스템에서는 조용히 아무 일도 하지 않는 대신 그 사실이 §13의
+ * 실패로 온다. 어떤 실패에서도 파일은 그 자리에 그대로 있다 (INV-3).
+ */
+export function showSavedFile(path: string): Promise<void> {
+  return call<void>('show_saved_file', { path });
 }
 
 /**

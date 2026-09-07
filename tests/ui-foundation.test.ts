@@ -72,6 +72,7 @@ import {
   startedAiExport,
   type AiExportAttempt,
 } from '../src/screens/aiHandoffView';
+import { NO_SHOW_FILE_ATTEMPT } from '../src/screens/savedFileView';
 
 const path = (relative: string) => fileURLToPath(new URL(relative, import.meta.url));
 const read = (relative: string) => readFileSync(path(relative), 'utf8');
@@ -660,7 +661,13 @@ describe('상태는 언제나 문장으로 온다 — 색은 거들 뿐이다 (�
   it('녹음 화면의 상태 네 갈래와 "아직 모른다"에 전부 문장이 있다', () => {
     for (const state of SESSION_STATES) {
       const display = sessionDisplay(
-        observedSession(INITIAL_RECORDING, { state, elapsedMs: 7000, elapsedLabel: '0:07' }),
+        // 입력 레벨은 이 검사의 대상이 아니다 — 재지 않은 상태(`null`)로 둔다.
+        observedSession(INITIAL_RECORDING, {
+          state,
+          elapsedMs: 7000,
+          elapsedLabel: '0:07',
+          level: null,
+        }),
       );
 
       expectSpeaksInWords(`session ${state}`, display);
@@ -693,10 +700,17 @@ describe('상태는 언제나 문장으로 온다 — 색은 거들 뿐이다 (�
   it('복사 자리의 여섯 갈래에 전부 문장이 있다', () => {
     const attempts: readonly CopyAttempt[] = [
       NO_COPY_ATTEMPT,
-      startedCopy('prompt', RECORDING.id),
-      copiedText('prompt', RECORDING.id),
-      failedCopy('prompt', RECORDING.id, FAILURE),
-      failedCopy('prompt', RECORDING.id, CLIPBOARD_FAILURE),
+      startedCopy('prompt', RECORDING.id, 1),
+      copiedText('prompt', RECORDING.id, {
+        recordingId: RECORDING.id,
+        text: '## Transcript\n00:00:03 안녕하세요.\n',
+        totalSize: { bytes: 96, chars: 32, lines: 2 },
+        portion: 1,
+        portionCount: 1,
+        portionSize: { bytes: 96, chars: 32, lines: 2 },
+      }),
+      failedCopy('prompt', RECORDING.id, 1, FAILURE),
+      failedCopy('prompt', RECORDING.id, 1, CLIPBOARD_FAILURE),
     ];
 
     const bodies = [
@@ -725,27 +739,38 @@ describe('상태는 언제나 문장으로 온다 — 색은 거들 뿐이다 (�
   it('Export for AI 자리의 여섯 갈래에 전부 문장이 있다', () => {
     const attempts: readonly AiExportAttempt[] = [
       NO_AI_EXPORT_ATTEMPT,
-      startedAiExport(RECORDING.id, 'meeting'),
+      startedAiExport(RECORDING.id, 'meeting', 1),
       exportedAiRequest({
-        recordingId: RECORDING.id,
-        path: '/data/exports/weekly-sync.md',
-        fileName: 'weekly-sync.md',
+        file: {
+          recordingId: RECORDING.id,
+          path: '/data/exports/weekly-sync.md',
+          fileName: 'weekly-sync.md',
+        },
+        totalSize: { bytes: 7_200, chars: 2_400, lines: 61 },
+        portion: 1,
+        portionCount: 1,
+        portionSize: { bytes: 7_200, chars: 2_400, lines: 61 },
       }),
-      failedAiExport(RECORDING.id, FAILURE),
+      failedAiExport(RECORDING.id, 1, FAILURE),
     ];
 
+    // `show`는 **만들어진 파일이 놓인 자리를 여는 시도**다 (`phase-prompt/05.6` 성공 기준 2).
+    // 여기서는 아직 아무것도 열지 않은 값을 준다 — 이 검사가 보는 것은 여섯 갈래 각각에
+    // 문장이 있는가이지, 여는 수단의 상태가 아니다.
     const bodies = [
       manualHandoff({
         recording: null,
         mode: 'meeting',
         copy: NO_COPY_ATTEMPT,
         aiExport: NO_AI_EXPORT_ATTEMPT,
+        show: NO_SHOW_FILE_ATTEMPT,
       }).aiExport.body,
       manualHandoff({
         recording: RECORDING_WITHOUT_TRANSCRIPT,
         mode: 'meeting',
         copy: NO_COPY_ATTEMPT,
         aiExport: NO_AI_EXPORT_ATTEMPT,
+        show: NO_SHOW_FILE_ATTEMPT,
       }).aiExport.body,
       ...attempts.map(
         (aiExport) =>
@@ -754,6 +779,7 @@ describe('상태는 언제나 문장으로 온다 — 색은 거들 뿐이다 (�
             mode: 'meeting',
             copy: NO_COPY_ATTEMPT,
             aiExport,
+            show: NO_SHOW_FILE_ATTEMPT,
           }).aiExport.body,
       ),
     ];

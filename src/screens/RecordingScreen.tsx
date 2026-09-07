@@ -15,6 +15,8 @@ import {
   failedAction,
   failedDevices,
   failedSession,
+  inputLevelDisplay,
+  inputLevelWarning,
   microphoneLabel,
   microphoneNotice,
   observedDevices,
@@ -178,6 +180,8 @@ export function RecordingScreen({ navigate }: ScreenProps) {
 
   const controls = recordingControls(view);
   const display = sessionDisplay(view);
+  const level = inputLevelDisplay(view);
+  const levelWarning = inputLevelWarning(view);
   const notice = microphoneNotice(view.microphone);
   const deviceFailure = view.microphone.kind === 'unknown' ? view.microphone.failure : null;
 
@@ -205,7 +209,22 @@ export function RecordingScreen({ navigate }: ScreenProps) {
           {display.stateText}
         </p>
         <p className="recording__elapsed">{display.elapsedLabel}</p>
+
+        {/* 입력 레벨은 상태와 경과 시간 **아래**에 작게 온다 (§19) — 그 둘이 여전히 이
+            화면에서 가장 크고 분명하다. 문장도 갈래도 backend가 만든 것 그대로이며,
+            무엇을 보일지 정하는 규칙은 `inputLevelDisplay`에 있다. */}
+        {level.shown && (
+          <p className={`recording__level recording__level--${level.kind}`}>{level.text}</p>
+        )}
       </section>
+
+      {/* 쓸 수 없을 만큼 낮으면 **정지 전에** 알린다 (ADR-0003 §16.1). 이것은 실패가 아니므로
+          FailureNotice가 아니고, 녹음을 막지도 않는다 — 사람이 정한다 (§16.5). */}
+      {levelWarning !== null && (
+        <p className="recording__level-warning" role="status" aria-live="polite">
+          {levelWarning}
+        </p>
+      )}
 
       {/* 주 조작 넷이 이 화면에서 상태 다음으로 크다 (§19 · 요구 10). 지금 누를 수 있는
           것과 없는 것은 `disabled`가 가르고, 흐림으로 눈에도 갈린다 (요구 12). 어느 것을

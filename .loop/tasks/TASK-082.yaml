@@ -1,0 +1,54 @@
+# 녹음 화면이 레벨을 보여 주고 낮으면 알린다
+# Runtime이 PLAN-20260907T032843Z 승인 시점에 생성했다 (proposal P7). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-082
+status: DONE
+
+request: |-
+  P6이 내보내는 값을 사람이 보는 자리까지 잇는다. (1) `src/ipc/types.ts`의 `SessionStatus`에 레벨 필드를 계약으로 더한다 — Rust가 보내는 것과 이름과 뜻이 같아야 한다. (2) `src/screens/recordingView.ts`(순수 모듈)에 표시 규칙을 둔다: 지금 레벨을 어떻게 보일 것인가, 그리고 **쓸 수 없을 만큼 낮을 때 녹음이 끝나기 전에 보이는 경고**를 어떤 문장으로 낼 것인가. 값이 아직 없을 때(null)와 '낮음'을 구분한다 — 모르는 것을 낮다고 말하지 않는다. 녹음 중이 아닐 때는 경고를 보이지 않는다. dBFS 계산이나 판정을 여기서 다시 하지 않는다(backend가 준 값을 그대로 쓴다 · `tests/screen-boundary.test.ts`). (3) `src/screens/RecordingScreen.tsx`는 그 상태를 그리기만 한다. §19대로 녹음 상태와 경과 시간이 여전히 가장 크고 분명하며, 레벨 표시가 그것을 밀어내지 않는다. (4) `src/screens/recordingView.test.ts`에 세 갈래(값 없음 · 낮음 · 쓸 만함)와 경고 문장, 그리고 녹음 중이 아닐 때 경고가 없다는 것을 고정한다. UI 리디자인은 하지 않는다 — Phase 5.5가 세운 기반 위에 최소로 얹는다.
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-081
+
+stop_condition:
+  gates: [build, lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 3
+
+acceptance_criteria:
+  - id: AC-1
+    description: |-
+      `npm run build`가 통과한다.
+    verification:
+      type: gate
+      ref: build
+  - id: AC-2
+    description: |-
+      `npm run lint`가 통과한다.
+    verification:
+      type: gate
+      ref: lint
+  - id: AC-3
+    description: |-
+      `npm run test`가 통과하고, 값 없음 · 낮음 · 쓸 만함 세 갈래와 경고 문장을 고정하는 새 vitest 케이스가 있으며 `tests/screen-boundary.test.ts`도 그대로 통과한다.
+    verification:
+      type: gate
+      ref: test
+  - id: AC-4
+    description: |-
+      녹음 중에 레벨이 화면에 보이고, 쓸 수 없을 만큼 낮으면 정지 전에 경고가 보인다. 표시 규칙은 `recordingView.ts`에 있고 컴포넌트는 그리기만 한다.
+    verification:
+      type: verifier
+  - id: AC-5
+    description: |-
+      화면 쪽에 dBFS 계산이나 판정 임계값이 없다 — backend가 준 값과 문장을 그대로 쓴다.
+    verification:
+      type: verifier
+
+evidence: []
+
+failure_memo: []

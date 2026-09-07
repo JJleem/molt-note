@@ -1,0 +1,424 @@
+diff --git a/docs/PHASE-3-TRANSCRIPTION-SMOKE-TEST.md b/docs/PHASE-3-TRANSCRIPTION-SMOKE-TEST.md
+index 2e53261..3b4c18c 100644
+--- a/docs/PHASE-3-TRANSCRIPTION-SMOKE-TEST.md
++++ b/docs/PHASE-3-TRANSCRIPTION-SMOKE-TEST.md
+@@ -683,3 +683,419 @@ VAD(음성 구간 검출)는 이번 실행에 포함하지 않았다. **[미검
+ 
+ **`A-TRANS-001`은 이 실행으로 해소되지 않는다.** 제품 경로가 고쳐지고 사람이 다시 확인할
+ 때까지 열려 있다.
++
++---
++
++# 부록 2 — 레벨을 올린 사본으로 다시 전사하는 절차와 결과 (2026-09-07)
++
++```text
++기록 일자:  2026-09-07
++기록 Task:  TASK-083 (문서 전용 — 제품 소스 · 설정 · 의존성 · 테스트를 바꾸지 않는다)
++Phase:      5.7 — Recording Level + Transcription Collapse (성공 기준 3)
++근거:       phase-prompt/05.7-recording-level-and-transcription-collapse.md R-2 · R-3
++            docs/ADR-0003-recording-engine.md §16.1 · docs/ADR-0007-transcription-engine.md §18.1
++Status:     절차는 적혔다 · **측정은 실행되지 않았다 ([미측정] — §부록2-5의 이유)**
++```
++
++> **위 §10의 표도, 2026-09-05 부록도 이 부록이 지우거나 다시 쓰지 않았다.**
++> 이것은 그 뒤에 덧붙인 세 번째 기록이며, 9/5 부록이 세운 선례를 그대로 따른다.
++
++> ⚠️ **이 부록이 절차를 적었다는 사실은 측정이 수행됐다는 뜻이 아니다.**
++> §부록2-4의 결과 칸이 `[미측정]`인 동안, "레벨을 올리면 이 오디오가 구제된다"고도
++> "구제되지 않는다"고도 적지 않는다.
++
++**이 부록은 `[관측된 사실]` · `[유력한 설명]` · `[미검증]` 을 구분해 적는다**
++(`05.7` §Preconditions의 표기를 그대로 쓴다). 그 구분을 지운 채 인용하지 않는다.
++
++## 부록2-0. 이 측정이 답하려는 질문 하나
++
++`05.7` R-3이 남긴 `[미검증]` 항목이다.
++
++```text
++이미 녹음된 capture-1788746454.wav 를 레벨만 올리면, 같은 제품 경로에서 전사가 되는가?
++```
++
++**이 질문이 묻지 않는 것:** 레벨이 붕괴의 *유일한* 원인인가. 이 실험은 한 파일에 한 조건을
++바꿔 한 번 재는 것이며, 어느 쪽 결과가 나와도 원인을 하나로 단정할 근거가 되지 않는다
++(§부록2-6).
++
++### 대상과 조건 [관측된 사실 · `05.7` R-2 · R-3]
++
++```text
++원본            capture-1788746454.wav
++                280 MB · WAV PCM · 16-bit · mono · 48,000 Hz · 50.99분
++                recording_id fe5f738c732bdae0810972a66d233ccb
++                평균 RMS 255.7 (-42.2 dBFS) · 전체 피크 3494 (-19.4 dBFS)
++                  ← 40구간 표본 측정값 (ADR-0003 §16.1)
++
++비교 대상        capture-1788522158.wav (9/4 녹음 · 전사가 성공한 파일)
++                평균 RMS 1685.5 (-25.8 dBFS) · 전체 피크 32767 (0.0 dBFS)
++                차이 16.4 dB (RMS 6.6배)
++```
++
++---
++
++## 부록2-1. 레벨을 올린 **사본**을 만든다 — 원본은 읽기만 한다 (INV-1)
++
++**규칙 세 개를 절차가 지킨다.**
++
++1. **원본은 `'rb'`로만 연다.** 원본 경로를 쓰기 모드로 여는 단계가 이 절차에 없다.
++2. **원본을 옮기지도 이름을 바꾸지도 않는다.** `mv` · `rm` · in-place 편집이 없다.
++3. **사본은 `recordings/` 밖에 놓는다.** 앱이 그 파일을 Recording으로 착각할 자리에 두지 않는다.
++
++쓰는 도구는 **macOS에 기본 포함된 `python3`의 표준 라이브러리(`wave` · `array` · `math`)**
++뿐이다. 새 의존성을 설치하지 않으며, 이것은 `ADR-0003 §16.1`의 레벨 측정이 이미 쓴 것과
++같은 도구다. **[미검증]** 아래 스크립트는 이 Run에서 실행해 보지 못했다 (§부록2-5).
++
++### 클리핑을 어떻게 피하는가 — 두 겹으로 막는다
++
++```text
++목표 이득    9/4 성공 녹음의 평균 RMS(-25.8 dBFS)에 맞춘다
++상한         올린 뒤의 **전체 피크가 -1 dBFS를 넘지 않는다**
++적용 이득    min(목표 이득, 상한 이득)      ← 둘 중 작은 쪽만 쓴다
++마지막 방어   샘플별 ±32767 클램프 + 클램프된 샘플 수를 세어 보고한다
++```
++
++**표본 값으로 미리 계산하면** 목표 이득은 `1685.5 / 255.7 ≈ 6.6배 (+16.4 dB)`이고, 그때
++피크는 `3494 × 6.6 ≈ 23,000 (-3.1 dBFS)`으로 상한 아래다. **실제로 쓰는 값은 스크립트가
++전체 파일을 훑어 다시 구한다** — 40구간 표본과 전 구간 측정은 다를 수 있고 [미검증],
++판단 근거는 표본이 아니라 전 구간 값이어야 한다.
++
++### 절차
++
++```bash
++APP_DATA="$HOME/Library/Application Support/com.moltnote.app"   # §4.1의 find로 확정한 값
++SRC="$APP_DATA/recordings/capture-1788746454.wav"
++DST="$HOME/molt-level-test/capture-1788746454-gain.wav"          # recordings/ 밖이다
++
++mkdir -p "$(dirname "$DST")"
++ls -l "$SRC"                       # 280 MB · 이 파일은 이 절차 내내 바뀌지 않는다
++shasum -a 256 "$SRC" | tee "$HOME/molt-level-test/original.sha256"
++```
++
++마지막 줄의 sha256은 **절차가 끝난 뒤 다시 찍어 같은 값인지 확인하기 위한 것**이다
++(§부록2-3의 마지막 단계).
++
++```bash
++python3 - "$SRC" "$DST" <<'PY'
++import array, math, os, sys, wave
++
++SRC, DST = sys.argv[1], sys.argv[2]
++TARGET_RMS_DBFS  = -25.8     # 9/4 성공 녹음의 평균 RMS (ADR-0003 §16.1)
++PEAK_CEILING_DBFS = -1.0     # 올린 뒤 피크가 이 위로 가지 않는다
++FULL_SCALE = 32768.0         # 16-bit 정수 PCM의 풀스케일 (ADR-0003 §16.1이 고정한 기준)
++
++# INV-1: 원본을 여는 유일한 자리이며 모드는 'rb'다. 아래 어디에도 SRC를 쓰는 코드가 없다.
++assert os.path.abspath(SRC) != os.path.abspath(DST), "사본 경로가 원본과 같다"
++assert "/recordings/" not in os.path.abspath(DST), "사본을 recordings/ 안에 두지 않는다"
++
++with wave.open(SRC, "rb") as w:
++    assert w.getsampwidth() == 2, "16-bit PCM이 아니다"
++    assert w.getnchannels() == 1, "mono가 아니다"
++    rate, frames = w.getframerate(), w.getnframes()
++    samples = array.array("h")
++    samples.frombytes(w.readframes(frames))
++if sys.byteorder == "big":
++    samples.byteswap()
++
++peak = max(max(samples), -min(samples))
++sumsq = 0
++for s in samples:                      # 147M 샘플 — 수 분 걸린다. 표본이 아니라 전 구간이다
++    sumsq += s * s
++rms = math.sqrt(sumsq / len(samples))
++
++gain_rms  = 10 ** (TARGET_RMS_DBFS  / 20) * FULL_SCALE / rms
++gain_peak = 10 ** (PEAK_CEILING_DBFS / 20) * FULL_SCALE / peak
++gain = min(gain_rms, gain_peak)        # 클리핑을 막는 것은 이 min 하나다
++
++clamped = 0
++out = array.array("h", bytes(2 * len(samples)))
++for i, s in enumerate(samples):
++    v = int(round(s * gain))
++    if v > 32767:
++        v, clamped = 32767, clamped + 1
++    elif v < -32768:
++        v, clamped = -32768, clamped + 1
++    out[i] = v
++if sys.byteorder == "big":
++    out.byteswap()
++
++with wave.open(DST, "wb") as w:        # 쓰기는 사본 경로 하나뿐이다
++    w.setnchannels(1)
++    w.setsampwidth(2)
++    w.setframerate(rate)
++    w.writeframes(out.tobytes())
++
++def dbfs(x):
++    return 20 * math.log10(x / FULL_SCALE) if x > 0 else float("-inf")
++
++print(f"원본        rate={rate} frames={frames} 길이={frames/rate/60:.2f}분")
++print(f"원본 레벨    RMS {rms:.1f} ({dbfs(rms):.1f} dBFS) · 피크 {peak} ({dbfs(peak):.1f} dBFS)")
++print(f"이득        목표 {gain_rms:.3f}x · 상한 {gain_peak:.3f}x · 적용 {gain:.3f}x "
++      f"({20*math.log10(gain):.1f} dB)")
++print(f"사본 예상    피크 {peak*gain:.0f} ({dbfs(peak*gain):.1f} dBFS) · 클램프된 샘플 {clamped}")
++print(f"사본        {DST}")
++PY
++```
++
++**보고서에서 확인할 것 두 가지.**
++
++- `클램프된 샘플 0` — 0이 아니면 클리핑이 일어났다. 그 사본으로 전사하지 않고
++  `PEAK_CEILING_DBFS`를 더 낮춰 다시 만든다.
++- `적용 이득`이 `상한`이 아니라 `목표` 쪽에서 왔는가 — 상한에 걸렸다면 9/4 수준까지
++  올리지 못했다는 뜻이며, 그 사실을 §부록2-4 표에 함께 적는다.
++
++### 사본을 형식 검사한다
++
++```bash
++afinfo "$DST"      # 16-bit little-endian signed integer · 1 ch · 약 3059초
++ls -l "$DST"       # 원본과 비슷한 280 MB 근처
++```
++
++`§5.1`의 조건(RIFF WAV · PCM 16-bit · mono)을 만족한다. 48 kHz는 그대로 두어도 된다 —
++앱이 16 kHz로 리샘플한다 [E1 · `src-tauri/src/transcription/audio_input.rs`].
++**원본과 같은 조건에서 레벨 하나만 다른 입력**이어야 비교가 성립하므로 리샘플하지 않는다.
++
++---
++
++## 부록2-2. 그 사본을 **제품 경로로** 전사한다 (§6.2 경로 B의 선례)
++
++전사 조건은 **2026-09-07 원본 실행과 같아야 한다**. 다른 것은 오디오 레벨 하나뿐이다.
++
++```text
++경로     제품 (npm run tauri dev)   — 저장소 밖의 검증용 도구가 아니다
++언어     ko                         (Settings의 Language 칸 [E1 · SettingsScreen.tsx])
++모델     ggml-large-v3-turbo.bin    (2026-09-07 원본 실행과 같은 파일)
++청크분할  없음                       (9/5 실험의 처방을 옮겨 오지 않는다 · `05.7` §하지 않는 것)
++```
++
++### 1) 설정 (Settings 화면)
++
++1. **Whisper model** 칸에 `ggml-large-v3-turbo.bin` — `<APP_DATA>/models/`에 있어야 한다
++   (없으면 §4의 절차로 놓는다. 절대 경로를 넣어도 된다 · §4.3).
++2. **Language** 칸에 `ko` — **비워 두지 않는다.** 빈 값은 자동 감지이며, 이 오디오에서
++   자동 감지는 확신도 0.478로 `en`을 골랐다 [관측된 사실 · `05.7` R-1].
++3. **Save** → `Saved.`
++
++### 2) 사본을 담을 **새 레코드**를 만든다 — 9/7 레코드를 건드리지 않는다
++
++§6.2 경로 B를 그대로 쓰되, **바꿔 넣는 대상은 방금 만든 버리는 레코드의 파일이다.**
++원본 `capture-1788746454.wav`와 그 레코드(`fe5f738c...`)는 이 절차에서 **읽지도 쓰지도
++않는다.**
++
++1. **Recording** 화면에서 **3~5초** 녹음하고 **Stop** — 새 레코드가 하나 생긴다.
++2. 그 레코드의 파일을 사본으로 바꾼다.
++
++```bash
++NEW=$(ls -t "$APP_DATA/recordings"/capture-*.wav | head -1)
++echo "$NEW"        # 방금 만든 레코드의 파일인지 눈으로 확인한다
++
++case "$NEW" in
++  *capture-1788746454.wav) echo "중단: 이것은 원본이다"; exit 1 ;;
++esac
++
++cp "$DST" "$NEW"   # 덮어쓰는 것은 방금 만든 버리는 레코드의 3초짜리 파일이다
++```
++
++- **전사를 시작하기 전에** 바꾼다.
++- 목록의 길이·크기가 3~5초로 보이는 것은 녹음 세션이 기록한 값이다. **실패가 아니다**
++  (§6.2의 주의와 같다).
++- 이것은 **운영자가 자기 fixture를 놓는 준비 작업**이며, INV-1이 금지하는 것은 *앱 코드가
++  원본을 덮어쓰는 것*이다 (§6.2). 그 원본은 이 절차에서 손대지 않는다.
++
++### 3) 전사를 시작하고 **시계로 시간을 잰다**
++
++1. 새 레코드의 상세 화면에서 **전사 시작**.
++2. 시작·종료 시각을 적는다. **소요 시간을 시계로 재는 이유:** 붕괴로 판정되면 Transcript가
++   저장되지 않아 `transcripts.transcription_ms`가 남지 않는다
++   [E1 · `src-tauri/src/transcription/run.rs` — 붕괴는 저장 **전에** 실패로 돌아간다].
++
++> **[관측된 사실 · E1]** 현재 작업 트리에는 붕괴 판정이 들어와 있다
++> (`src-tauri/src/transcription/collapse.rs` · `n >= 20` 이고 `u/n <= 0.20` 또는
++> `r/n >= 0.50`이면 붕괴). 그러므로 이번 실행은 **`done`이 아니라 실패로 끝날 수 있고,
++> 그것 자체가 정상 동작이다.** 두 경우의 측정 방법이 §부록2-3에 모두 적혀 있다.
++
++---
++
++## 부록2-3. 결과를 어떻게 재는가 — 9/5 · 9/7과 **같은 방법**이어야 한다
++
++재는 값은 네 개다. 문장을 세는 규칙은 `ADR-0007 §18.2`가 정한 그대로다 —
++**앞뒤 공백을 걷고 내부 연속 공백을 하나로 줄인 문자열이 문장이며, 빈 문자열은 세지 않는다.**
++
++```text
++총 segment 수        전사가 낸 segment의 개수
++고유 문장 u 와 u/n    서로 다른 문장의 개수와 그 비율 (n = 빈 문장을 뺀 문장 총 개수)
++최다 반복 점유율 r/n  가장 많이 나온 문장의 출현 횟수 r 을 n 으로 나눈 값
++소요 시간            transcripts.transcription_ms  또는  시계로 잰 값
++```
++
++### 경우 A — `done`으로 저장됐을 때 (DB에서 읽는다 · 읽기 전용으로 연다)
++
++```bash
++python3 - "$APP_DATA/molt-note.db" <<'PY'
++import collections, sqlite3, sys
++
++db = sqlite3.connect(f"file:{sys.argv[1]}?mode=ro", uri=True)   # 읽기 전용
++tid, lang, model, ms = db.execute(
++    "SELECT id, language, model, transcription_ms FROM transcripts "
++    "ORDER BY created_at DESC LIMIT 1").fetchone()
++rows = db.execute(
++    "SELECT text FROM transcript_segments WHERE transcript_id = ? ORDER BY ordinal",
++    (tid,)).fetchall()
++
++segments = len(rows)
++keys = [k for k in (" ".join(t.split()) for (t,) in rows) if k]   # ADR-0007 §18.2의 규칙
++n = len(keys)
++counter = collections.Counter(keys)
++u = len(counter)
++top, r = counter.most_common(1)[0] if counter else ("", 0)
++
++print(f"transcript   {tid} · language={lang} · model={model}")
++print(f"segment 총 개수 {segments}")
++print(f"문장 n        {n}")
++print(f"고유 문장 u    {u}  ({u / n * 100:.1f}%)" if n else "고유 문장 u    0")
++print(f"최다 반복      {r}회 ({r / n * 100:.1f}%)  {top!r}" if n else "최다 반복      0")
++print(f"소요          {ms / 60000:.2f}분" if ms is not None else "소요          (기록 없음)")
++PY
++```
++
++### 경우 B — 붕괴로 실패했을 때 (화면의 기술적 표현에서 읽는다)
++
++붕괴하면 Transcript가 저장되지 않으므로 경우 A의 질의에 새 행이 없다. 대신 실패에 붙는
++기술적 표현(detail)에 **판정을 재현할 수 있는 값이 전부 들어 있다**
++[E1 · `src-tauri/src/transcription/run.rs`의 `collapsed_output`].
++
++```text
++segments=… · n=… · u=… · uniqueRatio=… · r=… · topRepeatShare=… · Collapsed{…} · anomalies=…
++```
++
++이 줄의 `segments` · `n` · `u` · `uniqueRatio` · `r` · `topRepeatShare`를 그대로 표에
++옮긴다. **소요 시간은 이때 시계로 잰 값을 쓴다.**
++
++### 사본의 레벨도 함께 기록한다
++
++§부록2-1 스크립트의 보고서에서 `원본 레벨` · `적용 이득` · `사본 예상 피크`를 그대로 옮긴다.
++**표에 적히는 레벨 값이 어떤 방법으로 나온 것인지 함께 적는다** — ADR-0003 §16.1의 값은
++40구간 표본이고 이 스크립트의 값은 전 구간이라 **두 값은 다를 수 있다 [미검증]**.
++
++### 마지막 — 원본이 그대로인지 확인한다 (INV-1)
++
++```bash
++shasum -a 256 "$SRC"
++diff <(shasum -a 256 "$SRC" | cut -d' ' -f1) \
++     <(cut -d' ' -f1 "$HOME/molt-level-test/original.sha256")   # 차이가 없어야 한다
++```
++
++**해시가 달라졌다면 절차 어딘가가 원본을 건드린 것이다.** 그 실행의 결과를 쓰지 않고
++무엇이 원본을 썼는지 먼저 찾는다.
++
++---
++
++## 부록2-4. 결과 — **[미측정]**
++
++**아래 표의 오른쪽 열은 이 Task가 채우지 못했다.** 왼쪽 열은 이미 기록된 실측값이고,
++오른쪽 열은 **추정으로 채우지 않는다** (§부록2-5의 이유).
++
++| 항목 | 2026-09-07 **원본** (제품 경로 · `ko` · `large-v3-turbo`) | 2026-09-07 **레벨 보정 사본** (같은 조건) |
++| --- | --- | --- |
++| 오디오 | `capture-1788746454.wav` · 50.99분 | `capture-1788746454-gain.wav` · 같은 길이 |
++| 적용 이득 | 없음 (원본) | **[미측정]** |
++| 평균 RMS | 255.7 (**-42.2 dBFS**) · 40구간 표본 | **[미측정]** |
++| 전체 피크 | 3494 (**-19.4 dBFS**) · 40구간 표본 | **[미측정]** |
++| 총 segment 수 | **103** | **[미측정]** |
++| 문장 n | **103** (원 기록이 비율의 분모로 쓴 값 · ADR-0007 §18.1) | **[미측정]** |
++| 고유 문장 u (u/n) | **2 (1.9%)** | **[미측정]** |
++| 최다 반복 r (r/n) | **102회 (99.0%)** — `한글자막 by 한효정` | **[미측정]** |
++| 소요 시간 | **4.30분** (실시간의 약 11.9배) | **[미측정]** |
++| 저장된 상태 | `done` (붕괴 판정이 들어오기 전의 실행이다) | **[미측정]** |
++| 사람의 판정 | **붕괴** | **[미측정]** |
++
++> 왼쪽 열의 출처: `phase-prompt/05.7` R-2 · R-3 (운영자 실사용 실측) ·
++> `docs/ADR-0007-transcription-engine.md` §18.1 · `docs/ADR-0003-recording-engine.md` §16.1.
++> `1.9%`와 `99.0%`는 그 기록들이 `2 / 103` · `102 / 103`으로 계산해 둔 값이다.
++
++---
++
++## 부록2-5. 왜 측정하지 못했는가 — 막은 것
++
++**[관측된 사실]** 이 Task(TASK-083)를 실행한 Run에 허용된 명령은
++`node tools/loop-runtime/loopctl.mjs self-check` 하나였다. 오디오 변환·앱 실행·전사를
++실행할 수단이 이 Run에 없었다.
++
++**[관측된 사실]** 저장소 밖 경로에 대한 접근이 거부됐다. `~/Library/Application Support/`
++아래를 나열하려는 시도는 승인 필요로 막혔다.
++
++```text
++$ ls -d "$HOME/Library/Application Support/"*molt*
++This Bash command contains multiple operations. The following parts require approval: …
++```
++
++**[관측된 사실]** 그러므로 이 Run은 **원본 WAV(280 MB)와 `ggml-large-v3-turbo.bin`이 지금
++이 기기에 있는지도 확인하지 못했다.** 있다고도 없다고도 적지 않는다.
++
++**[관측된 사실]** §부록2-2의 전사는 GUI 앱(`npm run tauri dev`)을 사람이 조작해야 한다.
++이 Run은 비대화형이며 앱을 띄우거나 화면을 조작할 수 없다.
++
++**[관측된 사실]** 시간은 막은 이유가 **아니다.** 원본 실행이 4.30분이었으므로 사본도
++그 정도가 예상되지만, 실행 수단 자체가 없어 시간이 문제가 될 자리에 닿지 못했다.
++
++**막지 않은 것:** 절차·측정 방법·비교표는 전부 이 Run에서 확정했다. 남은 것은 §부록2-1 →
++§부록2-3을 **사람이 한 번 실행해 오른쪽 열을 채우는 일**이다.
++
++---
++
++## 부록2-6. 결과를 읽을 때 — 레벨이 유일한 원인이라고 단정하지 않는다
++
++**[관측된 사실]** 같은 마이크로 만든 두 파일의 레벨이 16.4 dB 다르고, 낮은 쪽의 전사가
++고유 1.9%로 붕괴했다 (`05.7` R-3).
++
++**[유력한 설명]** 입력 레벨이 낮아 whisper가 음성을 찾지 못했고, 빈 자리를 학습 데이터의
++잔재로 채웠다. 붕괴가 무음 구간이 아니라 **전 구간**에서 일어났다는 것이 이 설명과 맞는다.
++
++**[미검증] — 이 한 번의 측정으로는 답이 나오지 않는 것들.**
++
++- **두 실행이 레벨만 다르지 않다.** 9/4 성공 실행은 `ko` + Metal + `large-v3-turbo` +
++  **청크 분할·state 재생성·반복 차단**이 함께 걸린 저장소 밖 도구였고, 9/7 실행은
++  청크 분할이 없는 제품 경로였다 (9/5 부록 결과 2 · `05.7` R-2). 두 파일은 회의·화자·
++  마이크 거리·방도 다르다. **비교 대상이 한 변수로 정리되어 있지 않다.**
++- **선형 이득은 SNR을 바꾸지 않는다.** 신호와 잡음을 같은 배수로 키운다. 붕괴가 신호 대
++  잡음비 때문이라면 이 사본은 구제되지 않으며, **그때에도 "레벨은 무관하다"는 결론은
++  나오지 않는다** — 절대 진폭이 원인인 경우와 구분되지 않기 때문이다.
++- **whisper.cpp가 입력을 자체적으로 정규화하는지 이 Run은 확인하지 않았다.** 확인되면 이
++  실험의 예상 결과가 달라진다. 확인 전에 예상을 결과처럼 적지 않는다.
++- **`05.7` R-1이 기록한 자동 감지 실패(확신도 0.478 → `en`)가 레벨과 관련 있는지도
++  확인되지 않았다.**
++
++**그러므로 결과가 어느 쪽이든 이렇게만 적는다.**
++
++```text
++구제된다      →  [관측된 사실] 이 파일은 이득 N배에서 고유 X%로 전사됐다.
++                 레벨이 이 실패에 기여했다는 것이 이 한 파일에서 확인됐다.
++                 유일한 원인인지는 여전히 [미검증]이다.
++
++구제되지 않는다 →  [관측된 사실] 이득 N배에서도 고유 X%였다.
++                 레벨만 올리는 것으로는 이 파일이 구제되지 않는다.
++                 레벨이 원인이 아니라는 뜻은 아니다 (선형 이득은 SNR을 바꾸지 않는다).
++```
++
++---
++
++## 부록2-7. 이 Task가 내리지 않는 결정 — 다음 후보
++
++**측정 결과에 따른 제품 결정은 이 Task가 하지 않는다.** `05.7`의 성공 기준 3이
++*"답이 '구제된다'면 제품이 그 처리를 할지는 그 측정 뒤에 정한다 — 측정 전에 정규화 기능을
++구현하지 않는다"* 라고 적은 그대로다. **이 Task는 제품 소스·설정·의존성·테스트를 바꾸지
++않았고, 정규화나 게인 조정을 제품에 넣지 않았다.**
++
++측정이 끝난 뒤 **사람이** 결정할 후보들이다.
++
++| 후보 | 무엇을 정하는 결정인가 | 지금 상태 |
++| --- | --- | --- |
++| 전사 입력에 정규화/게인을 넣는가 | 앱이 전사 직전에 레벨을 올려 넣을 것인가 | **측정 대기** — 이 부록의 오른쪽 열 |
++| 녹음 시점의 입력 게인을 앱이 조정하는가 | 녹음 엔진 경계의 문제다 (ADR-0003 §16) | `05.7` §하지 않는 것이 이미 보류했다 |
++| VAD(음성 구간 검출) | 무음 구간 환각을 줄인다 | 9/5 부록 결과 5의 **[미검증 · 다음 후보]** 그대로 |
++| 청크 분할 · state 재생성 · 반복 차단 | 9/5 실험이 효과를 본 세 가지의 제품 이식 | `05.7` §하지 않는 것 — **다음 Phase 후보** |
++| 자동 언어 감지 개선 | 확신도 0.478의 `en` 오판 | `05.7` §하지 않는 것 — 설정 경로가 열려 있다 |
++
++**`A-TRANS-001`은 이 부록으로도 해소되지 않는다.** 사람이 레벨을 올려 다시 녹음한 회의가
++읽을 만하게 전사되는 것을 볼 때까지 열려 있다 (`05.7` §Human Review).

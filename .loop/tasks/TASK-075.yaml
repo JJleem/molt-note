@@ -1,0 +1,54 @@
+# 문서 마무리 — 구현 결과 · 운영자 절차 · 시스템 맵
+# Runtime이 PLAN-20260905T201413Z 승인 시점에 생성했다 (proposal P10). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-075
+status: DONE
+
+request: |-
+  **문서만 바꾸는 Task다 — 소스 · 설정 · 의존성 · 테스트는 건드리지 않는다.** 다섯을 한다. (1) `docs/ADR-0007-transcription-engine.md`의 구현 결과 절(§16 계열)에 이번에 **실제로 만들어진 것**과 **계획과 달라진 것**을 적는다: 언어가 어디서 읽혀 어디까지 도달하는가, Metal이 켜졌는지와 그 판정 근거, 전사 소요 시간이 어디에 남는가. 측정하지 않은 성능 수치를 적지 않는다. §16.3.1의 A-TRANS-001이 이 Phase 뒤에 어떤 상태인지 — 여전히 사람의 실행으로만 닫히는 항목이라는 것 — 을 명시한다. (2) `docs/ADR-0009-notion-and-export.md`에 내보낸 파일의 자리를 여는 결정을 덧붙인다: 왜 경로를 보여 주는 것만으로 부족했는가(2026-09-05 관측), 무엇이 그 자리를 여는가, 왜 임의 경로가 아니라 앱의 exports 디렉터리 아래로 제한되는가. (3) `docs/ADR-0010-manual-ai-handoff.md`에 크기 결정을 덧붙인다: 실측(99 KB · 5,139줄 · 제목 1,711개), 앱이 고른 예산과 그것이 벤더 제약이 아니라는 것, 나눔 규칙, §11 export 형식은 바꾸지 않았다는 것. 세 문서 모두 **과거 기록을 지우지 않고** 언제 왜 바뀌었는지로 덧붙인다. (4) `docs/PHASE-5.6-HUMAN-REVIEW.md`를 새로 쓴다 — 이 저장소의 기존 smoke test · human review 문서와 같은 형태로, 사람이 다시 실행해 판정할 절차와 항목을 적는다: 한국어 회의가 읽을 만하게 전사되는가, `ggml-base`로 충분한가(A-TRANS-001의 실질적 답), Metal 전후로 체감이 달라지는가(기록된 전사 소요 시간을 비교하는 방법 포함), 내보낸 파일을 실제로 열 수 있는가, 긴 회의의 handoff를 실제로 AI 채팅에 넣을 수 있는가. **이들이 주관적 Human Review 항목이며 자동 Gate가 판정할 수 없다는 것**을 문서가 직접 말한다. (5) `docs/SYSTEM-MAP.md`를 갱신한다 — 이 Phase가 실제로 바꾼 것(전사 언어 경로 · Metal · 시간 기록 · 파일 도달 · handoff 크기)만 반영하고, Current / Planned / Deferred 구분과 이전 Phase가 세운 기록을 지우지 않는다. 아직 사람이 확인하지 않은 것을 구현 완료로 적지 않는다.
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-069
+  - TASK-074
+
+stop_condition:
+  gates: []
+  requires_verifier: true
+  max_consecutive_failures: 2
+
+acceptance_criteria:
+  - id: AC1
+    description: |-
+      ADR-0007 · ADR-0009 · ADR-0010에 이번 Phase의 결정과 구현 결과가 덧붙었고, 기존 문단이 삭제되지 않았다.
+    verification:
+      type: verifier
+      instruction: |-
+        변경 전후를 비교해 삭제된 절이 없는지, 덧붙은 내용이 실제 코드와 일치하는지 확인한다.
+  - id: AC2
+    description: |-
+      `docs/PHASE-5.6-HUMAN-REVIEW.md`가 존재하고, 사람이 실행할 절차와 판정 항목이 구체적으로 적혀 있으며, 그것이 자동 Gate로 판정되는 것이 아니라는 사실을 문서가 직접 말한다.
+    verification:
+      type: verifier
+  - id: AC3
+    description: |-
+      `docs/SYSTEM-MAP.md`가 이번 Phase의 변경만 반영하고 Current / Planned / Deferred 구분이 유지된다. 사람이 아직 확인하지 않은 것(한국어 전사 품질 · 모델 크기 · Metal 체감)이 구현 완료나 검증 완료로 적히지 않았다.
+    verification:
+      type: verifier
+  - id: AC4
+    description: |-
+      측정되지 않은 수치가 어떤 문서에도 새로 들어가지 않았고, VERIFIED와 UNVERIFIED가 구분돼 있다.
+    verification:
+      type: verifier
+  - id: AC5
+    description: |-
+      `docs/` 밖의 파일이 하나도 바뀌지 않았다.
+    verification:
+      type: verifier
+
+evidence: []
+
+failure_memo: []

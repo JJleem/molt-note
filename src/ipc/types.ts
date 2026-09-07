@@ -125,6 +125,36 @@ export interface MissingAudio {
 export type SessionState = 'idle' | 'recording' | 'paused' | 'stopped';
 
 /**
+ * 입력 레벨 판정 하나 (docs/ADR-0003-recording-engine.md §16.4).
+ *
+ * `src-tauri/src/audio/level.rs`의 `LevelVerdict`와 1:1이다 — 이름도 뜻도 같다.
+ *
+ * **"값 없음"은 이 타입에 없다.** 아직 재지 않은 것은 판정이 아니라 {@link SessionStatus.level}의
+ * `null`이며, 그래서 *모르는 것*이 *낮음*으로 조용히 승격되지 않는다 (§16.3).
+ */
+export type InputLevelVerdict = 'usable' | 'low' | 'silent';
+
+/**
+ * 진행 중인 녹음의 입력 레벨 (ADR-0003 §16.3 · `InputLevelPayload`).
+ *
+ * **오디오 샘플은 이 경계를 지나지 않는다** — 파형도 스펙트럼도 샘플 배열도 없다 (INV-6 · §12).
+ * 오는 것은 수치 둘 · 판정 하나 · 사람이 읽는 문장 하나뿐이다.
+ *
+ * `elapsedLabel`과 같은 규약이다 — **수치와 문장이 함께 온다.** dBFS 환산도 판정 구간도
+ * 사람이 읽는 문장도 `src-tauri/src/audio/level.rs` 한 곳에서 만들어지며, 화면은 그것을
+ * 다시 만들지 않는다 (`tests/screen-boundary.test.ts`).
+ */
+export interface InputLevel {
+  /** 평균 RMS의 dBFS. 소수 한 자리이며 **판정은 이 값으로 한다.** */
+  readonly averageDbfs: number;
+  /** 전체 피크의 dBFS. 소수 한 자리. **판정에 쓰이지 않는다** — 함께 보는 값이다. */
+  readonly peakDbfs: number;
+  readonly verdict: InputLevelVerdict;
+  /** 사람이 읽는 짧은 문장. **화면이 이 문장을 다시 만들지 않는다.** */
+  readonly message: string;
+}
+
+/**
  * 지금 녹음이 어떤 상태인지 (PRODUCT-SPEC §6의 R-001).
  *
  * **진행 중인 session을 들고 있는 것은 backend다.** 화면은 그것을 소유하지 않고 물어본다 —
@@ -132,7 +162,7 @@ export type SessionState = 'idle' | 'recording' | 'paused' | 'stopped';
  * (docs/ADR-0004-recording-session-lifecycle.md).
  *
  * 길이는 밀리초와 문장이 함께 온다. 초를 `0:07`로 바꾸는 규칙은 Rust 한 곳에만 있다
- * (`tests/screen-boundary.test.ts`).
+ * (`tests/screen-boundary.test.ts`). 입력 레벨도 같은 규약을 따른다 ({@link InputLevel}).
  */
 export interface SessionStatus {
   readonly state: SessionState;
@@ -140,6 +170,14 @@ export interface SessionStatus {
   readonly elapsedMs: number;
   /** 같은 길이를 사람이 읽는 문장으로 (예: `0:07`). */
   readonly elapsedLabel: string;
+  /**
+   * 지금까지 **파일에 쓰인** 샘플의 입력 레벨 (ADR-0003 §16.3).
+   *
+   * **진행 중인 녹음이 없거나 아직 샘플이 하나도 없으면 `null`이다 — 0이 아니다.**
+   * 재지 않은 것을 "소리 없음"이라고 말하지 않으며, 화면도 그 둘을 구분해 그린다
+   * (`src/screens/recordingView.ts`).
+   */
+  readonly level: InputLevel | null;
 }
 
 /**
@@ -180,6 +218,30 @@ export interface TranscriptionStatus {
    * 종류가 뭉개지지 않는다 — 모델이 없는 것과 엔진이 죽은 것은 사용자가 할 일이 다르다 (§13).
    */
   readonly failure: Failure | null;
+  /**
+   * **도는 동안** 지금까지 나온 문장들 (2026-09-07 추가). 그 밖의 상태에서는 빈 배열이다.
+   *
+   * **저장된 Transcript가 아니다.** `parse`도 붕괴 판정도 반복 차단도 지나지 않은
+   * 미리보기이므로, 여기 보이던 문장이 최종 Transcript에 없을 수 있다.
+   */
+  readonly partialLines: readonly PartialLine[];
+  /**
+   * 오디오를 얼마나 지났는가. `0 ~ 1`이며, **아직 모르면 `null`이다** (0이 아니다).
+   *
+   * 조각 개념을 담지 않는다 (INV-9) — 내부 처리 단위가 바뀌어도 이 값의 뜻은 그대로다.
+   */
+  readonly progress: number | null;
+}
+
+/**
+ * 전사 도중에 나온 문장 하나. {@link TranscriptionStatus.partialLines}의 원소다.
+ *
+ * 시각은 저장된 segment의 `startMs`와 **같은 단위**다. 끝 시각은 없다 — 엔진이 아직
+ * 그 자리를 말하지 않았고, 모르는 값을 지어내지 않는다.
+ */
+export interface PartialLine {
+  readonly startMs: number;
+  readonly text: string;
 }
 
 /**
@@ -218,6 +280,23 @@ export interface Transcript {
   readonly createdAt: string;
   readonly engine: string;
   readonly model: string;
+  /**
+   * 이 전사 한 건에 **걸린 시간**(밀리초). 잰 적이 없으면 `null`이다.
+   *
+   * **{@link Recording.durationMs}와 다른 축의 값이다** — 저쪽은 오디오가 얼마나 긴가이고
+   * 이쪽은 그것을 문장으로 옮기는 데 얼마나 걸렸는가다.
+   */
+  readonly transcriptionMs: number | null;
+  /**
+   * 같은 시간을 **Rust가 만든 문장으로** (예: `1:47`).
+   *
+   * 화면은 이 값을 그대로 그린다 — 밀리초를 나눠 문장을 조립하지 않는다
+   * (`tests/screen-boundary.test.ts` · `src-tauri/src/domain/duration.rs`).
+   *
+   * **`null`은 '그때는 재지 않았다'는 정상 상태다.** 화면은 그것을 `0:00`이라고 말하지
+   * 않는다 — 그 줄을 보이지 않는다 (`src/screens/transcriptView.ts`).
+   */
+  readonly transcriptionLabel: string | null;
 }
 
 /**
@@ -251,6 +330,23 @@ export interface Settings {
    * 실제로 찾아보는 것은 전사를 시작할 때이며, 없으면 §13의 실패로 드러난다.
    */
   readonly transcriptionModel: string | null;
+  /**
+   * 전사할 때 **무슨 언어로 들을지**
+   * (docs/ADR-0007-transcription-engine.md §17.1). 아직 고르지 않았으면 `null`이다.
+   *
+   * **`null`은 특정 언어가 아니라 '자동 감지'다** (§17.1.4-1). 고르지 않은 것은 오류가 아니고
+   * 영어도 아니다 — 화면은 그 상태를 빈칸이 아니라 자동 감지로 말한다
+   * (`src/screens/settingsView.ts`).
+   *
+   * `transcriptionModel`과 **다른 값이다.** 어떤 모델로 듣는가와 무슨 언어로 듣는가는 서로
+   * 다른 질문이며, 하나를 고른다고 다른 하나가 정해지지 않는다.
+   *
+   * **secret이 아니다** — 무슨 언어로 듣는지일 뿐이므로 INV-7과 충돌하지 않는다.
+   *
+   * {@link Transcript.language}와 같은 값이 아니다. 이쪽은 앞으로의 전사에 대한 설정이고,
+   * 저쪽은 이미 만들어진 전사 하나가 어떤 언어로 만들어졌는가의 기록이다.
+   */
+  readonly transcriptionLanguage: string | null;
   /**
    * 기본으로 고를 입력 장치의 **선택 키** ({@link InputDevice.key}). 아직 고르지 않았으면
    * `null`이며, 그것도 정상 상태다.
@@ -502,6 +598,72 @@ export interface ExportedFile {
    * AI-ready 문서면 `2026-09-01-3dgs-study-04-ai-request.md`).
    */
   readonly fileName: string;
+}
+
+/**
+ * 문자열 하나가 **얼마나 큰가** (`phase-prompt/05.6` 성공 기준 4 · R-5).
+ *
+ * **이 값이 없으면 화면은 사용자에게 크기를 말할 수 없다.** 72분 녹음의 산출물은 99 KB였고,
+ * 사람은 그것을 채팅 창에 붙여 넣으려다 실패했으며 앱은 그 사실을 말해 주지 않았다.
+ *
+ * 셋이 함께 오는 이유는 사람이 크기를 재는 방법이 하나가 아니기 때문이다 — 바이트는 나눔의
+ * 예산과 견주는 값이고, 글자 수는 채팅 창에서 감각하는 값이며, 줄 수는 전사에서 segment 수에
+ * 가깝다. **어떤 AI 채팅의 한도도 여기 없다** (INV-9): 그것은 이 저장소가 확인한 적이 없는
+ * 사실이며, 나눔의 예산은 backend가 고른 값이다.
+ */
+export interface TextSize {
+  readonly bytes: number;
+  readonly chars: number;
+  readonly lines: number;
+}
+
+/**
+ * 산출물 하나가 얼마나 크고, 지금 가져온 것이 그중 **몇 번째인가**
+ * (`phase-prompt/05.6` 성공 기준 4).
+ *
+ * 세 산출물이 전부 이 모양으로 말한다 — 프롬프트 · 전사 텍스트 · AI-ready 문서 파일.
+ * 그래서 화면은 "얼마나 큰가"와 "몇 번째 중 몇 번째인가"를 자리마다 다른 규칙으로 읽지 않는다.
+ */
+export interface PortionOf {
+  /** 산출물 **전체**의 크기. 조각 하나만 왔을 때에도 이 값은 전체를 말한다. */
+  readonly totalSize: TextSize;
+  /** 지금 온 조각의 순번. **1부터 센다.** */
+  readonly portion: number;
+  /** 조각이 전부 몇 개인가. `1`이면 나뉘지 않았고, 지금 온 것이 전부다. */
+  readonly portionCount: number;
+  /** 지금 온 조각 하나의 크기. */
+  readonly portionSize: TextSize;
+}
+
+/**
+ * 사람이 자기 AI 채팅으로 가져가는 **텍스트 한 조각** (docs/ADR-0010-manual-ai-handoff.md
+ * §5.4 · §6 · §8.1).
+ *
+ * 문자열 하나가 아니라 이 값인 이유는 **잘린 것을 온전한 것이라고 말할 수 없게 하기
+ * 위해서다** — 조각 번호와 전체 조각 수가 같은 값에 실려 오므로, 화면이 그것을 모른 채
+ * "다 가져갔다"고 말할 수단이 없다.
+ *
+ * **오디오도 provider도 벤더도 실리지 않는다** (MH-4 · MH-6 · INV-9). 담을 자리가 없다.
+ */
+export interface HandoffText extends PortionOf {
+  readonly recordingId: string;
+  /** 지금 가져온 텍스트. 조각이 하나뿐이면 산출물 전체다. */
+  readonly text: string;
+}
+
+/**
+ * 방금 만들어진 **AI-ready 문서 파일 하나**와 그것이 문서의 어디인가 (§5.6 · 성공 기준 4).
+ *
+ * {@link ExportedFile}을 **감싼다** — 두 번째 파일 타입을 만들지 않는다. 화면이 파일에 대해
+ * 알아야 하는 것은 Markdown export와 똑같고, 여기서 더하는 것은 그 파일이 나뉜 문서의 몇
+ * 번째인가 하나뿐이다.
+ *
+ * **나뉜 문서를 내보내도 이미 있는 파일은 그대로다** (docs/ADR-0009-notion-and-export.md §4.3) —
+ * 조각마다 파일이 하나씩 새로 생기며, 파일 이름이 그 자리를 말한다
+ * (`…-ai-request-part-2-of-4.md`).
+ */
+export interface ExportedAiRequest extends PortionOf {
+  readonly file: ExportedFile;
 }
 
 /** 지금 돌고 있는 Notion 전송 한 건의 상태 (§10). */

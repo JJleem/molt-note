@@ -15,6 +15,7 @@
 //! devices.rs         목록을 다듬는 규칙        (하드웨어 없이 테스트된다)
 //! capture.rs         파일을 만들고 확정하는 규칙 (하드웨어 없이 테스트된다)
 //! finalized.rs       확정된 파일을 확인하는 규칙 (하드웨어 없이 테스트된다)
+//! level.rs           입력 레벨을 값으로 만드는 규칙 (하드웨어 없이 테스트된다)
 //! session.rs         녹음 session의 상태 기계   (하드웨어도 시계도 없이 테스트된다)
 //! system_devices.rs  실제 장치에 묻는 부분      (cpal을 아는 두 자리 중 하나)
 //! system_capture.rs  실제 장치를 여는 부분      (cpal을 아는 두 자리 중 하나)
@@ -23,6 +24,7 @@
 pub mod capture;
 pub mod devices;
 pub mod finalized;
+pub mod level;
 pub mod session;
 pub mod system_capture;
 pub mod system_devices;
@@ -33,6 +35,10 @@ pub use capture::{
 };
 pub use finalized::{audio_is_present, VerifiedAudio, MIN_FINALIZED_BYTES};
 pub use devices::{catalog, InputDevice, InputDeviceSource, ObservedInputDevice};
+pub use level::{
+    verdict_for_average_dbfs, InputLevel, LevelReading, LevelVerdict, FLOOR_DBFS, FULL_SCALE,
+    SILENT_BELOW_DBFS, USABLE_AT_OR_ABOVE_DBFS,
+};
 pub use session::{RecordingSession, SessionState, SessionSummary};
 pub use system_capture::SystemSampleSource;
 pub use system_devices::SystemInputDevices;

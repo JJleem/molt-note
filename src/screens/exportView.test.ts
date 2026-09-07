@@ -32,6 +32,15 @@ import {
   type ExportPanelInput,
 } from './exportView';
 import { loadedRecordingDetail } from './recordingDetailView';
+import {
+  NO_SHOW_FILE_ATTEMPT,
+  SHOW_FILE_LABEL,
+  SHOW_FILE_PRESERVED_NOTICE,
+  SHOW_FILE_RESOLUTION,
+  SHOW_FILE_RETRY_LABEL,
+  failedShowFile,
+  showingFile,
+} from './savedFileView';
 import { loadedRecordings } from './recordingsView';
 import { transcriptTab } from './transcriptView';
 
@@ -104,6 +113,8 @@ function input(overrides: Partial<ExportPanelInput> = {}): ExportPanelInput {
     recording: recording(),
     notes: [],
     attempt: NO_EXPORT_ATTEMPT,
+    // 자리를 여는 시도는 아직 하지 않았다 (`phase-prompt/05.6` 성공 기준 2).
+    show: NO_SHOW_FILE_ATTEMPT,
     ...overrides,
   };
 }
@@ -188,6 +199,120 @@ describe('내보내기 자리가 놓이는 상태', () => {
   });
 });
 
+// --- 그 자리를 여는 수단 (`phase-prompt/05.6` 성공 기준 2 · R-4) -------------------------
+
+describe('만들어진 파일이 놓인 자리를 여는 수단이 함께 있다', () => {
+  // 2026-09-05의 실사용에서 드러난 사실이 이 자리의 이유다 — 경로를 글자로 보여 주고 있었는데도
+  // 사람이 파일에 도달하지 못했다 (macOS에서 `~/Library`는 Finder 기본 숨김이다). 그래서
+  // **경로를 없애지 않고 여는 수단을 더한다.**
+
+  it('경로는 그대로 있고, 그 옆에 여는 동작이 값으로 있다', () => {
+    const written = file();
+    const view = exportPanel(input({ attempt: exportedFile(written) }));
+
+    if (view.body.kind !== 'done') {
+      throw new Error('만들어진 파일이 있어야 한다');
+    }
+    // 대체가 아니라 추가다 — 경로 줄이 사라지지 않았다.
+    expect(view.body.file.path).toBe(written.path);
+    expect(view.body.file.show.action.kind).toBe('show');
+    expect(view.body.file.show.action.label).toBe(SHOW_FILE_LABEL);
+    // 여는 대상은 backend가 준 경로 그대로다 — 화면이 다른 경로를 지어내지 않는다.
+    expect(view.body.file.show.action.path).toBe(written.path);
+    expect(view.body.file.show.showing).toBe(false);
+    expect(view.body.file.show.trouble).toBeNull();
+  });
+
+  it('여는 중이라는 사실이 문장으로 있다', () => {
+    const written = file();
+    const view = exportPanel(
+      input({ attempt: exportedFile(written), show: showingFile(written.path) }),
+    );
+
+    if (view.body.kind !== 'done') {
+      throw new Error('만들어진 파일이 있어야 한다');
+    }
+    expect(view.body.file.show.showing).toBe(true);
+    expect(view.body.file.show.text.trim()).not.toBe('');
+    // 여는 중에도 경로는 그대로 보인다.
+    expect(view.body.file.path).toBe(written.path);
+  });
+
+  it('열지 못해도 파일과 경로는 그대로이고, 그 사실이 값으로 있다 (§13 · INV-3)', () => {
+    const written = file();
+    const view = exportPanel(
+      input({
+        attempt: exportedFile(written),
+        show: failedShowFile(written.path, failure('storage', { retryable: false })),
+      }),
+    );
+
+    if (view.body.kind !== 'done') {
+      throw new Error('여는 데 실패해도 파일은 만들어진 채다');
+    }
+    // 파일이 만들어졌다는 사실도, 그 경로도 달라지지 않았다.
+    expect(view.body.file.headline).toBe(EXPORT_DONE_HEADLINE);
+    expect(view.body.file.path).toBe(written.path);
+
+    const trouble = view.body.file.show.trouble;
+    if (trouble === null) {
+      throw new Error('실패가 값으로 있어야 한다');
+    }
+    expect(trouble.failure.kind).toBe('storage');
+    expect(trouble.preservedNotice).toBe(SHOW_FILE_PRESERVED_NOTICE);
+    // 그래도 도달할 길이 남아 있다 — 위에 그대로 있는 경로다.
+    expect(trouble.resolution).toBe(SHOW_FILE_RESOLUTION);
+    // 다시 시도할 수 있고, 그것이 처음 누르는 것과 다른 상황이라는 것도 이름이 말한다 (§13).
+    expect(view.body.file.show.action.kind).toBe('retry');
+    expect(view.body.file.show.action.label).toBe(SHOW_FILE_RETRY_LABEL);
+  });
+
+  it('다른 파일을 열다 실패한 사실이 이 자리에 보이지 않는다', () => {
+    const written = file();
+    const view = exportPanel(
+      input({
+        attempt: exportedFile(written),
+        show: failedShowFile('/somewhere/else.md', failure('storage')),
+      }),
+    );
+
+    if (view.body.kind !== 'done') {
+      throw new Error('만들어진 파일이 있어야 한다');
+    }
+    expect(view.body.file.show.trouble).toBeNull();
+    expect(view.body.file.show.action.kind).toBe('show');
+  });
+
+  it('여는 시도가 무엇이든 내보내기 상태는 달라지지 않는다', () => {
+    // 여는 일과 내보내는 일은 다른 사건이다. 열지 못했다고 "내보내지 못했다"가 되면 안 된다.
+    const written = file();
+    const attempts = [
+      NO_SHOW_FILE_ATTEMPT,
+      showingFile(written.path),
+      failedShowFile(written.path, failure('storage')),
+    ];
+
+    for (const show of attempts) {
+      const view = exportPanel(input({ attempt: exportedFile(written), show }));
+
+      expect(view.body.kind, show.kind).toBe('done');
+      if (view.body.kind !== 'done') {
+        throw new Error('만들어진 파일이 있어야 한다');
+      }
+      expect(view.body.file.fileName, show.kind).toBe(written.fileName);
+      expect(view.body.again.kind, show.kind).toBe('again');
+    }
+  });
+
+  it('아직 내보내지 않은 상태에는 열 자리가 없다', () => {
+    // 만들어지지 않은 파일을 여는 수단이 있으면 그것은 없는 것을 가리킨다.
+    const view = exportPanel(input({ show: showingFile('/tmp/whatever.md') }));
+
+    expect(view.body.kind).toBe('ready');
+    expect(JSON.stringify(view.body)).not.toContain('/tmp/whatever.md');
+  });
+});
+
 // --- 무엇이 파일에 들어가는가 (§11 · INV-6) ---------------------------------------------
 
 describe('무엇이 파일에 들어가는지 말한다', () => {
@@ -229,7 +354,11 @@ describe('P-3 (1) AI provider 없이 Markdown export가 된다 (INV-8)', () => {
   it('이 자리의 입력에 AI provider를 담을 자리가 없다', () => {
     // 자리가 생기는 순간 provider 하나 때문에 내보내기가 막힐 수 있게 된다. 그래서 입력의
     // 필드를 통째로 고정한다 — 새 필드가 하나 생기면 여기서 먼저 드러난다.
-    expect(Object.keys(input()).sort()).toEqual(['attempt', 'notes', 'recording']);
+    // **필드가 하나 늘었다** — `show`다 (`phase-prompt/05.6` 성공 기준 2 · R-4). 그것은
+    // provider가 아니라 **이 화면이 건 '자리 열기' 한 번**이며, 담고 있는 것은 파일 경로
+    // 하나다. 여는 데 실패해도 내보내기 상태는 그대로이므로 (아래 '자리를 여는 수단'),
+    // 이 필드가 늘었다고 provider 없이 내보낼 수 있다는 사실이 흔들리지 않는다.
+    expect(Object.keys(input()).sort()).toEqual(['attempt', 'notes', 'recording', 'show']);
   });
 
   // 값의 모양만 고정하면 "모듈 안에서 몰래 본다"는 경로가 남는다. 그래서 **모듈 원문에

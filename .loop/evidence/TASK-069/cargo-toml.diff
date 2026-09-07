@@ -1,0 +1,44 @@
+diff --git a/src-tauri/Cargo.toml b/src-tauri/Cargo.toml
+index 3069000..f4c2ad7 100644
+--- a/src-tauri/Cargo.toml
++++ b/src-tauri/Cargo.toml
+@@ -45,7 +45,38 @@ hound = "3"
+ # 알려진 한계: 번들 whisper.cpp가 upstream보다 낮고(v1.8.3 vs v1.9.3), 유지보수가
+ # GitHub → Codeberg로 이동했다 (ADR-0007 §4.3). 그래서 버전을 핀하고 교체 비용을 작게 둔다
+ # (§13 — 교체 대상은 `transcription::whisper` 하나다).
+-whisper-rs = "0.16"
++#
++# ★ 가속 — Metal을 **명시적으로 하나 켠다** (ADR-0007 §17.2).
++#   켠 feature 이름:  `metal`
++#   확인한 버전:      whisper-rs 0.16.0 · whisper-rs-sys 0.15.0 (`Cargo.lock`이 checksum까지 고정한다)
++#   왜 켰는가:        PRODUCT-SPEC §14.4가 "Rust 바인딩 = whisper-rs 0.16.0(whisper-rs-sys 0.15.0,
++#                     **Metal feature**)"라고 이미 적어 두었는데 이 파일에는 feature 지정이 없었고,
++#                     그 결과 `whisper-rs-sys`의 build.rs가 `GGML_METAL = OFF`를 정의하고 있었다.
++#                     **Spec과 저장소가 어긋났고 어긋난 쪽이 저장소다** (ADR-0007 §17.2.1).
++#   확인 경로:        (1) **이름** — cargo가 manifest를 파싱해 fingerprint에 남긴
++#                     `declared_features`에 `metal`이 있다. 두 crate 모두이며, Metal 관련 이름은
++#                     그 목록에 이것 하나다. crate 소스 파일 자체는 읽지 못했다 — registry
++#                     접근이 막혀 있고 네트워크가 없다 (TASK-047과 같은 제약).
++#                     (2) **효과** — 이름이 적혔다는 것으로 판정하지 않고 **산출물로 판정했다**:
++#                     `GGML_METAL:BOOL=OFF` → `ON`, `libggml-metal.a`가 새로 생김,
++#                     `Metal`/`MetalKit` 링크 지시가 붙음, 그리고 test Gate가 실제로 실행한
++#                     바이너리 안에 `ggml_metal_*` 심볼이 있음.
++#                     before/after: `.loop/evidence/TASK-069/metal-feature-verification.md`
++#                     (ADR-0009 §11.4가 TLS에 대해 세운 규칙과 같다 — 켰다고 적어 두고 산출물이
++#                      그대로면 켜지지 않은 것이다)
++#   대가:             feature가 바뀌면 build.rs가 다른 CMake 정의로 다시 돌아 **cold build가
++#                     whisper.cpp 재컴파일을 포함한다** (ADR-0007 §4.3 · §17.2.4).
++#   `Cargo.lock`:     **바뀌지 않았다.** lock은 해석된 패키지·버전만 적고 켜진 feature는 적지
++#                     않으며, `metal`은 새 crate를 들여오지 않는다 (`ureq`의 `rustls`와 다른
++#                     종류다 — 그때는 lock에 TLS crate가 새로 생겼다). 그래서 판정을 lock이
++#                     아니라 빌드 산출물에 걸었다 — evidence §3.3.
++#   **얼마나 빨라지는지는 이 저장소가 측정한 적이 없다** — 배수도 소요 시간도 적지 않는다
++#   (ADR-0007 §17.2.3). 켠 근거는 측정된 속도가 아니라 Spec과의 간극이다.
++#   CoreML · OpenMP 등 다른 가속 feature는 **켜지 않았다** — 하나씩 확인한다. 둘 다 이 crate의
++#   별개 feature 이름이며(`coreml` · `openmp`), 빌드에서도 꺼진 채다 (`WHISPER_COREML` ·
++#   `GGML_OPENMP` = OFF — before/after 동일). `GGML_BLAS` · `GGML_ACCELERATE`는 **원래부터
++#   켜져 있었다** — 이 줄이 켠 것이 아니다.
++whisper-rs = { version = "0.16", features = ["metal"] }
+ # 샘플레이트 변환. ADR-0007 §9.2가 고른 순수 Rust 경로의 나머지 절반이다
+ # (`hound` 읽기 + `rubato` 리샘플 + 수동 다운믹스). 외부 도구를 요구하지 않는 것이
+ # 선택 이유이며, 그래서 제품 경로는 ffmpeg을 부르지 않는다 (§14.4.2 · ADR-0007 §7).

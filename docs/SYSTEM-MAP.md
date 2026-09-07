@@ -3,8 +3,12 @@
 이 문서는 프로젝트의 **최상위 지도**다. 상세 구현 문서가 아니라 진입점이다.
 상세는 §8의 문서로 넘긴다.
 
-> **현재 상태: Phase 5.5 완료 (2026-09-06) — engineering DONE · Human Review 미실행.**
-> (직전 상태: Phase 5 완료 · 2026-09-04. 아래 서술은 그 위에 쌓인다.)
+> **현재 상태: Phase 5.6 · Phase 5.7 모두 engineering DONE (2026-09-07) — 두 Phase 다
+> Human Review 미실행.**
+> (직전 상태: Phase 5.5 완료 · 2026-09-06 · 그 앞은 Phase 5 완료 · 2026-09-04.
+> **Phase 5.6은 2026-09-07 이 문서가 갱신되기 직전까지 부분 완료였다** — 남은 넷(TASK-072 ~
+> TASK-075)이 Phase 5.7 뒤에 돌아 마무리됐다. 아래 별도 문단. 서술은 그 위에 쌓이며 앞 Phase의
+> 기록을 지우지 않는다.)
 > 앱 셸 · 로컬 영속성 · §7 데이터 모델 ·
 > 네 화면 navigation에 더해, **녹음 lifecycle(Record/Pause/Resume/Stop) · 파일 확정 ·
 > Recording 영속화 · 재생**이 구현되고 자동 검증을 통과했다.
@@ -36,7 +40,32 @@
 > 엔진 경로 자체는 지났으나(segments · timestamp · 재시작 생존) **언어가 설정되지 않아
 > 한국어가 영어로 강제 디코딩됐고 결과는 사용할 수 없었다.** `A-TRANS-001`은 해소되지
 > **않았다.** 기록은 `docs/PHASE-3-TRANSCRIPTION-SMOKE-TEST.md` 부록, 수정은 Phase 5.6
-> (`phase-prompt/05.6-transcription-correctness-and-reach.md` · PLANNED)이 맡는다.
+> (`phase-prompt/05.6-transcription-correctness-and-reach.md`)이 맡았다.
+>
+> ⚠️ ~~**Phase 5.6은 부분 완료다 (2026-09-07 기준).**~~ **그것은 이 문서의 직전 갱신 시점
+> 기록이며, 그 뒤 남은 넷이 돌았다.** 당시의 사실은 이랬다 — 열 Task 중 TASK-066 ~ TASK-071이
+> DONE이고 TASK-072 ~ TASK-075는 TODO였으며, 그래서 이 문서에 Phase 5.6의 완료 기록이 없었다.
+> **2026-09-07 늦게 TASK-072 ~ TASK-075가 돌아 열 Task 전부가 DONE이 됐다** (§5).
+> 저장소에 들어온 것은 전사 언어 설정(저장소 → 화면) · 언어가 엔진에 도달하는 경로 ·
+> `whisper-rs`의 `metal` feature · `transcripts.transcription_ms` · 내보낸 파일 자리를 여는
+> command에 더해, **AI Handoff 산출물의 크기와 무손실 분할**(`export/portion.rs` → command →
+> AI Note 탭)과 **이 Phase의 네 불변 전용 테스트**다.
+> **engineering DONE이지 Human Review가 끝났다는 뜻이 아니다** — 한국어 전사 품질 · 모델 크기 ·
+> Metal 체감 · 파일 도달 · handoff의 실제 사용은 전부 사람이 판정하며 기록표는 **비어 있다**
+> (`docs/PHASE-5.6-HUMAN-REVIEW.md`).
+>
+> ⚠️ **2026-09-07에 운영자가 두 번째로 실제 전사를 돌렸다** (51분 한국어 회의).
+> **Phase 5.6의 언어 수정은 동작했다** — 설정한 `ko`가 엔진에 도달했다. 그런데 그 아래에 있던
+> 문제가 드러났다: **전사가 51분 전 구간에서 환각으로 채워졌고(고유 문장 2개 · 한 문장이 99.0%)
+> 제품은 그것을 `done`으로 저장했다.** 그 녹음의 평균 입력 레벨은 성공한 9/4 녹음보다
+> **16.4 dB 낮았다.** `A-TRANS-001`은 **여전히 열려 있다.**
+>
+> 그 두 침묵을 메운 것이 **Phase 5.7**이다 (로드맵에 없던 삽입 · 운영자 결정 2026-09-07).
+> 녹음 중에 **입력 레벨과 그 판정이 화면에 보이고**, 쓸 수 없을 만큼 낮으면 **정지 전에**
+> 경고가 뜬다. 전사는 **저장 직전에 붕괴 판정을 통과해야** 하며, 걸리면 Transcript를 남기지
+> 않고 `failed`가 되고, 화면은 **무엇이 얼마나 반복됐는지와 다음에 할 일**을 문장으로 보여준다.
+> **이 Phase는 마이크 게인도 오디오 정규화도 넣지 않았다** — 청크 분할 · state 재생성 ·
+> 반복 차단 · VAD · 자동 언어 감지 개선도 마찬가지로 **다음 Phase 후보로 남았다** (§5).
 >
 > 갱신 이력:
 > - 2026-09-01 Bootstrap — 개발 baseline과 Gate 확보
@@ -48,6 +77,17 @@
 > - **2026-09-06 Phase 5.5 DONE** — Manual AI Handoff 경계 · clipboard 경계 · UI 기반 ·
 >   Ollama 재배치 반영 (§1 · §2 · §3 · §5 · §6 · §7 · §8 · §9). Phase 5.5는 **로드맵에 없던
 >   삽입**이며(운영자 결정 2026-09-04) `PRODUCT-SPEC.md` §9.7 · §14.5.1 · §21이 함께 갱신됐다
+> - **2026-09-07 Phase 5.7 DONE** — 입력 레벨 경계 · 붕괴 판정 경계 · 그 둘의 화면 표현 반영
+>   (§1 · §2 · §3 · §4 · §5 · §6 · §7 · §8 · §9). Phase 5.7도 **로드맵에 없던 삽입**이며
+>   (운영자 결정 2026-09-07) **Phase 5.6이 부분 완료인 상태에서 그 앞으로 들어갔다.**
+>   같은 갱신에서 **Phase 5.6의 실제 상태(TASK-066~071 DONE · TASK-072~075 TODO)** 를 적었다 —
+>   이전 기록을 지운 것이 아니라 "PLANNED"였던 서술을 오늘의 사실로 바꿨다
+> - **2026-09-07 Phase 5.6 engineering DONE** — 남은 넷(TASK-072 ~ TASK-075)이 Phase 5.7 뒤에
+>   돌았다. AI Handoff 산출물의 크기와 무손실 분할 · 이 Phase의 네 불변 전용 테스트 ·
+>   문서 마무리(ADR-0007 §19 · ADR-0009 §16 · ADR-0010 §12.8 ·
+>   `docs/PHASE-5.6-HUMAN-REVIEW.md`)를 §1 · §2 · §3 · §4 · §5 · §6 · §7 · §8 · §9에 반영했다.
+>   **위 Phase 5.7 줄과 그때의 "부분 완료" 서술은 지우지 않았다** — 이 Phase가 왜 두 번에 나눠
+>   끝났는지가 그 기록에 남아 있다. **Human Review는 실행되지 않았다**
 
 ---
 
@@ -86,14 +126,18 @@ Linux와 모바일은 범위 밖이다 (`PRODUCT-SPEC.md` §3).
 | --- | --- |
 | **지금 동작한다 (DONE · 자동 검증 기준)** | 앱이 실행되고 네 화면 사이를 이동한다. 로컬 SQLite에 §7 스키마가 있고 Recording 목록·Settings가 재시작 후에도 유지된다. **backend가 소유하는 녹음 session으로 Record/Pause/Resume/Stop이 동작하고, Stop은 파일 확정 후 Recording을 영속화하며, Detail에서 재생한다.** 실패가 화면에 표시되고 재시도된다. 그 위에서 **Transcript → structured note(Meeting · Study · Summary) → AI Note 탭**이 돌고, Settings에서 provider · 주소 · 모델을 고르고 연결을 확인한다 |
 | **⚠️ 자동 검증됐으나 장치 미확인** | 위 녹음 경로 전체. 실제 마이크·권한 프롬프트·음질로 확인된 적이 **없다** (`ASSUMPTION A-REC-001`) |
-| **⚠️ 구현됐으나 실제 추론 미실행** | 전사 경로 전체. `whisper-rs`가 링크돼 있고 자동 검증을 지나지만 **실제 모델로 추론한 적이 없다** (`A-TRANS-001`) |
+| **⚠️ 실제 추론은 두 번 실행됐고, 두 번 다 쓸 수 없었다** | 전사 경로 전체. 2026-09-05(언어 미설정 → 영어 강제)과 2026-09-07(입력 레벨 낮음 → 전 구간 환각)에 **실제 모델로 추론이 돌았다.** 엔진 경로는 지났으나 **사람이 읽을 수 있는 전사는 아직 한 번도 나오지 않았다** — `A-TRANS-001`은 **열려 있다** (§7 · `docs/PHASE-3-TRANSCRIPTION-SMOKE-TEST.md` 부록 · 부록 2) |
 | **⚠️ 구현됐으나 실제 호출 미실행** | AI Note 경로 전체. 계약 · adapter · 화면이 자동 검증을 지나지만 **실제 Ollama에 요청을 보낸 적이 한 번도 없다** (`A-AI-001` · `docs/PHASE-4-AI-NOTE-REVIEW.md` §10.2) |
 | **⚠️ 구현됐으나 실제 전송 미실행** | Notion sync 경로 전체. adapter · 분할 · SecretStore · 화면이 자동 검증을 지나지만 **실제 Notion 워크스페이스로 요청을 보낸 적이 없다** (`A-NOTION-001` · `docs/PHASE-5-NOTION-SMOKE-TEST.md` §10.1) |
 | **지금 동작한다 (DONE · 자동 검증 기준) — Phase 5.5** | **AI Provider를 하나도 설정하지 않아도** Recording Detail에서 Manual 프롬프트와 Transcript 텍스트를 복사하고, AI-ready 문서를 `exports/`에 파일로 꺼낼 수 있다. 세 산출물은 결정론적 순수 함수의 결과이며 파일 쓰기까지 임시 디렉터리에서 실제로 검증된다. 화면은 타입·여백 스케일 · accent/상태색 · 보이는 focus · 공통 빈 상태 · 로딩 위에 선다 |
 | **⚠️ 구현됐으나 실물 미확인 — Phase 5.5** | **clipboard 쓰기가 실제 webview에서 동작하는지 확인된 적이 없다** (ADR-0010 §7.4 · §12.4 — 여섯 항목 전부 UNVERIFIED). 자동 테스트는 언제나 test double을 쓴다. **사람이 산출물을 실제 외부 AI 채팅에 붙여 넣은 적도 없다.** clipboard가 거절돼도 Export for AI가 대체 경로로 남도록 설계돼 있다 (ADR-0010 §7.5) |
-| **다음 단계 (PLANNED)** | Phase 5.6 — 전사 정확도 결함 수정(언어 미설정 · Metal) → Phase 6 — Cross-platform Validation & Hardening (Windows) |
+| **지금 동작한다 (DONE · 자동 검증 기준) — Phase 5.7** | **녹음 중에 입력 레벨이 화면에 보인다** — 파일에 쓰이는 것과 같은 통로에서 누적한 평균 RMS · 피크의 dBFS와 판정(쓸 만함 · 낮음 · 소리 없음)과 사람이 읽는 문장이 backend에서 만들어져 그대로 표시되고, 쓸 수 없을 만큼 낮으면 **정지 전에** 경고가 뜬다. 아직 재지 않은 것은 `null`이며 '낮음'이 아니다. **전사는 저장 직전에 붕괴 판정을 통과해야 한다** — 걸리면 Transcript를 추가하지 않고 `current_transcript_id`도 바꾸지 않은 채 `failed`가 되며, 화면이 무엇이 몇 번 반복됐는지와 다음에 할 일을 문장으로 보여준다 |
+| **⚠️ 구현됐으나 실물 미확인 — Phase 5.7** | 위 둘 전부 **실제 마이크와 실제 전사에서 확인된 적이 없다.** 레벨은 가짜 `SampleSource`로, 붕괴 판정은 값으로 만든 segment 열로만 검증됐다. **"레벨 표시를 보고 사람이 실제로 마이크를 고칠 수 있는가" · "레벨을 올려 다시 녹음한 회의가 읽을 만하게 전사되는가"는 사람이 판정한다** (`docs/PHASE-5.7-HUMAN-REVIEW.md` — **기록표는 비어 있다**) |
+| **지금 동작한다 (DONE · 자동 검증 기준) — Phase 5.6** | **전사 언어를 Settings에서 고를 수 있고, 고르지 않은 것이 '자동 감지'라는 정상 상태로 화면에 말해진다.** 그 선택이 엔진 경계까지 값으로 도달해 whisper.cpp의 기본값 `"en"`이 더 이상 조용히 쓰이지 않는다. `whisper-rs`의 `metal` feature가 켜져 빌드 산출물에 Metal 백엔드가 링크된다. **전사 한 건에 걸린 시간이 Transcript와 함께 저장되고** Transcript 탭에 문장으로 보인다(값이 없으면 그 줄이 없다). **내보낸 파일이 놓인 자리를 화면에서 열 수 있고**(경로 문자열은 그대로 남는다) 열리는 대상은 앱의 `exports/` 아래 파일로 제한된다. **긴 회의의 AI Handoff가 크기 때문에 조용히 실패하지 않는다** — 크기가 값으로 나오고, 예산을 넘으면 무손실로 순서대로 나뉘며, 각 조각이 자기 자리를 말한다 |
+| **⚠️ 구현됐으나 사람이 판정하지 않음 — Phase 5.6** | **한국어 회의가 읽을 만하게 전사되는가 · `ggml-base`로 충분한가 · Metal 전후로 체감이 달라지는가 · 내보낸 파일을 실제로 열 수 있는가 · 긴 handoff를 실제 AI 채팅에 넣을 수 있는가** — 다섯 다 자동 Gate가 판정할 수 없다 (`docs/PHASE-5.6-HUMAN-REVIEW.md` — **기록표는 비어 있다**). **전사 속도는 이 저장소가 한 번도 측정한 적이 없고**(`ADR-0007` §19.2), `open -R` · `explorer /select,`는 실행된 적이 없으며(`ADR-0009` §16.2), handoff 예산 40,000 B는 **어떤 채팅의 확인된 한도도 아닌 이 앱이 고른 값이다**(`ADR-0010` §12.8.2) |
+| **다음 단계 (PLANNED)** | Phase 6 — Cross-platform Validation & Hardening (Windows) |
 | **미룬 것 (DEFERRED)** | **Cloud AI Providers (Claude · Gemini · Groq)** · search · tags · processing queue · menu bar (`PRODUCT-SPEC.md` §16) |
-| **후보 (CANDIDATE)** | recording engine (§4) · whisper 통합 방식 (§4) · persistence crate (§4) |
+| **후보 (CANDIDATE)** | recording engine (§4) · whisper 통합 방식 (§4) · persistence crate (§4) · **전사 품질 후보 다섯과 입력 정규화 결정 하나** (§5의 Phase 5.7 절 — 청크 분할 · 청크마다 state 재생성 · 반복 차단 · VAD · 자동 언어 감지 개선 · P8 측정 뒤에 내릴 정규화 결정. **어느 것도 구현되지 않았다**) |
 
 ---
 
@@ -114,14 +158,32 @@ Recording 화면
   ↓
 Record → Pause → Resume → Stop      ← 상태 기계는 순수 모듈, session은 backend 소유
   ↓
+  ├─ 파일로 가는 통로(drain)의 샘플이 그대로 WAV로 쓰인다        ← 게인도 정규화도 없다
+  └─ **같은 통로에서** 입력 레벨이 누적된다 (audio/level.rs)      ← 실시간 콜백이 아니다
+        ↓  평균 RMS·피크의 dBFS · 판정 하나 · 사람이 읽는 문장   ← 오디오 샘플은 실리지 않는다
+     status payload → 녹음 화면
+        ↓  아직 잰 것이 없으면 값은 null이다 — '낮음'이 아니다
+     낮음 · 소리 없음이면 **정지 전에** 경고가 보인다 (녹음을 막지도 멈추지도 않는다)
+  ↓
 Stop = 캡처 정지 → writer 확정 → 파일 존재·크기 확인 → Recording 영속화
   ↓  DB 실패 시 **audio를 지우지 않고** 경로를 담은 실패를 돌려준다 (INV-3 · INV-4)
 Recordings 목록 → Recording Detail → 재생
                                    ↓ 파일이 없으면 레코드를 지우지 않고 알린다
   ↓
-전사 (whisper-rs in-process · 배경 스레드)      ← 원본 오디오는 읽기만 한다
-  ↓  성공하면 Transcript를 **덧붙이고** current를 옮긴다. 실패하면 이전 current를 유지한다
+전사 (whisper-rs in-process · Metal · 배경 스레드)   ← 원본 오디오는 읽기만 한다
+  ↓  시작할 때 설정에서 **모델과 언어를 한 번에** 읽는다 (commands/transcriber.rs)
+  ↓    고른 언어 없음 → 감지를 켠다     고른 언어 있음 → 그 언어를 지정한다
+  ↓    두 갈래 중 어느 쪽도 whisper.cpp의 기본값 "en"에 기대지 않는다
+  ↓  걸린 시간을 단조 시계로 한 번 잰다 → 성공한 Transcript와 함께 저장된다
+  ↓
+**저장 직전 관문** — transcription/collapse.rs가 판정한다 (개수만 보지 않는다)
+  ↓  빈 결과 · 붕괴 → Transcript를 만들지 않고 current도 그대로 둔 채 `failed`
+  ↓                   실패 종류는 §13의 `TranscriptionOutputUnusable`이고,
+  ↓                   문장에 무엇이 몇 번 반복됐는지가 수치와 함께 들어 있다
+  ↓  쓸 수 있다     → Transcript를 **덧붙이고** current를 옮긴다
 Detail의 Transcript 탭
+  ↓  붕괴 실패는 별도 갈래로 보인다 — 다음에 할 일(레벨 확인 후 재녹음 · 다른 모델 · 재시도)과
+  ↓  "아무것도 지워지지 않았다"가 함께 있다
   ↓
 AI Note 탭 → mode 선택(Meeting · Study · Summary) → 생성
   ↓
@@ -155,22 +217,47 @@ AI Note 탭 (두 줄)
    "복사됨" 또는 무엇이 실패했는지 + 재시도 + Export for AI   exports/…-ai-request.md
         ↓
    (사람이) 자기 AI 채팅에 붙여 넣거나 파일을 첨부한다   ← 앱은 여기서 아무것도 보내지 않는다 (MH-3)
+
+━━━━━━━━━ 크기와 도달 — Phase 5.6이 위 두 갈래에 얹은 것 ━━━━━━━━━
+
+세 산출물 ─→ export::portion (순수)  ─┬─→ 얼마나 큰가        (바이트 · 글자 · 줄)
+                                       └─→ 예산을 넘으면      문단 → 줄 → 문장 → 낱말 → 글자
+                                           순서대로 나눈다     순으로 자리를 찾는다
+        ↓  이어 붙이면 원본이다 (한 글자도 잃지 않는다)
+   화면이 크기와 "몇 번째 중 몇 번째"를 값으로 말한다 — 잘린 것을 온전하다고 말하는 상태가 없다
+        ↓  파일로 갈 때는 조각마다 파일이고 이름이 그 자리를 말한다 (덮어쓰지 않는다)
+   exports/…-ai-request-part-N-of-M.md
+        ↓
+   Show this file ─→ show_saved_file ─→ ① exports/ 아래인가  ② 파일인가  ─→ platform/file_manager
+        ↑ 전체 경로 문자열은 그대로 남는다 — 여는 수단은 대체가 아니라 추가다
 ```
 
 **이 갈래가 저장소에 쓰는 것은 없다** — `ai_notes` 행도 `promptVersion`도 만들지 않는다
 (MH-7 · ADR-0010 §6.4). 파일시스템에 닿는 자리는 `write_new` 하나이며 기존 파일을 덮어쓰지
 않는다. 채팅에서 받은 답을 앱으로 되돌리는 import 경로는 **없다.**
 
-**아직 없는 것(PLANNED):** 전사 정확도 수정 (Phase 5.6) · Windows 실동작 검증 (Phase 6).
+**아직 없는 것(PLANNED):** Windows 실동작 검증 (Phase 6).
+*(2026-09-07 갱신 — 이 줄에 있던 "Phase 5.6의 남은 넷"은 그 뒤에 구현됐다 · §5)*
+
+**이 Phase가 넣지 않은 것:** 마이크 게인 조정 · 오디오 정규화 · 청크 분할 · 청크마다 state
+재생성 · 반복 차단 · VAD · 자동 언어 감지 개선. **전부 CANDIDATE이며 코드에 없다** (§5).
+레벨 표시는 **알릴 뿐 녹음을 막지도 멈추지도 않고**, 붕괴 판정은 **저장을 막을 뿐 저장된
+Transcript를 고치거나 지우지 않는다** (INV-2).
 
 ⚠️ 위 흐름 중 **AI 생성 · Notion 전송은 실제로 실행된 적이 없다** —
 Ollama 호출(`A-AI-001`) · Notion 요청(`A-NOTION-001`)은 자동 검증에서 fixture와 stub으로만
-지나간다. **전사는 2026-09-05에 한 번 실제로 실행됐으나 제품 경로가 쓸 수 있는 결과를 내지
-못했다**(언어 미설정 · 위 상태 블록) — `A-TRANS-001`은 여전히 열려 있다.
+지나간다. **전사는 2026-09-05과 2026-09-07에 두 번 실제로 실행됐으나 제품 경로가 쓸 수 있는
+결과를 내지 못했다**(각각 언어 미설정 · 낮은 입력 레벨 · 위 상태 블록) — `A-TRANS-001`은
+여전히 열려 있다. **위 흐름의 레벨 표시와 붕괴 관문도 실제 마이크·실제 전사에서 확인된 적이
+없다** — 가짜 `SampleSource`와 값으로 만든 segment 열로만 검증됐다.
 **Markdown 파일 export와 Manual AI Handoff의 Export for AI는 실제 파일 쓰기까지 자동 검증이
 지나간다** — 임시 디렉터리에서 실물 파일을 만들고 내용을 확인한다. 이 두 경로에는 외부
 의존이 없다. **다만 clipboard 쓰기는 그렇지 않다** — 자동 테스트는 언제나 test double을 쓰며,
 실제 webview에서의 동작은 UNVERIFIED다 (ADR-0010 §12.4).
+**Phase 5.6이 얹은 두 자리도 같은 성질이다** — 나눔과 크기는 순수 함수라 자동 검증이 끝까지
+지나가지만, **OS 파일 관리자를 실제로 여는 것**(`open -R` · `explorer /select,`)은 자동 테스트가
+double로 대신하고(부르면 검사가 도는 동안 창이 열린다) **실제로 열리는지는 UNVERIFIED다**
+(ADR-0009 §16.2). **조각 하나가 실제 AI 채팅에 들어가는지도 마찬가지다** (ADR-0010 §12.8.2).
 
 전체 목표 흐름은 `docs/PRODUCT-SPEC.md` §4에 있다.
 
@@ -213,6 +300,25 @@ Ollama 호출(`A-AI-001`) · Notion 요청(`A-NOTION-001`)은 자동 검증에�
 | **`src/platform/clipboard.ts`** | **webview의 clipboard 쓰기를 아는 유일한 자리** (INV-10). 새 의존성 · 새 command · 새 `FailureKind` 없이 `navigator.clipboard`를 한 줄에서 집는다. 실패는 던지지 않고 값으로 돌아오며 `unavailable`/`rejected`가 갈린다 | **DONE** (⚠️ 실제 webview 동작 UNVERIFIED · ADR-0010 §12.4) |
 | **`screens/copyView.ts` · `screens/aiHandoffView.ts`** | 복사 한 번의 상태·표시와 AI Note 탭의 **두 줄**(자동으로 만들기 / 내 AI로 하기)을 정하는 순수 모듈. **입력 타입에 provider를 담을 자리가 없다** — provider 부재로 아래 줄이 막힐 수단 자체가 없다 (MH-1 · INV-8) | **DONE** |
 | **UI 기반 (`src/App.css` · `EmptyState` · `Loading`)** | 타입 스케일 다섯 위계 · 여백 스케일 여섯 · accent/상태색 · 보이는 `:focus` · 공통 빈 상태와 로딩. 새 색 토큰은 dark 블록에도 정의된다. **radius(5px)는 이미 통일돼 있어 그대로 뒀다.** gradient · glassmorphism · 과한 그림자 · 장식 애니메이션은 테스트가 막는다 | **DONE** (⚠️ 실행 화면의 체감은 사람이 판정 · `docs/PHASE-5.5-HUMAN-REVIEW.md`) |
+| **`audio/level.rs`** (Phase 5.7) | **입력 레벨의 계산과 판정이 사는 자리 하나** — i16 덩어리를 누적해 평균 RMS·피크를 dBFS로 옮기고, 판정 구간(`-36` / `-60` dBFS)과 **사람이 읽는 문장까지 여기서 만든다.** 장치도 파일도 스레드도 저장소도 모르고, **샘플을 바꾸는 함수가 없다.** 잰 것이 없으면 `None`이지 0이 아니다 | **DONE** (⚠️ 실제 마이크 미확인) |
+| **`audio/capture.rs`의 레벨 갱신** (Phase 5.7) | 레벨을 **파일에 쓰이는 것과 같은 통로(`drain`)** 에서 갱신한다 — 실시간 오디오 콜백에서 계산하지 않는다. 일시정지 구간은 파일에도 레벨에도 도달하지 않는다. **캡처가 만드는 WAV의 샘플 값은 예전과 같다** | **DONE** |
+| **`transcription/collapse.rs`** (Phase 5.7) | **붕괴 판정 규칙이 사는 자리 하나** — 정규화된 segment 열에서 문장 수 `n` · 고유 수 `u` · 최다 반복 `r`을 세고, `n < 20`은 판정하지 않으며 `u/n <= 0.20` 또는 `r/n >= 0.50`이면 붕괴다. **판정은 수치를 잃지 않는다.** 파일시스템 · DB · 네트워크 · 시계 · 엔진을 모른다 | **DONE** |
+| **`transcription/run.rs`의 저장 직전 관문** (Phase 5.7) | 개수만 보던 자리(`segments.is_empty()`)에 그 판정을 더했다. **빈 결과 판정은 그대로 남아 있다.** 붕괴면 Transcript를 추가하지 않고 current도 옮기지 않은 채 `failed`가 되며, **새 실패 종류를 만들지 않고** 이미 있는 `TranscriptionOutputUnusable`을 쓴다. `run.rs`는 임계값도 비율도 스스로 계산하지 않는다 | **DONE** |
+| **`commands`의 `SessionStatusPayload.level` · `src/ipc/types.ts`의 `InputLevel`** (Phase 5.7) | 수치 둘 · 판정 이름 하나 · 문장 하나만 나간다. **오디오 샘플을 담을 자리가 없고**(INV-6) 새 벤더 고유 개념도 없다(INV-9). 진행 중인 녹음이 없으면 `null`이다 | **DONE** |
+| **`screens/recordingView.ts`의 레벨 표시** (Phase 5.7) | `inputLevelDisplay`(값 없음 · 낮음 · 소리 없음 · 쓸 만함)와 `inputLevelWarning`(녹음 중에만, 약할 때만). **dBFS 계산도 임계값도 여기에 없다** — backend가 준 값과 문장을 그대로 쓴다. `RecordingScreen.tsx`는 그리기만 한다 | **DONE** (⚠️ 실행 화면 미확인) |
+| **`screens/transcriptView.ts`의 붕괴 갈래** (Phase 5.7) | `transcriptionOutputUnusable`이 `other`로 뭉개지지 않고 별도 원인이 된다. 그 갈래에 **다음에 할 일**(레벨 확인 후 재녹음 · 다른 모델 · 재시도)이 문장으로 있고, 재시도 수단과 `TRANSCRIPTION_PRESERVED_NOTICE`가 함께 남는다 | **DONE** |
+| **`tests/level-and-collapse-boundary.test.ts`** (Phase 5.7) | 이 Phase의 다섯 불변을 저장소 원문으로 판정한다 — 레벨 경로에 오디오 샘플이 없다 · 붕괴 규칙이 한 자리에만 있다 · 화면에 dBFS 계산과 임계값이 없다 · 캡처가 샘플을 바꾸지 않는다 · 새 벤더 고유 개념이 없다 | **DONE** |
+| **전사 언어 설정** (Phase 5.6) | `settings.transcription_language`(migration 9 · nullable) → `Settings` → payload → `settingsView.ts` → Settings 화면. **NULL은 '아직 고르지 않았다 = 자동 감지'라는 정상 상태**이며, 기본값 정책은 스키마가 아니라 `Settings::DEFAULT`가 갖는다. **앱이 사용자 로캘을 짐작해 언어를 굳혀 두지 않는다** | **DONE** |
+| **`transcription::engine::LanguageChoice`** (Phase 5.6) | 무슨 언어로 들을지에 대한 **선택 하나**. 설정을 읽는 자리는 `commands/transcriber.rs` 하나(모델과 **같은 자리에서 한 번에** 읽는다), 엔진 호출로 옮기는 자리는 `transcription/whisper.rs` 하나다. 그 사이의 모듈은 값을 나르기만 하고 해석하지 않는다. **`Transcript.language`는 여전히 엔진이 보고한 값이며 설정 값을 베껴 넣지 않는다** | **DONE** (⚠️ 한국어 품질은 사람이 판정 · `docs/PHASE-5.6-HUMAN-REVIEW.md`) |
+| **`whisper-rs`의 `metal` feature** (Phase 5.6) | Spec §14.4가 적은 대로 Metal을 켠다. **판정은 manifest 기재가 아니라 빌드 산출물이다** — `GGML_METAL` OFF→ON · `libggml-metal.a` 생성 · `Metal`/`MetalKit` 링크 지시 · Gate가 실행한 바이너리의 `ggml_metal_*` 심볼. CoreML · OpenMP는 켜지 않았다 | **DONE** (⚠️ **속도는 측정한 적이 없다** · 런타임 GPU 사용은 UNVERIFIED · `ADR-0007` §19.2) |
+| **`transcripts.transcription_ms`** (Phase 5.6) | 전사 한 건에 걸린 시간. 재는 자리는 `transcription/run.rs`의 `Instant` 하나(단조 시계)이고 재는 구간은 모델 해석 → 오디오 읽기 → 엔진 → 정규화까지다. **사람이 읽는 문장은 Rust가 만든다**(`transcriptionLabel`). 값이 없는 옛 Transcript는 NULL이며 **화면이 그 줄을 그리지 않는다 — "0:00"이라고 말하지 않는다** | **DONE** |
+| **`platform/file_manager.rs` · `commands/saved_file.rs`** (Phase 5.6) | 내보낸 파일이 **놓인 자리**를 여는 경계. **OS를 부르는 코드는 `file_manager.rs` 안에만 있고**(INV-10), 허용을 판정하는 자리는 `SavedFiles::show` 하나다 — 정규화된 경로가 앱의 `exports/` 아래의 **파일**일 때만 열린다(`..`·symlink·디렉터리·빈 경로는 거절). **파일을 만들지도 고치지도 지우지도 않고** 디렉터리도 만들지 않는다. 새 의존성도 새 capability 권한도 쓰지 않았다 | **DONE** (⚠️ `open -R` · `explorer /select,`가 실제로 여는지는 UNVERIFIED · `ADR-0009` §16.2) |
+| **`export/portion.rs`** (Phase 5.6) | **AI Handoff 산출물의 크기와 나눔이 사는 자리 하나** — `measure`(바이트 · 글자 · 줄)와 `split`(문단 → 줄 → 문장 → 낱말 → 글자). **이어 붙이면 원본이다**(조각은 전부 입력의 부분 슬라이스이고 자리는 값이지 본문 표식이 아니다). 예산 `PORTION_MAX_BYTES = 40_000`은 **이 앱이 고른 값이지 벤더 제약이 아니다** — Notion의 `CHUNK_MAX_BYTES`에서 오지 않았다는 것을 테스트가 못박는다. 파일시스템 · 저장소 · 네트워크 · 시계를 모른다 | **DONE** (⚠️ 실제 채팅의 한도는 UNVERIFIED · `ADR-0010` §12.8.2) |
+| **`markdown.rs`의 `TranscriptShape`** (Phase 5.6) | segment를 적는 **모양** 둘 — §11의 `### HH:MM:SS` 제목(`Sectioned`)과 AI Handoff의 `HH:MM:SS 문장` 한 줄(`Compact`). **어느 segment를 · 어떤 순서로 · 없으면 무엇으로 대체하는가는 모양과 무관하게 같은 함수에서 온다**(규칙이 복제되지 않았다). **`render`는 언제나 `Sectioned`이며 §11 export 파일 형식은 바뀌지 않았다** — Phase 5의 golden 테스트가 고쳐지지 않은 채 통과한다 | **DONE** |
+| **`commands/export.rs`의 세 이름의 인자·응답** (Phase 5.6) | `get_ai_prompt` · `get_transcript_text` · `export_ai_request`가 `portion` 인자를 받고 **전체 크기와 조각의 자리**를 함께 돌려준다. **command 이름은 늘지 않았다**(ADR-0010 §8.1). 셋 다 여전히 `transcriptId`를 받지 않고(MH-5) 벤더 고유 개념도 없다(INV-9). 없는 조각을 달라는 요청은 빈 값이 아니라 실패다 | **DONE** |
+| **`screens/copyView.ts` · `aiHandoffView.ts`의 크기·조각 표현** (Phase 5.6) | 얼마나 큰가(`handoffSize`)와 몇 번째 중 몇 번째인가(`portionTaken`)를 값으로 말한다. 두 모듈이 **같은 두 함수를 쓴다**(규칙이 두 벌이 되지 않는다). **잘린 결과를 온전한 것처럼 말하는 상태가 없고**, 나머지를 마저 가져가는 수단이 값으로 있다 | **DONE** (⚠️ 실제 채팅에서의 쓸모는 사람이 판정) |
+| **`screens/savedFileView.ts`** (Phase 5.6) | 여는 동작과 그 실패의 순수 규칙. **어느 OS의 파일 관리자인지 말하지 않으며**(INV-10), 실패했을 때 *"전체 경로는 그대로 위에 있다"* 가 함께 있다 — 여는 수단은 경로의 대체가 아니라 추가다 | **DONE** |
+| **`src-tauri/tests/transcription_and_reach_invariants.rs` · `tests/transcription-and-reach-invariants.test.ts`** (Phase 5.6) | 이 Phase의 네 불변 전용 테스트 — 언어가 영어로 강제되지 않는다 · §D의 language 설정이 실재하고 왕복한다 · 내보낸 파일에 도달하는 수단이 있고 exports 밖을 열지 못한다 · 긴 handoff가 크기 때문에 조용히 실패하지 않는다. **판정할 수 없는 것을 판정하는 척하지 않는다** — 한국어 품질과 Metal 체감은 사람의 몫이라고 테스트가 직접 적는다 | **DONE** |
 | Windows 지원 검증 | §3.1 핵심 기능의 Windows 실동작 | **PLANNED** (Phase 6) |
 
 ---
@@ -222,7 +328,7 @@ Ollama 호출(`A-AI-001`) · Notion 요청(`A-NOTION-001`)은 자동 검증에�
 | 구분 | 항목 | 비고 |
 | --- | --- | --- |
 | **선택됨 · 현재 사용 중** | Tauri v2 (2.11.5) · React 19 · Vite 7 · TypeScript 5.8 · ESLint · Vitest<br>**`rusqlite` 0.40.2 (`bundled`, SQLite 3.53.2)** — 제품 경로에서 실제로 쓰인다 | persistence 선택 근거는 `docs/ADR-0001-local-persistence.md` |
-| **선택됨 · 추론 미실행** | **`whisper-rs` 0.16 + `rubato` 5** — 제품 전사 경로에서 쓰인다 | ⚠️ 실제 모델로 추론한 적이 없다 (`A-TRANS-001`) |
+| **선택됨 · 추론은 돌았으나 쓸 수 있는 결과가 없다** | **`whisper-rs` 0.16 + `rubato` 5** — 제품 전사 경로에서 쓰인다. **Phase 5.6이 `whisper-rs`의 `metal` feature를 켰다** (TASK-069 · 새 crate를 들여오지 않는다) | ⚠️ 실제 모델로 두 번(2026-09-05 · 2026-09-07) 추론했으나 **읽을 만한 전사가 나온 적이 없다** (`A-TRANS-001`) |
 | **선택됨 · 실제 호출 미실행** | **`ureq` 3.4.0 (`default-features = false, features = ["rustls"]`)** — 로컬 Ollama REST(`ai/ollama/network.rs`)와 Notion HTTPS(`notion/network.rs`)를 부르는 자리에서 쓰인다 | ⚠️ 실제 서버에 요청을 보낸 적이 없다 (`A-AI-001` · `A-NOTION-001`). **Phase 5가 `rustls`를 명시적으로 켰다** — ADR-0008 §12.2가 예고한 대로 HTTPS가 실제로 필요해진 시점이다 |
 | **선택됨 · 실제 저장소 미접근** | **`keyring` 3.6.3 (`apple-native` + `windows-native`)** — Notion integration token을 담는 유일한 자리(`platform/secret_store.rs`) | ⚠️ 자동 테스트는 메모리 double만 쓰며 실제 OS 자격증명 저장소를 건드리지 않는다. feature 전체 목록은 **UNVERIFIED** — 확인된 것은 두 feature 이름이 실재하고 플랫폼 API가 들어왔다는 것까지다 (`ADR-0009` §15.2.4) |
 | **선택됨 · 사용 중** | **`sha2` 0.10** — export 경로에서 쓰인다 | `Cargo.lock`이 고정한다 |
@@ -263,6 +369,19 @@ webview가 이미 갖고 있(을 것으로 기대되)는 것을 경계 하나 �
 의존성을 얹는 선택이라 탈락했다 — 필요가 증명되면 그때 얹는다 (ADR-0010 §7.3).
 **Manual AI Handoff는 새 외부 경계를 만들지 않는다** — 나가는 행위의 주체가 사람이므로
 §12의 세 단계 구분(완전 로컬 · 로컬 AI · 외부)이 그대로다.
+
+**Phase 5.7도 의존성을 하나도 더하지 않았다** — `package.json`도 `Cargo.toml`도 바뀌지 않았고
+새 Tauri 권한 항목도 없다. 입력 레벨은 **이미 캡처 경로를 지나는 샘플에서 산술로만** 만들어지고,
+붕괴 판정은 **이미 파싱이 끝난 segment 열에서 세기만** 한다. 둘 다 **완전 로컬** 단계 안이며
+기기 밖으로 나가는 통로가 없다.
+
+**Phase 5.6이 `Cargo.toml`에서 바꾼 것은 한 줄이다** — `whisper-rs`에 `metal` feature를 켠 것.
+**새 crate는 하나도 들어오지 않았고 `Cargo.lock`도 바뀌지 않았다** (이 feature는 새 패키지를
+끌어오지 않는 빌드 스위치이며, 그래서 판정을 lock이 아니라 빌드 산출물에 걸었다 —
+`ADR-0007` §19.2). **내보낸 파일의 자리를 여는 경계도 의존성을 더하지 않았다** — Tauri 플러그인
+없이 표준 라이브러리의 프로세스 실행 하나를 쓰고, `src-tauri/capabilities/default.json`의
+permissions는 `["core:default"]` 그대로다 (`ADR-0009` §16.2). AI Handoff의 크기와 나눔은
+순수 Rust 산술이다. **이 Phase도 새 외부 경계를 만들지 않았다** — §12의 세 단계 구분이 그대로다.
 
 ---
 
@@ -624,12 +743,164 @@ Windows에서의 clipboard · 화면                     ← Phase 6
 
 이 Phase의 입력도 전부 fixture였다 — `A-TRANS-001` · `A-AI-001`이 여전히 유효하기 때문이다.
 
-### Phase 5.6 — Transcription Correctness & Reach · **PLANNED**
+### Phase 5.6 — Transcription Correctness & Reach · 2026-09-07 · **engineering DONE · Human Review 미실행**
 
-2026-09-05 운영자의 첫 실제 전사 실행이 드러낸 결함(언어 미설정 · Metal 미사용)을 메운다.
-새 제품 방향이 아니라 **이미 Spec에 있던 것이 구현되지 않은 자리**다. Goal은
-`phase-prompt/05.6-transcription-correctness-and-reach.md`, 실측 기록은
-`docs/PHASE-3-TRANSCRIPTION-SMOKE-TEST.md` 부록.
+**로드맵에 없던 삽입이다** (운영자 결정 · 2026-09-05). 첫 실제 전사 실행이 드러낸 결함
+(언어 미설정 · Metal 미사용 · 내보낸 파일에 도달 못 함 · 긴 handoff가 채팅에 안 들어감)을 메운다.
+**새 제품 방향이 아니라 이미 Spec에 있던 것이 구현되지 않은 자리다** — 그래서 새 ADR을 쓰지 않고
+기존 ADR을 갱신했다. Goal은 `phase-prompt/05.6-transcription-correctness-and-reach.md`,
+실측 기록은 `docs/PHASE-3-TRANSCRIPTION-SMOKE-TEST.md` 부록.
+
+**이 Phase는 두 번에 나눠 끝났다.** TASK-066 ~ TASK-071이 먼저 돌았고, 2026-09-07의 두 번째
+실사용이 더 급한 결함을 드러내 **Phase 5.7이 그 앞으로 들어갔으며**, 남은 넷(TASK-072 ~
+TASK-075)이 그 뒤에 돌았다. **그 순서 자체가 기록이다** — 위의 갱신 이력과 Phase 5.7 절이
+그것을 그대로 갖고 있다.
+
+Task 10개(TASK-066 ~ TASK-075).
+
+| Task | 결과물 |
+| --- | --- |
+| TASK-066 | `ADR-0007` §17 — 언어 처리 결정과 Metal 결정 |
+| TASK-067 | 전사 언어 설정을 저장소부터 화면까지 (migration 9) |
+| TASK-068 | 전사가 설정된 언어를 실제로 쓴다 — 영어 강제 제거 (`LanguageChoice`) |
+| TASK-069 | `whisper-rs`의 `metal` feature — **판정은 빌드 산출물로** |
+| TASK-070 | `transcripts.transcription_ms` — 걸린 시간 기록 (migration 10) |
+| TASK-071 | 내보낸 파일이 있는 자리를 화면에서 연다 (`platform/file_manager.rs` · `commands/saved_file.rs`) |
+| TASK-072 | AI Handoff 산출물의 크기와 순서대로 나누기 (순수 모듈 `export/portion.rs`) |
+| TASK-073 | 그 크기와 나눔을 command 경계와 AI Note 탭까지 |
+| TASK-074 | Phase 5.6 네 불변 전용 테스트 |
+| TASK-075 | ADR 갱신(`ADR-0007` §19 · `ADR-0009` §16 · `ADR-0010` §12.8) · Human Review 절차 · SYSTEM-MAP |
+
+핵심 성질:
+
+```text
+고르지 않음은 영어가 아니다   — 설정이 비면 감지를 켠다. 언어 파라미터를 건드리지 않는 코드
+                                경로가 남지 않았다. whisper.cpp의 기본값 "en"이 조용히 쓰이던
+                                자리가 사라졌다
+읽는 자리 하나 · 옮기는 자리 하나 — 설정은 commands/transcriber.rs 에서 모델과 함께 한 번에
+                                읽히고, 엔진 호출로 옮기는 것은 transcription/whisper.rs 하나다.
+                                그 사이 모듈은 값을 나르기만 한다 (§13의 교체 경계가 그대로다)
+결과는 여전히 엔진이 말한 값   — Transcript.language 에 설정 값을 베껴 넣지 않는다.
+                                엔진이 말하지 못하면 비어 있다
+켜졌다는 판정은 산출물로       — metal feature 를 켠 뒤 GGML_METAL 이 ON 이 되고
+                                libggml-metal.a 가 생기고 링크된 바이너리에 심볼이 있다.
+                                **manifest 에 이름이 적혔다는 것으로 판정하지 않았다**
+모르는 것을 0이라고 하지 않는다 — 전사 소요 시간은 nullable 이고 DEFAULT 가 없다.
+                                값이 없는 옛 Transcript 는 화면에서 그 줄이 아예 없다
+여는 쪽이 범위를 정한다        — webview 가 임의 경로를 열 수 없다. 정규화된 경로가 앱의
+                                exports/ 아래의 파일일 때만 열리고, 그 판정은 한 자리에 있다
+경로는 사라지지 않았다        — 여는 수단은 대체가 아니라 추가다. 실패해도 전체 경로가 남는다
+나눠도 잃지 않는다            — 조각을 이어 붙이면 원본이다. 자리는 값이지 본문 표식이 아니다
+예산은 앱이 고른 값이다        — 40,000 B 는 어떤 채팅의 확인된 한도도 아니고 Notion 의
+                                벤더 제약에서 오지도 않았다. 테스트가 그 독립성을 못박는다
+§11 형식은 바뀌지 않았다      — AI 경로만 압축 모양을 고른다. render 는 언제나 Sectioned 이고
+                                Phase 5 의 golden 테스트가 고쳐지지 않은 채 통과한다
+```
+
+검증: 이 Phase의 마지막 엔지니어링 Task(TASK-074)를 돌릴 때 **Runtime이 직접 실행한**
+`build` · `lint` · `test` Gate가 셋 다 PASS · exit 0이고, 그 `test` 로그가
+**자동 테스트 1,471개** (vitest 586 · Rust 885)를 적는다 — 원본은 Runtime 소유 경로
+`.loop-local/runs/RUN-20260907T062848Z-TASK-074/`(`gate-report.json` · `gates/test/stdout.log`).
+**마무리 Task(TASK-075)는 문서 전용이고 Gate를 선언하지 않았다** — 그 뒤로 바뀐 것이 `docs/`
+아래뿐이므로 이 수치가 그대로 선다.
+
+**⚠️ IMPLEMENTED / VERIFIED로 기록하지 않는 것:**
+
+```text
+한국어 회의가 읽을 만하게 전사된다             ← NOT RUN (사람이 판정한다)
+ggml-base 로 충분한가 / 더 큰 모델이 필요한가   ← NOT RUN (A-TRANS-001 의 실질적 답)
+Metal 을 켜서 전사가 빨라진다                  ← **측정한 적이 없다.** before 값이 저장소에 없다
+런타임에 GPU 가 실제로 잡힌다                  ← UNVERIFIED (확인된 것은 바이너리에 링크됐다까지)
+open -R · explorer /select, 가 그 창을 연다     ← NOT RUN (자동 테스트는 double 을 쓴다)
+예산 40,000 B 가 실제 AI 채팅에서 맞는 크기다   ← UNVERIFIED (확인된 한도가 아니다)
+조각을 순서대로 넣는 것이 사람에게 쓸 만하다    ← NOT RUN (사람이 판정한다)
+whisper-rs 0.16.0 의 [features] 를 crate 소스에서 읽었다 ← 읽지 못했다. cargo 가 파싱해 남긴
+                                                 declared_features 를 읽었다 (ADR-0007 §19.2)
+```
+
+절차와 **빈 기록표**는 `docs/PHASE-5.6-HUMAN-REVIEW.md`.
+**`A-` deferred assumption을 더하지 않았다** — 이 Phase가 남긴 다섯은 주관적 Human Review
+항목이며, `A-TRANS-001`은 **새로 만든 것이 아니라 계속 열려 있던 것**이다 (§7).
+구현 대조는 `ADR-0007` §19 · `ADR-0009` §16 · `ADR-0010` §12.7 · §12.8.
+
+**성공 기준 1(언어)은 실사용으로 한 번 확인됐다** — 2026-09-07의 두 번째 실행에서 설정한 `ko`가
+엔진에 도달했고 `auto-detected language: en` 줄이 사라졌다 (`phase-prompt/05.7` R-1).
+**그 확인이 "한국어가 읽을 만하게 전사됐다"는 뜻은 아니다** — 그 실행의 결과는 다른 이유로
+붕괴했고(§5의 Phase 5.7 절), 품질 판정은 여전히 사람의 몫이다.
+
+### Phase 5.7 — Recording Level + Transcription Collapse · 2026-09-07 · **engineering DONE · Human Review 미실행**
+
+**로드맵에 없던 삽입이다** (운영자 결정 · 2026-09-07). Phase 5.6이 부분 완료인 상태에서 그 앞으로
+들어갔고, **새 제품 방향이 아니다** — 2026-09-07 운영자의 두 번째 실사용이 드러낸 두 침묵을 메운다:
+녹음 중에는 소리가 담기지 않는다는 것을 말해 주지 않았고, 전사 뒤에는 붕괴한 결과를 완료라고 말했다.
+
+Task 9개(TASK-076 ~ TASK-084).
+
+| Task | 결과물 |
+| --- | --- |
+| TASK-076 | `ADR-0007` §18(붕괴 판정 규칙) · `ADR-0003` §16(입력 레벨 경계) — 규칙과 임계값을 값으로 확정 |
+| TASK-077 | 붕괴 판정 순수 모듈 (`transcription/collapse.rs`) |
+| TASK-078 | 저장 직전 관문 — 붕괴한 전사를 `done`으로 저장하지 않는다 (`transcription/run.rs`) |
+| TASK-079 | 붕괴 실패가 화면에서 별도 갈래로 읽힌다 (`screens/transcriptView.ts`) |
+| TASK-080 | 입력 레벨 순수 모듈 (`audio/level.rs`) |
+| TASK-081 | 파일에 쓰이는 통로에서 레벨을 갱신하고 status payload로 내보낸다 (`audio/capture.rs` · `commands`) |
+| TASK-082 | 녹음 화면의 레벨 표시와 **정지 전** 경고 (`ipc/types.ts` · `screens/recordingView.ts` · `RecordingScreen.tsx`) |
+| TASK-083 | 성공 기준 3의 측정 절차 — `PHASE-3-TRANSCRIPTION-SMOKE-TEST.md` 부록 2 |
+| TASK-084 | 이 Phase의 다섯 불변 전용 테스트 (`tests/level-and-collapse-boundary.test.ts`) |
+
+핵심 성질:
+
+```text
+레벨은 파일과 같은 통로에서 잰다  — 실시간 오디오 콜백이 아니라 drain이다. 일시정지 구간은
+                                    파일에도 레벨에도 도달하지 않는다
+샘플은 바뀌지 않는다              — 게인도 정규화도 없다. 들어온 샘플이 그대로 WAV로 쓰인다
+모르는 것을 낮다고 말하지 않는다   — 잰 것이 없으면 null이고, 화면의 'unknown'은 판정이 아니다
+판정 규칙이 한 자리다             — dBFS 환산·임계값은 level.rs, 붕괴 규칙은 collapse.rs.
+                                    화면에도 run.rs에도 엔진에도 복제되지 않았다
+저장을 막을 뿐 고치지 않는다      — 붕괴 판정은 저장 직전에 있고, 저장된 Transcript를
+                                    지우거나 고치는 경로는 생기지 않았다 (INV-2)
+새 실패 종류를 만들지 않았다      — 이미 있는 TranscriptionOutputUnusable을 쓴다 (§13)
+원인을 단정하지 않는다            — 같은 붕괴가 낮은 레벨·잘못된 언어·부족한 모델 어디서도
+                                    나오므로, 화면은 하나를 지목하지 않고 할 수 있는 일을 늘어놓는다
+```
+
+검증: test Gate green · **자동 테스트 1,405개** (vitest 571 · Rust 834).
+
+**⚠️ IMPLEMENTED / VERIFIED로 기록하지 않는 것:**
+
+```text
+실제 마이크에서 레벨 표시가 맞는 값을 보인다        ← NOT RUN (가짜 SampleSource로만 검증)
+사람이 그 표시를 보고 마이크나 자리를 고칠 수 있다   ← 사람이 판정한다
+붕괴 판정이 실제 whisper 출력에서 옳게 걸린다        ← NOT RUN (값으로 만든 segment 열로만 검증)
+임계값 셋(-36 dBFS · u/n 0.20 · r/n 0.50)이 옳은 값인가 ← 관측 두셋에서 고른 값이다. UNVERIFIED
+레벨을 올리면 9/7 오디오가 구제되는가               ← **[미측정]** (성공 기준 3 · 아래)
+레벨을 올려 다시 녹음한 회의가 읽을 만하게 전사되는가 ← NOT RUN (A-TRANS-001의 실질적 답)
+```
+
+**성공 기준 3은 절차까지만 왔다.** `docs/PHASE-3-TRANSCRIPTION-SMOKE-TEST.md` **부록 2**가
+원본을 읽기만 하고 레벨을 올린 사본을 만드는 절차 · 같은 조건으로 전사하는 절차 · 재는 방법 ·
+9/7 원본값과 나란히 놓는 비교표를 확정했으나, **오른쪽 열은 전부 `[미측정]`이다** (부록2-4 ·
+막은 것은 부록2-5). **그러므로 "레벨을 올리면 구제된다"고도 "구제되지 않는다"고도 적지 않는다.**
+
+절차와 **빈 기록표**는 `docs/PHASE-5.7-HUMAN-REVIEW.md`.
+**`A-` deferred assumption을 더하지 않았다** — 이 Phase가 남긴 넷은 주관적 Human Review 항목이며,
+`A-TRANS-001`은 **새로 만든 것이 아니라 계속 열려 있던 것**이다 (§7).
+
+#### 다음 Phase 후보 — **어느 것도 이 Phase에서 구현되지 않았다 (CANDIDATE)**
+
+**아래는 계획도 결정도 아니다.** 코드에 없고, 이 표가 그것들을 DONE으로 만들지 않는다.
+
+| # | 후보 | 왜 이 Phase에서 제외됐는가 (한 줄) |
+| --- | --- | --- |
+| **C-1** | **청크 분할** — 긴 오디오를 나눠 전사한다 | 9/4 실험에서 효과를 본 처방이지만 **이번 실패의 원인이 그것이 아니며**(R-3), 원인을 확인하기 전에 옮겨 오지 않기로 했다 |
+| **C-2** | **청크마다 state 재생성** — 윈도우 사이로 환각이 번지는 것을 끊는다 | C-1과 같은 9/4 실험의 처방이고 **청크 분할 없이는 성립하지 않는다** — C-1이 정해지기 전에는 정할 것이 없다 |
+| **C-3** | **반복 차단** — 같은 문장이 이어지면 디코딩을 멈춘다 | 같은 9/4 처방이며, **이 Phase는 반복을 막는 대신 반복을 판정해 저장을 막는 쪽**을 골랐다 (ADR-0007 §18) — 둘 다 하기 전에 붕괴 판정이 실사용에서 옳은지를 먼저 본다 |
+| **C-4** | **VAD (음성 구간 검출)** | 무음 구간 환각을 줄이는 수단이지만 **2026-09-07의 붕괴는 무음 구간이 아니라 전 구간**에서 일어났다 — 이 실패를 설명하지 못한다 (9/5 부록 결과 5의 [미검증]이 그대로다) |
+| **C-5** | **자동 언어 감지 개선** — 확신도 0.478의 `en` 오판 | 감지가 이 오디오에서 실패한 것은 기록해 뒀지만, **설정으로 언어를 지정하는 경로가 동작하므로 사람에게 막힌 길이 아니다** (Phase 5.6 R-1) |
+| **C-6** | **입력 정규화를 제품에 넣는가** — 전사 직전에 레벨을 올려 넣을 것인가 | **측정 대기.** Phase Goal이 *"측정 전에 정규화 기능을 구현하지 않는다"* 로 못박았고, 그 측정(부록 2)의 결과 칸이 아직 `[미측정]`이다 |
+
+C-6과 **녹음 시점의 마이크 게인을 앱이 조정할 것인가**는 서로 다른 결정이다 — 후자는 녹음 엔진
+경계의 문제이며 `ADR-0003` §16이 이 Phase의 범위 밖으로 보류했다.
 
 ### Phase 6 — Cross-platform Validation & Hardening · **PLANNED**
 ---
@@ -638,8 +909,8 @@ Windows에서의 clipboard · 화면                     ← Phase 6
 
 | | 무엇을 보장하는가 | 수단 |
 | --- | --- | --- |
-| **Automated validation** | 위의 전부 + **Markdown 렌더링 결정성 · 파일명 정규화 · 무손실 분할과 재조립 · Notion 요청 조립과 실패 변환 · `Retry-After` 준수 · 중복 페이지 없는 재시도 · SecretStore 경계** + **Manual AI Handoff 산출물 셋의 결정성과 기대 문자열 · 프롬프트 상수 불변 · MH-1~MH-8 · clipboard 실패의 값 · UI 기반 다섯 검사** — **자동 테스트 1,238개** (web `vitest` 494 · Rust `cargo test` 744) | `build` · `lint` · `test` Gate + 독립 Verifier<br>Task별 Gate는 최소·관련 범위로 좁힐 수 있으나 **Phase 종료 시에는 저장소 전체에 세 Gate를 모두 돌린다** (2026-09-04 운영자 결정) |
-| **Human validation / witness** | 실제 마이크 음질 · 재생 음질 · **실제 Whisper 추론(`A-TRANS-001`)** · **실제 Ollama 호출과 AI Note의 유용성(`A-AI-001`)** · **실제 Notion 전송과 페이지 품질 · 1시간 transcript 온전성(`A-NOTION-001`)** · export Markdown의 외부 도구 호환성 · **화면의 시각적 완성도** · **Windows 실동작** · **연기된 recording 장치 검증(ADR-0003 §12)** + **실제 webview에서의 clipboard 동작 · Manual AI Handoff 산출물이 실제 외부 AI 채팅에서 쓸 만한가 · 로컬 provider가 '선택적 · 고급'으로 읽히는가** (`docs/PHASE-5.5-HUMAN-REVIEW.md` — **기록표는 비어 있다**) | 사람이 직접 확인 |
+| **Automated validation** | 위의 전부 + **Markdown 렌더링 결정성 · 파일명 정규화 · 무손실 분할과 재조립 · Notion 요청 조립과 실패 변환 · `Retry-After` 준수 · 중복 페이지 없는 재시도 · SecretStore 경계** + **Manual AI Handoff 산출물 셋의 결정성과 기대 문자열 · 프롬프트 상수 불변 · MH-1~MH-8 · clipboard 실패의 값 · UI 기반 다섯 검사** + **입력 레벨의 dBFS·판정·문장(무음 · -42 · -26 · 풀스케일 · 빈 입력 · 덩어리 경계 불변) · 붕괴 판정의 임계값 경계와 수치 보존 · 붕괴한 출력이 Transcript를 남기지 않고 current를 바꾸지 않는다는 것 · 화면의 붕괴 갈래와 레벨 세 갈래 · 이 Phase의 다섯 불변** + **전사 언어가 엔진 경계까지 값으로 도달한다는 것(고르지 않으면 감지 · 고르면 지정) · 언어 설정의 왕복과 다른 설정 저장에도 지워지지 않음 · 전사 소요 시간의 저장·재조회와 '값 없음' 경로 · 여는 대상이 exports 아래로 제한되고 `..`·symlink·디렉터리·빈 경로가 거절된다는 것 · OS 호출이 `platform/` 안에만 있다는 것 · 나눔의 결정성·무손실·순서 보존·경계값 · §11 Markdown export 형식 불변 · Phase 5.6의 네 불변** — **자동 테스트 1,471개** (web `vitest` 586 · Rust `cargo test` 885 — TASK-074 Run에서 **Runtime이 직접 돌린** `test` Gate 로그의 값이다 · §5) | `build` · `lint` · `test` Gate + 독립 Verifier<br>Task별 Gate는 최소·관련 범위로 좁힐 수 있으나 **Phase 종료 시에는 저장소 전체에 세 Gate를 모두 돌린다** (2026-09-04 운영자 결정) |
+| **Human validation / witness** | 실제 마이크 음질 · 재생 음질 · **실제 Whisper 추론이 읽을 만한 전사를 내는가(`A-TRANS-001`)** · **실제 Ollama 호출과 AI Note의 유용성(`A-AI-001`)** · **실제 Notion 전송과 페이지 품질 · 1시간 transcript 온전성(`A-NOTION-001`)** · export Markdown의 외부 도구 호환성 · **화면의 시각적 완성도** · **Windows 실동작** · **연기된 recording 장치 검증(ADR-0003 §12)** + **실제 webview에서의 clipboard 동작 · Manual AI Handoff 산출물이 실제 외부 AI 채팅에서 쓸 만한가 · 로컬 provider가 '선택적 · 고급'으로 읽히는가** (`docs/PHASE-5.5-HUMAN-REVIEW.md` — **기록표는 비어 있다**) + **레벨 표시로 "지금 소리가 안 담기고 있다"를 알 수 있는가 · 마이크나 자리를 고쳤을 때 레벨이 올라가는가 · 붕괴 실패 메시지로 무엇을 해야 할지 알 수 있는가 · 레벨을 올려 다시 녹음한 회의가 읽을 만하게 전사되는가** (`docs/PHASE-5.7-HUMAN-REVIEW.md` — **기록표는 비어 있다**) + **한국어 회의가 읽을 만하게 전사되는가 · `ggml-base`로 충분한가(`A-TRANS-001`의 실질적 답) · Metal 전후로 체감이 달라지는가(before 값을 직접 만들어야 한다) · 내보낸 파일을 실제로 열 수 있는가 · 긴 handoff를 실제 AI 채팅에 넣을 수 있는가** (`docs/PHASE-5.6-HUMAN-REVIEW.md` — **기록표는 비어 있다**) | 사람이 직접 확인 |
 
 > Phase 1에서 사람이 확인한 것: 번들 `.app`의 Info.plist 병합(확인됨) ·
 > 권한 문구(확인됨) · 화면 레이아웃(**소스 수준 검토만 — 실행 화면 확인은 사용자 몫**).
@@ -709,6 +980,68 @@ Windows에서의 clipboard · 화면                     ← Phase 6
   `whisper.rs`가 언어를 설정하지 않아 한국어가 영어로 강제 디코딩됐다. Metal도 꺼져 있다.
   **`A-TRANS-001`은 해소되지 않았다.** 실측 기록은
   `docs/PHASE-3-TRANSCRIPTION-SMOKE-TEST.md` 부록, 수정은 Phase 5.6.
+  **그 둘은 Phase 5.6의 TASK-067 ~ TASK-069로 실제로 고쳐졌고, 2026-09-07의 두 번째 실사용이
+  그것을 확인했다** (설정한 `ko`가 엔진에 도달했다 · `phase-prompt/05.7` R-1).
+- **⚠️ `A-TRANS-001`은 여전히 열려 있다 — 두 번째 실사용도 읽을 만한 전사를 내지 못했다**
+  (2026-09-07). 51분 회의가 **고유 문장 2개**(한 문장이 99.0% · 30초 윈도우마다 하나씩)로
+  나왔고 제품은 그것을 `done`으로 저장했다. 같은 마이크의 9/4 녹음보다 평균 입력 레벨이
+  **16.4 dB 낮았다**(-42.2 vs -25.8 dBFS).
+  **[유력한 설명]** 입력 레벨이 낮아 whisper가 음성을 찾지 못하고 빈 자리를 학습 데이터의
+  잔재로 채웠다. **[미검증] 레벨이 유일한 원인인지, 레벨을 올리면 이 오디오가 구제되는지는
+  확인되지 않았다** — 절차는 `docs/PHASE-3-TRANSCRIPTION-SMOKE-TEST.md` 부록 2에 있고
+  **결과 칸은 전부 `[미측정]`이다.**
+  **이 가정이 닫히는 조건은 하나다 — 사람이 입력 레벨을 올려 다시 녹음한 회의가 제품 경로에서
+  읽을 만하게 전사되는 것을 보는 것이다** (`docs/PHASE-5.7-HUMAN-REVIEW.md` HR-4).
+  **Phase 5.7은 이 가정을 닫지 않는다.** 이 Phase가 한 것은 *붕괴를 성공이라 부르지 않는 것*과
+  *녹음 중에 레벨을 보이는 것*이지, *읽을 만한 전사를 내는 것*이 아니다.
+- **⚠️ 레벨 판정 구간과 붕괴 임계값은 관측 두셋에서 고른 값이다** — `-36 dBFS`(쓸 만함) ·
+  `-60 dBFS`(소리 없음) · `u/n <= 0.20` · `r/n >= 0.50` · `n >= 20`. 근거는 9/4 · 9/5 · 9/7의
+  세 실행뿐이고, 특히 `r/n`의 문턱은 가장 가까운 붕괴 관측(62.1%)과 **12.1%p** 떨어져 있을
+  뿐이다 (`ADR-0007` §18.2 · `ADR-0003` §16.4). **설정 항목으로 열지 않았다** — 틀렸다면 고칠
+  자리는 각 모듈의 상수다. **실사용에서 오판(정상 전사를 붕괴로 부르거나 그 반대)이 나오는지는
+  아직 확인되지 않았다.**
+- **⚠️ 누적 레벨은 녹음 도중의 개선을 곧바로 보여 주지 않는다** — 표시되는 값이 *지금 이 순간*이
+  아니라 *지금까지 파일에 쓰인 전체*의 평균 RMS와 누적 피크다. 마이크를 고쳐도 평균은 천천히
+  올라오고 **누적 피크는 아예 내려가지 않는다.** 최근 구간 미터가 필요한지는 이 Phase가 정하지
+  않았다 (`ADR-0003` §16.3). **레벨이 낮다고 앱이 녹음을 막거나 멈추지 않는다** — 알릴 뿐이다.
+- **⚠️ 이미 저장된 붕괴한 Transcript는 그대로 남아 있다** — 붕괴 판정은 **저장을 막는 자리**에
+  있고, 저장된 것을 고치거나 지우는 경로는 생기지 않았다 (INV-2). 2026-09-07에 `done`으로 저장된
+  그 Transcript도 `current`인 채로 있다. **소급 정리 기능은 만들지 않았다.**
+- **⚠️ Metal은 켜졌지만 그것이 빨라졌다는 뜻은 아니다** — 확인된 것은 **빌드 산출물이
+  달라졌다**까지다 (`GGML_METAL` OFF→ON · `libggml-metal.a` · 링크된 바이너리의 `ggml_metal_*`
+  심볼 · `ADR-0007` §19.2). **이 저장소는 전사 속도를 한 번도 측정한 적이 없고**, 런타임에 GPU가
+  실제로 잡히는지도 확인하지 않았다. **전사 소요 시간을 기록하는 열은 Metal을 켠 것과 같은
+  Phase에 생겼으므로 "Metal 전"의 값이 저장소 어디에도 없다** — 비교하려면 사람이 빌드를 한 번
+  되돌려 before를 직접 만들어야 한다 (`docs/PHASE-5.6-HUMAN-REVIEW.md` §4.2).
+  2026-09-05의 26분도 2026-09-07의 4.30분도 **붕괴한 디코딩의 소요 시간이라 기준값이 아니다.**
+- **⚠️ `whisper-rs`의 feature 목록을 crate 소스에서 읽지 못했다** — `metal`이라는 이름이 두
+  crate에 선언돼 있다는 것은 **cargo가 manifest를 파싱해 fingerprint에 남긴 `declared_features`**
+  에서 확인했다. **crate의 `Cargo.toml` 파일 자체를 연 것이 아니다** (`ADR-0007` §19.2).
+  registry 접근도 네트워크도 없는 제약은 그대로다.
+- **⚠️ 내보낸 파일의 자리를 여는 것이 실제로 동작하는지 확인되지 않았다** — `open -R`도
+  `explorer /select,`도 이 저장소의 어떤 Run에서도 실행된 적이 없고, 두 이름과 플래그는 각
+  플랫폼의 관례를 따른 것이다 (`ADR-0009` §16.2의 [E4]). 자동 테스트는 언제나 double을 쓴다 —
+  **부르면 검사가 도는 동안 창이 열리기 때문에** 그것이 의도된 설계다. **확인하지 못한 것에
+  제품을 걸지 않았다**: 실패하면 정의된 실패가 화면에 도착하고 **전체 경로는 그대로 남아**
+  사람이 직접 찾아갈 수 있다. 확인은 `docs/PHASE-5.6-HUMAN-REVIEW.md` HR-4다.
+- **⚠️ AI Handoff의 나눔 예산은 확인된 한도가 아니다** — `PORTION_MAX_BYTES = 40_000`은
+  **이 앱이 고른 값**이며 어떤 AI 채팅의 확인된 입력 한도도 아니다 (`ADR-0010` §12.8.2).
+  Notion의 `CHUNK_MAX_BYTES`에서 유도되지도 않았고, 그 독립성은 테스트가 못박는다.
+  **틀렸다면 고칠 자리는 상수 한 줄이며**, 실제 채팅이 조각을 거절하는지는
+  `docs/PHASE-5.6-HUMAN-REVIEW.md` HR-5 · §8.6에서 처음 관측된다.
+- **⚠️ 한국어 전사 품질과 모델 크기는 여전히 판정되지 않았다** — Phase 5.6은 **여러 모델을 쓸
+  수 있게** 만들었을 뿐 **어느 것이 충분한지 판정하지 않기로 했다** (`ADR-0007` §17.4 · §19.5).
+  `PRODUCT-SPEC` §14.4의 *"한국어+영어 혼용 1시간 녹음에 `large-v3` / `large-v3-turbo`가 현실적"*
+  이라는 서술은 **여전히 UNVERIFIED이며 실측된 적이 없다.** 첫 실측은
+  `docs/PHASE-5.6-HUMAN-REVIEW.md` HR-2에서 나온다.
+- **⚠️ 사용자가 고른 언어인지 엔진이 감지한 언어인지가 Transcript에 남지 않는다** —
+  `ADR-0007` §17.1.4-2는 그 구분이 Transcript에서 보여야 한다고 적었지만, **구현은 출처를 담는
+  값을 만들지 않았다.** 저장되는 것은 여전히 엔진이 보고한 코드 하나이며, 그 전사가 지정으로
+  만들어졌는지 감지로 만들어졌는지는 **그때의 설정을 함께 봐야** 알 수 있다 (`ADR-0007` §19.4).
+  필요해지면 열 하나를 더하는 일이다.
+- **⚠️ 실시간 전사 진행률은 구현되지 않았다** — `phase-prompt/05.6`이 이 Phase의 성공 기준에서
+  제외했고(R-6은 관측으로만 남아 있다), Phase 5.6이 책임진 것은 **시간이 기록으로 남는 데까지**다.
+  긴 전사가 도는 동안 화면에 변화가 없는 것은 그대로다.
 - **⚠️ AI Note 경로가 실제 추론 서버에서 검증되지 않았다** — 계약 · adapter · 화면이
   컴파일되고 자동 검증을 지나지만, **실제 Ollama에 요청이 나간 적이 한 번도 없다**
   (`ASSUMPTION A-AI-001`). §14.5의 엔드포인트·파라미터 이름은 2026-09-01 기록이며 이 Phase가
@@ -736,7 +1069,17 @@ Windows에서의 clipboard · 화면                     ← Phase 6
 | `docs/PHASE-5-NOTION-SMOKE-TEST.md` | **실제 Notion smoke test 절차와 빈 기록표.** §10.1이 `A-NOTION-001`의 정본이고 §12가 확인되지 **않은** 것의 목록이다 |
 | `docs/ADR-0010-manual-ai-handoff.md` | **Manual AI Handoff 결정** — 두 제품 방향 변경의 기록 · AI-ready 산출물의 형식과 순서 · `export::markdown` 재사용 · `ai::prompt` 상수를 고치지 않는 재사용 · clipboard 경계의 자리와 탈락 후보 · command 이름 셋 · MH-1~MH-8의 판정 수단 · **§12 구현 대조와 남은 UNVERIFIED** |
 | `docs/PHASE-5.5-HUMAN-REVIEW.md` | **자동으로 판정할 수 없는 셋(화면 · Manual AI Handoff의 유용성 · 로컬 provider의 위치)의 Human Review 절차와 빈 기록표.** §6이 이 Phase가 확인하지 **않은** 것의 정본이다 |
-| `phase-prompt/05.6-transcription-correctness-and-reach.md` | 2026-09-05 실제 전사 실행이 드러낸 결함의 Goal (PLANNED) |
+| `phase-prompt/05.6-transcription-correctness-and-reach.md` | 2026-09-05 실제 전사 실행이 드러낸 결함의 Goal · **R-1 ~ R-6의 실측 전제** (**engineering DONE** — §5) |
+| `docs/ADR-0007-transcription-engine.md` **§17** | **전사 언어 결정과 Metal 결정** — whisper.cpp의 기본값이 `"en"`이고 감지가 꺼져 있다는 사실 · 붕괴의 원인이 디코더 설정이 아니라는 것 · 앞으로 무엇을 부를 것인가 · Spec §D와의 연결 |
+| `docs/ADR-0007-transcription-engine.md` **§19** | **§17의 구현 결과** — 언어가 어디서 읽혀 어디까지 도달하는가 · Metal이 켜졌다는 판정의 근거(산출물) · 전사 소요 시간이 남는 자리 · **계획과 달라진 다섯** · `A-TRANS-001`이 여전히 열려 있다는 것 |
+| `docs/ADR-0009-notion-and-export.md` **§16** | **내보낸 파일의 자리를 여는 결정** — 왜 경로를 보여 주는 것만으로 부족했는가(2026-09-05) · 무엇이 그 자리를 여는가 · **왜 앱의 `exports/` 아래로 제한되는가** · 확인하지 못한 것 |
+| `docs/ADR-0010-manual-ai-handoff.md` **§12.7 · §12.8** | **크기와 나눔** — 인자와 응답이 넓어진 자리(이름은 늘지 않았다) · 실측(99 KB · 5,139줄 · 제목 1,711개) · **예산이 이 앱이 고른 값이지 벤더 제약이 아니라는 것** · 나눔 규칙 · **§11 export 형식이 바뀌지 않았다는 판정 근거** |
+| `docs/PHASE-5.6-HUMAN-REVIEW.md` | **자동 Gate가 판정할 수 없는 다섯(한국어 전사 품질 · 모델 크기 · Metal 체감 · 파일 도달 · handoff의 실제 사용)의 Human Review 절차와 빈 기록표.** §4.2가 **Metal before 값을 직접 만드는 절차**이고, §7이 이 Phase가 확인하지 **않은** 것의 정본이다 |
+| `phase-prompt/05.7-recording-level-and-transcription-collapse.md` | 2026-09-07 두 번째 실제 전사 실행이 드러낸 두 침묵의 Goal · **R-1 ~ R-5의 실측 전제**([관측된 사실] · [유력한 설명] · [미검증] 구분) |
+| `docs/ADR-0003-recording-engine.md` **§16** | **입력 레벨 경계** — 재는 자리(실시간 콜백이 아닌 파일 통로) · 내보내는 값 · 판정 구간과 근거(-25.8 vs -42.2 dBFS) · **게인 조정과 정규화를 하지 않는다는 것** |
+| `docs/ADR-0007-transcription-engine.md` **§18** | **붕괴 판정 규칙** — 무엇을 붕괴로 보는가(`n >= 20` · `u/n <= 0.20` · `r/n >= 0.50`) · 세 관측에서 임계값을 고른 근거 · 규칙이 사는 자리 · 대응하는 §13 실패 · **저장을 막는 자리이지 저장된 것을 고치는 자리가 아니라는 것**(INV-2) |
+| `docs/PHASE-3-TRANSCRIPTION-SMOKE-TEST.md` **부록 2** | **성공 기준 3의 측정 절차와 비교표.** 레벨을 올린 **사본**을 만드는 절차(원본은 읽기만 한다 · INV-1) · 같은 조건의 전사 · 재는 방법. **결과 칸은 `[미측정]`이며 왜 측정하지 못했는지가 부록2-5에 있다** |
+| `docs/PHASE-5.7-HUMAN-REVIEW.md` | **자동 Gate가 판정할 수 없는 넷(레벨을 보고 아는가 · 고쳤을 때 올라가는가 · 붕괴 메시지로 할 일을 아는가 · 다시 녹음한 회의가 읽을 만하게 전사되는가)의 Human Review 절차와 빈 기록표.** §7이 이 Phase가 확인하지 **않은** 것의 정본이다 |
 | `docs/GIT-WORKFLOW.md` | Git/GitHub 운영 정책 — Phase 단위 commit · public 저장소 안전 규칙 |
 | `docs/LOOP-RUNTIME-FIELD-NOTES.md` | Runtime 운용 관찰 기록 |
 | `CLAUDE.local.md` | 대화형 세션 운영 지침 |
@@ -786,6 +1129,22 @@ Windows에서의 clipboard · 화면                     ← Phase 6
 | 2026-09-06 (Phase 5.5) | **clipboard 경계를 프론트엔드 platform 모듈 하나로 둔다.** Rust command도 Tauri 플러그인도 쓰지 않는다 | 복사할 문자열은 이미 webview 안에 있어 Rust로 되돌려 보낼 이유가 없고, 플러그인은 **확인하지 못한 세 값**(crate/npm 이름 · 호환 버전 · permission 식별자) 위에 의존성을 얹는 선택이다. A가 플랫폼에서 막히면 그때 B/C로 **모듈 하나를 갈아 끼운다** | 채택 · **플랫폼 능력은 UNVERIFIED** (`ADR-0010` §7 · §12.4) |
 | 2026-09-06 (Phase 5.5) | **기존 프롬프트 상수를 고치지 않고 치환 두 번으로 재사용한다.** 두 번째 프롬프트 세트를 만들지 않는다 | 상수를 고치면 `PROMPT_VERSION_*`의 선언값과 계산값이 어긋나 테스트가 깨지고, 선언값을 따라 올리면 **이미 저장된 `ai_notes.prompt_version`이 가리키는 프롬프트가 저장소 어디에도 없게 된다** — 저장된 provenance가 거짓이 된다 | 채택 (`ADR-0010` §6) |
 | 2026-09-06 (Phase 5.5) | **UI 기반은 "처음부터 만들기"가 아니라 "이미 있는 것을 규칙으로 끌어올리기"다.** 서드파티 디자인 시스템을 들이지 않는다 | 색 토큰 여섯과 dark 장치, radius 5px는 이미 있었다. 비어 있던 것은 타입·여백 스케일 · accent/상태색 · focus다. 값은 대부분 이미 쓰이던 것을 토큰으로 올린 것이며 새 크기를 발명하지 않았다 | 채택 (`phase-prompt/05.5` R-1 · `tests/ui-foundation.test.ts`) |
+| 2026-09-05 (운영자) | **Phase 5.6을 로드맵에 삽입한다** | 첫 실사용에서 72분 한국어 회의가 통째로 못 쓰게 됐다. **새 제품 방향이 아니라 Spec과 구현 사이의 간극이다** — §D의 `language` 설정도 §14.4의 Metal도 Spec에 이미 있었다. 그래서 새 ADR을 쓰지 않고 기존 ADR을 갱신한다 | 채택 (`phase-prompt/05.6`) |
+| 2026-09-06 (Phase 5.6) | **전사 언어를 설정으로 두되 "고르지 않음"을 자동 감지로 정의한다.** 로캘을 짐작해 굳혀 두지 않는다 | 결정이 없어서 whisper.cpp의 기본값(`"en"` · 감지 OFF)이 그대로 쓰였고 한국어 회의가 영어로 강제 디코딩됐다. **짐작한 값이 저장되면 그때부터 그것은 사용자가 고른 값처럼 보인다** — 앱 화면 언어는 말하는 언어가 아니다 | 채택 (`ADR-0007` §17.1 · §19.1) |
+| 2026-09-06 (Phase 5.6) | **Spec §14.4가 적은 대로 Metal을 켠다. 켜졌다는 판정은 manifest 기재가 아니라 빌드 산출물로 한다** | Spec과 저장소가 어긋나 있었고 어긋난 쪽이 저장소였다. **켠 근거는 측정된 속도가 아니다** — 이 저장소는 전사 속도를 측정한 적이 없고 배수를 적지 않는다. `Cargo.lock`은 이 feature에서 바뀌지 않으므로 ADR-0009 §11.4의 lock 판정 대신 `GGML_METAL` · 링크 산출물 · 심볼로 판정했다 | 채택 · **속도 UNVERIFIED** (`ADR-0007` §17.2 · §19.2) |
+| 2026-09-07 (Phase 5.6) | **전사에 걸린 시간을 Transcript와 함께 남긴다. 값이 없는 것을 0이라고 말하지 않는다** | Metal 전후를 사람이 비교하려면 비교할 값이 남아야 한다. 재지 않은 전사를 `0:00`이라고 말하면 그 비교가 거짓을 말하므로 열은 nullable이고 `DEFAULT`가 없으며 화면은 그 줄을 그리지 않는다. **실시간 진행률은 이 Phase의 성공 기준이 아니다** | 채택 (`ADR-0007` §19.3) |
+| 2026-09-07 (Phase 5.6) | **내보낸 파일이 놓인 자리를 여는 수단을 더한다. 경로 문자열은 그대로 남긴다** | §4.1이 세운 전제(*"경로를 보여 주면 찾을 수 있다"*)가 macOS에서 틀렸다 — `~/Library`는 Finder 기본 숨김이다. **부족했던 것은 정보가 아니라 수단이므로 경로를 없애지 않고 수단을 더한다.** 여는 것은 파일이 아니라 자리이며, 허용은 앱의 `exports/` 아래로 제한된다 — **주소를 만드는 쪽이 아니라 여는 쪽이 범위를 정한다** | 채택 · **실제 동작 UNVERIFIED** (`ADR-0009` §16) |
+| 2026-09-07 (Phase 5.6) | **AI Handoff 산출물의 나눔 예산을 40,000 B로 정한다 — 이 앱이 고른 값이며 벤더 제약이 아니다** | 72분 녹음의 산출물이 99 KB였고 채팅에 한 번에 들어가지 않았는데 **앱이 그 사실을 말해 주지 않았다.** 어떤 채팅의 한도도 확인된 적이 없으므로 그 숫자를 코드에 적으면 벤더 지식이 된다 (INV-9). Notion의 예산과도 근거가 다르며 서로를 따라 움직이지 않는다 | 채택 · **실제 채팅 한도 UNVERIFIED** (`ADR-0010` §12.8.2) |
+| 2026-09-07 (Phase 5.6) | **AI 경로의 transcript만 압축 모양으로 적고, §11 export 파일 형식은 바꾸지 않는다** | 크기의 이유가 `### HH:MM:SS` 제목 1,711줄이었다. 그러나 §11 파일은 사람이 읽는 문서이고 Notion 본문이기도 하므로 모양을 바꾸면 함께 흔들린다. **렌더링 규칙은 한 자리에 두고 모양만 둘로 갈랐다** — 무엇을 어떤 순서로 적는가는 두 모양이 같은 함수에서 온다 | 채택 (`ADR-0010` §12.8.4) |
+| 2026-09-07 (Phase 5.6) | **모델 크기 판정을 이 Phase가 하지 않는다. Human Review 다섯을 `A-` 가정으로 올리지 않는다** | 한국어 전사 품질 판정에는 사람의 귀가 필요하다 — Worker도 Gate도 Verifier도 *"이 전사가 읽을 만한가"* 를 판정할 수 없다. Phase 5.5의 D-4와 같은 판단이며, **다섯 중 둘(한국어 품질 · 모델 크기)은 이미 열려 있는 `A-TRANS-001`의 실질적 답이지 새 가정이 아니다** | 채택 (`ADR-0007` §17.4 · §19.5 · `docs/PHASE-5.6-HUMAN-REVIEW.md`) |
+| 2026-09-07 (운영자) | **Phase 5.7을 로드맵에 삽입하고, 부분 완료인 Phase 5.6 앞에 둔다** | 두 번째 실사용에서 51분이 사라졌다. Phase 5.6의 언어 수정은 동작했으나 그 아래에 두 침묵이 있었다 — 녹음 중에 소리가 담기지 않는다는 것을 말해 주지 않았고, 붕괴한 전사를 완료라고 말했다. **제품이 실패를 실패라고 말하지 않는 것**이 남은 Phase 5.6 Task보다 급하다 | 채택 (`phase-prompt/05.7`) |
+| 2026-09-07 (Phase 5.7) | **"쓸 수 없는 전사"를 값으로 정의하고, 저장 직전에서 판정한다** — `n >= 20` · `u/n <= 0.20` **또는** `r/n >= 0.50` | 저장 직전 검사가 `segments.is_empty()` 하나였고, 그래서 103개짜리 붕괴가 "있어서" 통과했다. Transcript는 immutable이므로(INV-2) 막을 수 있는 자리는 저장 직전뿐이다. **임계값은 세 관측에서 골랐고 그 약함(`r/n`은 가장 가까운 붕괴와 12.1%p)을 감추지 않는다** | 채택 · **임계값 UNVERIFIED** (`ADR-0007` §18.2 · §18.5) |
+| 2026-09-07 (Phase 5.7) | **새 실패 종류를 만들지 않고 이미 있는 `TranscriptionOutputUnusable`을 쓴다** | §13의 갈래가 이미 그 뜻이다. 종류를 늘리면 화면 · IPC · 저장된 상태의 해석이 함께 늘어나는데, 늘어나는 정보는 *왜 쓸 수 없는가*의 수치뿐이며 그것은 `message`와 `detail`에 담긴다 | 채택 (`ADR-0007` §18.4) |
+| 2026-09-07 (Phase 5.7) | **입력 레벨은 실시간 오디오 콜백이 아니라 파일에 쓰이는 통로(`drain`)에서 잰다** | 사람이 묻는 질문은 *"이 파일이 쓸 수 있는 소리를 담고 있는가"* 다. 콜백에서 재면 파일에 도달하지 않는 샘플(일시정지 구간)까지 세게 되고, 실시간 스레드에 일이 늘어난다 | 채택 (`ADR-0003` §16.2) |
+| 2026-09-07 (Phase 5.7) | **판정은 평균 RMS로만 한다. 피크로 하지 않는다** | 9/7 파일의 전체 피크는 -19.4 dBFS로 무음이 아니었다 — 피크만 보면 "소리가 들어오고 있다"고 말하게 된다. 두 파일을 가른 것은 평균 RMS의 16.4 dB 차이였다 | 채택 (`ADR-0003` §16.4) |
+| 2026-09-07 (Phase 5.7) | **재지 않은 것을 0이라고도 '낮음'이라고도 말하지 않는다** — 값이 없으면 `null`이고 화면의 `unknown`은 판정이 아니다 | 방금 시작한 녹음이 곧바로 "낮음"으로 보이면 그 뒤로 이 표시를 믿을 수 없게 된다. 경고가 배경이 되는 순간 이 Phase의 목적이 사라진다 | 채택 (`ADR-0003` §16.3 · `recordingView.ts`) |
+| 2026-09-07 (Phase 5.7) | **게인 조정도 정규화도 넣지 않는다. 청크 분할 · state 재생성 · 반복 차단 · VAD · 자동 언어 감지 개선도 넣지 않는다** | 이번 실패의 원인이 확인되기 전에 9/4 실험의 처방을 옮겨 오지 않는다. 정규화는 Phase Goal이 **측정 뒤에** 정하기로 못박았고 그 측정은 아직 `[미측정]`이다 | 보류 (**CANDIDATE** · §5의 C-1 ~ C-6) |
+| 2026-09-07 (Phase 5.7) | **Human Review 넷을 `A-` 가정으로 올리지 않는다** | Phase 5.5의 D-4와 같은 판단이다 — 셋은 주관적 판정이고, 넷째(*다시 녹음한 회의가 읽을 만하게 전사되는가*)는 **이미 열려 있는 `A-TRANS-001`의 실질적 답이지 새 가정이 아니다** | 채택 (`docs/PHASE-5.7-HUMAN-REVIEW.md`) |
 
 ---
 

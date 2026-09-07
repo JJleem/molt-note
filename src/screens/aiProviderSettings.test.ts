@@ -59,6 +59,8 @@ const DEFAULT_SETTINGS: Settings = {
   automaticProcessing: false,
   automaticTranscription: false,
   transcriptionModel: null,
+  // 언어를 고르지 않은 것이 기본이며, 그것은 자동 감지다 (ADR-0007 §17.1.4-1).
+  transcriptionLanguage: null,
   defaultMicrophone: null,
   aiProvider: null,
   aiBaseUrl: null,

@@ -1,0 +1,2 @@
+ src-tauri/src/transcription/whisper.rs | 214 +++++++++++++++++++++++++--------
+ 1 file changed, 167 insertions(+), 47 deletions(-)

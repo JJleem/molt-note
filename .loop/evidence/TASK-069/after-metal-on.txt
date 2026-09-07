@@ -1,0 +1,139 @@
+TASK-069 — Metal feature를 켠 **뒤**의 관측 (이 Run이 직접 실행한 명령의 출력 그대로)
+작업 디렉터리: /Users/molt/orca/projects/molt-note
+관측 시각: 2026-09-06 15:12 (build 산출물 mtime 기준)
+
+--------------------------------------------------------------------------------
+1) src-tauri/Cargo.toml 의 whisper-rs 줄 (feature 지정 후)
+--------------------------------------------------------------------------------
+whisper-rs = { version = "0.16", features = ["metal"] }
+
+--------------------------------------------------------------------------------
+2) cargo 가 해석한 feature 집합 — cargo 자신의 기록
+   $ grep -o '"features":"\[[^]]*\]"' \
+       src-tauri/target/debug/.fingerprint/whisper-rs-*/lib-whisper_rs.json \
+       src-tauri/target/debug/.fingerprint/whisper-rs-sys-*/lib-whisper_rs_sys.json
+--------------------------------------------------------------------------------
+whisper-rs-832fc319169ff7b4/lib-whisper_rs.json:      "features":"[\"_gpu\", \"default\", \"metal\"]"   ← 새 것
+whisper-rs-98d41d5c13749804/lib-whisper_rs.json:      "features":"[\"default\"]"                        ← 이전 것 (남아 있음)
+whisper-rs-sys-7f1b7ef590cc7566/lib-whisper_rs_sys.json:"features":"[\"metal\"]"                        ← 새 것
+whisper-rs-d6c13803281996e9/lib-whisper_rs.json:      "features":"[\"default\"]"                        ← 이전 것
+whisper-rs-sys-937543fec3ce9af6/lib-whisper_rs_sys.json:"features":"[]"                                 ← 이전 것
+whisper-rs-sys-c774acbcc09ac244/lib-whisper_rs_sys.json:"features":"[]"                                 ← 이전 것
+
+--------------------------------------------------------------------------------
+3) ★ build.rs 가 CMake 에 넘긴 정의 — 새 build 디렉터리의 CMakeCache.txt
+   $ grep -i '^GGML_METAL' \
+       src-tauri/target/debug/build/whisper-rs-sys-316e0b7185149455/out/build/CMakeCache.txt
+--------------------------------------------------------------------------------
+GGML_METAL:BOOL=ON
+GGML_METAL_EMBED_LIBRARY:BOOL=ON
+GGML_METAL_MACOSX_VERSION_MIN:STRING=
+GGML_METAL_NDEBUG:BOOL=ON
+GGML_METAL_SHADER_DEBUG:BOOL=OFF
+GGML_METAL_STD:STRING=
+
+--------------------------------------------------------------------------------
+4) 다른 가속 옵션은 그대로다 — 이 Task 가 켠 것은 Metal 하나뿐이다
+   $ grep -iE '^(WHISPER_COREML|GGML_OPENMP|GGML_BLAS|GGML_CUDA|GGML_VULKAN|WHISPER_OPENVINO|GGML_ACCELERATE)[A-Z_]*:' <CMakeCache.txt>
+   (before = whisper-rs-sys-3a8019dcfcfe9c4c / after = whisper-rs-sys-316e0b7185149455)
+--------------------------------------------------------------------------------
+              before      after
+WHISPER_COREML   OFF   →    OFF
+WHISPER_COREML_ALLOW_FALLBACK OFF → OFF
+GGML_OPENMP      OFF   →    OFF
+WHISPER_OPENVINO OFF   →    OFF
+GGML_CUDA        OFF   →    OFF
+GGML_VULKAN      OFF   →    OFF
+GGML_BLAS        ON    →    ON     (Apple vendor — 원래부터 켜져 있었다)
+GGML_ACCELERATE  ON    →    ON     (원래부터 켜져 있었다)
+
+두 CMakeCache 를 위 키들로 비교했을 때 값이 달라진 것은 GGML_METAL* 뿐이다.
+
+--------------------------------------------------------------------------------
+5) 산출물 — metal 백엔드 정적 라이브러리가 새로 생겼다
+   $ ls src-tauri/target/debug/build/whisper-rs-sys-316e0b7185149455/out/lib
+--------------------------------------------------------------------------------
+cmake
+libggml-base.a
+libggml-blas.a
+libggml-cpu.a
+libggml-metal.a     ← before 에는 없던 파일
+libggml.a
+libwhisper.a
+pkgconfig
+
+   $ stat -f "%Sm %N" -t "%Y-%m-%d %H:%M:%S" .../out/lib/libggml-metal.a
+2026-09-06 15:12:24 src-tauri/target/debug/build/whisper-rs-sys-316e0b7185149455/out/lib/libggml-metal.a
+   (lint Gate 가 돈 시각과 같다 — 이 Gate 안에서 whisper.cpp 가 재컴파일됐다)
+
+--------------------------------------------------------------------------------
+6) build.rs 가 cargo 에 준 링크 지시 — before/after 차이
+   $ grep -E '^cargo:rustc-link-lib' <build script output>
+--------------------------------------------------------------------------------
+before (whisper-rs-sys-3a8019dcfcfe9c4c/output):
+  cargo:rustc-link-lib=dylib=c++
+  cargo:rustc-link-lib=framework=Accelerate
+  cargo:rustc-link-lib=static=whisper
+  cargo:rustc-link-lib=static=ggml
+  cargo:rustc-link-lib=static=ggml-base
+  cargo:rustc-link-lib=static=ggml-cpu
+  cargo:rustc-link-lib=static=ggml-blas
+
+after (whisper-rs-sys-316e0b7185149455/output):
+  cargo:rustc-link-lib=dylib=c++
+  cargo:rustc-link-lib=framework=Accelerate
+  cargo:rustc-link-lib=framework=Foundation      ← 새로 생김
+  cargo:rustc-link-lib=framework=Metal           ← 새로 생김
+  cargo:rustc-link-lib=framework=MetalKit        ← 새로 생김
+  cargo:rustc-link-lib=static=whisper
+  cargo:rustc-link-lib=static=ggml
+  cargo:rustc-link-lib=static=ggml-base
+  cargo:rustc-link-lib=static=ggml-cpu
+  cargo:rustc-link-lib=static=ggml-blas
+  cargo:rustc-link-lib=static=ggml-metal         ← 새로 생김
+
+   같은 output 파일의 CMake 로그:
+  -- Metal framework found
+  -- Including METAL backend
+  [ 25%] Generate assembly for embedded Metal library
+  Embedding Metal library
+
+--------------------------------------------------------------------------------
+7) ★ 사슬의 끝 — test Gate 가 실제로 만들어 실행한 바이너리
+   $ grep -aoE "ggml_metal[a-zA-Z_]*" src-tauri/target/debug/deps/transcription_engine-ae6a83e38b980483 | sort -u | head
+--------------------------------------------------------------------------------
+ggml_metal_kargs_add_id
+ggml_metal_kargs_arange
+ggml_metal_kargs_argmax
+ggml_metal_kargs_argsort
+ggml_metal_kargs_argsort_merge
+ggml_metal_kargs_bin
+ggml_metal_kargs_clamp
+ggml_metal_kargs_concat
+ggml_metal_kargs_conv_
+ggml_metal_kargs_conv_transpose_
+
+   $ grep -aoE "/System/Library/Frameworks/Metal[A-Za-z]*\.framework[^ ]*" <같은 바이너리> | sort -u
+/System/Library/Frameworks/Metal.framework/Versions/A/Metal
+/System/Library/Frameworks/MetalKit.framework/Versions/A/MetalKit
+
+--------------------------------------------------------------------------------
+8) Cargo.lock — **바뀌지 않았다**
+   $ git diff --stat -- src-tauri/Cargo.lock
+--------------------------------------------------------------------------------
+(출력 없음 — 변경 없음)
+
+   $ git status --porcelain src-tauri/Cargo.toml src-tauri/Cargo.lock
+ M src-tauri/Cargo.toml
+
+   cargo 는 lint · test Gate 에서 두 번 다 정상적으로 lock 을 읽고 빌드했고 lock 을 고치지
+   않았다. 해석은 §3.3 에 있다.
+
+--------------------------------------------------------------------------------
+9) Gate 결과
+--------------------------------------------------------------------------------
+$ node tools/loop-runtime/loopctl.mjs self-check lint
+lint: PASS  exit=0  20.1s          ← 이 실행 안에서 whisper.cpp 가 재컴파일됐다 (5번의 mtime)
+
+$ node tools/loop-runtime/loopctl.mjs self-check test
+test: PASS  exit=0  55.0s

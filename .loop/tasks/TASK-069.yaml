@@ -1,0 +1,50 @@
+# Spec §14.4가 적은 대로 Metal을 켠다
+# Runtime이 PLAN-20260905T201413Z 승인 시점에 생성했다 (proposal P4). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-069
+status: DONE
+
+request: |-
+  `src-tauri/Cargo.toml`의 `whisper-rs` 의존성에 ADR-0007이 확인한 Metal feature를 켠다. **feature 이름은 P1이 확인해 문서에 적은 값을 쓰고, 그 자리에서 다시 crate의 실제 정의와 맞는지 확인한다** — 이름이 틀리면 cargo가 알 수 없는 feature로 거절하거나 조용히 아무 일도 하지 않는다. 이 Task에서 CoreML · OpenMP · 그 밖의 가속 feature는 켜지 않는다(하나씩 확인한다). `Cargo.lock`을 함께 갱신하고, Cargo.toml의 주석에는 이 저장소의 기존 밀도대로 남긴다: 왜 켰는가(PRODUCT-SPEC §14.4가 이미 적은 것을 실제와 맞춘다), 무엇을 확인했는가(확인 경로와 crate 버전), 어떤 대가를 지불하는가(cold build가 whisper.cpp 재컴파일을 포함한다 — ADR-0007 §4.3). **켜졌다는 판정은 manifest에 이름이 적혔는가가 아니다** — `whisper-rs-sys`의 build.rs가 더 이상 `GGML_METAL = OFF`를 정의하지 않는다는 것, 또는 빌드 산출물이 실제로 달라졌다는 것을 확인해 그 근거를 `.loop/evidence/` 아래에 이 저장소의 기존 evidence 파일들과 같은 형태로 남긴다(ADR-0009 §11.4가 TLS에 대해 세운 규칙과 같은 태도다). 속도를 측정하지 않았다면 측정하지 않았다고 적고, 배수나 소요 시간을 추정해 적지 않는다. 제품 코드는 이 Task에서 바꾸지 않는다.
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-066
+
+stop_condition:
+  gates: [lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 2
+
+acceptance_criteria:
+  - id: AC1
+    description: |-
+      `npm run lint`가 통과한다 — Metal이 켜진 상태로 whisper.cpp를 포함한 Rust 트리 전체가 컴파일된다.
+    verification:
+      type: gate
+      ref: lint
+  - id: AC2
+    description: |-
+      `npm run test`가 통과한다.
+    verification:
+      type: gate
+      ref: test
+  - id: AC3
+    description: |-
+      feature가 실제로 빌드에 영향을 준다는 근거가 확인돼 evidence로 남아 있다 — manifest 기재만으로 켜졌다고 주장하지 않는다.
+    verification:
+      type: verifier
+      instruction: |-
+        evidence 파일이 무엇을 어떻게 확인했는지 읽고, 관측 사실과 추론이 구분돼 있는지 본다.
+  - id: AC4
+    description: |-
+      측정하지 않은 성능 수치가 Cargo.toml 주석 · evidence · 문서 어디에도 새로 적히지 않았다. 이 Task가 제품 소스를 바꾸지 않았다.
+    verification:
+      type: verifier
+
+evidence: []
+
+failure_memo: []

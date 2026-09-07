@@ -1,0 +1,92 @@
+ M docs/ADR-0003-recording-engine.md
+ M docs/ADR-0007-transcription-engine.md
+ M docs/LOOP-RUNTIME-FIELD-NOTES.md
+ M src-tauri/Cargo.toml
+ M src-tauri/src/commands/mod.rs
+ M src-tauri/src/commands/payload.rs
+ M src-tauri/src/commands/transcriber.rs
+ M src-tauri/src/db/migrations.rs
+ M src-tauri/src/db/settings.rs
+ M src-tauri/src/db/store.rs
+ M src-tauri/src/domain/mod.rs
+ M src-tauri/src/domain/settings.rs
+ M src-tauri/src/export/ai_request.rs
+ M src-tauri/src/export/markdown.rs
+ M src-tauri/src/lib.rs
+ M src-tauri/src/platform/mod.rs
+ M src-tauri/src/transcription/engine.rs
+ M src-tauri/src/transcription/mod.rs
+ M src-tauri/src/transcription/run.rs
+ M src-tauri/src/transcription/testing.rs
+ M src-tauri/src/transcription/whisper.rs
+ M src-tauri/tests/ai_failure_recovery.rs
+ M src-tauri/tests/ai_note_commands.rs
+ M src-tauri/tests/ai_note_run.rs
+ M src-tauri/tests/audio_never_reaches_ai.rs
+ M src-tauri/tests/command_boundary.rs
+ M src-tauri/tests/domain_model.rs
+ M src-tauri/tests/manual_ai_handoff.rs
+ M src-tauri/tests/manual_handoff_invariants.rs
+ M src-tauri/tests/markdown_export.rs
+ M src-tauri/tests/notion_and_export_invariants.rs
+ M src-tauri/tests/notion_chunking.rs
+ M src-tauri/tests/notion_sync.rs
+ M src-tauri/tests/recording_repository.rs
+ M src-tauri/tests/settings_repository.rs
+ M src-tauri/tests/transcription_background.rs
+ M src-tauri/tests/transcription_engine.rs
+ M src-tauri/tests/transcription_run.rs
+ M src/App.css
+ M src/ipc/commands.ts
+ M src/ipc/types.ts
+ M src/screens/RecordingDetailScreen.tsx
+ M src/screens/SettingsScreen.tsx
+ M src/screens/aiHandoffView.test.ts
+ M src/screens/aiHandoffView.ts
+ M src/screens/aiNoteView.test.ts
+ M src/screens/aiProviderSettings.test.ts
+ M src/screens/coreWithoutAi.test.ts
+ M src/screens/exportView.test.ts
+ M src/screens/exportView.ts
+ M src/screens/settingsView.test.ts
+ M src/screens/settingsView.ts
+ M src/screens/transcriptView.test.ts
+ M src/screens/transcriptView.ts
+ M tests/ipc-boundary.test.ts
+ M tests/manual-handoff-invariants.test.ts
+ M tests/screen-boundary.test.ts
+ M tests/ui-foundation.test.ts
+?? .loop/evidence/TASK-066/
+?? .loop/evidence/TASK-067/
+?? .loop/evidence/TASK-068/
+?? .loop/evidence/TASK-069/
+?? .loop/evidence/TASK-070/
+?? .loop/evidence/TASK-071/
+?? .loop/evidence/TASK-076/
+?? .loop/tasks/TASK-066.yaml
+?? .loop/tasks/TASK-067.yaml
+?? .loop/tasks/TASK-068.yaml
+?? .loop/tasks/TASK-069.yaml
+?? .loop/tasks/TASK-070.yaml
+?? .loop/tasks/TASK-071.yaml
+?? .loop/tasks/TASK-072.yaml
+?? .loop/tasks/TASK-073.yaml
+?? .loop/tasks/TASK-074.yaml
+?? .loop/tasks/TASK-075.yaml
+?? .loop/tasks/TASK-076.yaml
+?? .loop/tasks/TASK-077.yaml
+?? .loop/tasks/TASK-078.yaml
+?? .loop/tasks/TASK-079.yaml
+?? .loop/tasks/TASK-080.yaml
+?? .loop/tasks/TASK-081.yaml
+?? .loop/tasks/TASK-082.yaml
+?? .loop/tasks/TASK-083.yaml
+?? .loop/tasks/TASK-084.yaml
+?? .loop/tasks/TASK-085.yaml
+?? phase-prompt/05.7-recording-level-and-transcription-collapse.md
+?? src-tauri/src/commands/saved_file.rs
+?? src-tauri/src/platform/file_manager.rs
+?? src-tauri/tests/show_saved_file.rs
+?? src-tauri/tests/transcription_language.rs
+?? src/screens/savedFileView.test.ts
+?? src/screens/savedFileView.ts

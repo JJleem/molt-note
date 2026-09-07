@@ -1,0 +1,52 @@
+# 내보낸 파일이 있는 자리를 화면에서 열 수 있게 한다
+# Runtime이 PLAN-20260905T201413Z 승인 시점에 생성했다 (proposal P6). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-071
+status: DONE
+
+request: |-
+  성공 기준 2를 만든다 — 경로를 글자로 보여 주는 것에 더해, **그 자리를 여는 수단이 화면에 있어야 한다.** macOS에서 `~/Library`는 Finder 기본 숨김이라 경로를 알아도 걸어 들어갈 수 없다는 것이 2026-09-05에 관측된 사실이다. (1) OS 호출은 `src-tauri/src/platform/` 아래 새 모듈 하나에만 둔다(INV-10) — 화면도 domain도 export 실행 순서도 OS를 부르지 않는다. 지원하지 않는 플랫폼에서는 조용히 아무 일도 하지 않는 대신 §13의 정의된 실패로 말한다. (2) Tauri command 하나를 연다. **webview가 임의 경로를 열 수 있게 하지 않는다** — backend가 자기 `AppDataDirectory::exports_dir()` 아래의 파일인지 확인한 뒤에만 열고, 아니면 거절한다. 이름은 `tests/ipc-boundary.test.ts`의 `outOfScope` 정규식(특히 `export`(허용된 둘 제외) · `play` · 벤더 이름)에 걸리지 않아야 하며, 같은 파일의 `REGISTERED_COMMANDS` 목록과 'export 표면은 파일 하나를 만드는 이름 둘뿐이다' 검사를 **무엇이 왜 늘었는지 주석과 함께** 갱신한다 — 이 이름은 파일을 만들지도 고치지도 지우지도 않고 이미 있는 것을 열 뿐이라는 사실이 그 자리에 남아야 한다. Tauri 플러그인이나 capability 권한이 필요하면 `src-tauri/capabilities/default.json`에 필요한 것만 이름으로 켜고 그 이유를 적는다. (3) `src/ipc/commands.ts`에 대응하는 함수를 더한다. (4) 표현 규칙은 순수 모듈에 둔다 — `src/screens/exportView.ts`의 `done` 상태와 `src/screens/aiHandoffView.ts`의 `done` 상태에 '그 자리를 연다'는 동작을 **값으로** 더하고(기존 `ExportAction` · `AiExportAction`과 같은 형태), 실��했을 때 무엇이 그대로인지도 그 자리의 규칙으로 표현한다. (5) `src/screens/RecordingDetailScreen.tsx`의 Markdown export 자리와 Export for AI 자리 두 곳에서 그 동작을 부른다. **경로 문자열은 그대로 남긴다** — 여는 수단은 대체가 아니라 추가다.
+
+execution:
+  role: impl
+
+stop_condition:
+  gates: [build, lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 2
+
+acceptance_criteria:
+  - id: AC1
+    description: |-
+      `npm run build`가 통과한다.
+    verification:
+      type: gate
+      ref: build
+  - id: AC2
+    description: |-
+      `npm run lint`가 통과한다.
+    verification:
+      type: gate
+      ref: lint
+  - id: AC3
+    description: |-
+      `npm run test`가 통과한다 — `tests/ipc-boundary.test.ts`의 command 표면 검사를 포함하며, 허용 목록 변경에 무엇이 왜 늘었는지가 주석으로 남아 있다.
+    verification:
+      type: gate
+      ref: test
+  - id: AC4
+    description: |-
+      OS를 부르는 코드가 `src-tauri/src/platform/` 안에만 있고, 여는 대상이 앱의 exports 디렉터리 아래로 제한된다 — 화면이 임의 경로를 보내 열 수 있는 통로가 없다.
+    verification:
+      type: verifier
+      instruction: |-
+        command가 경로를 검증하는 자리와 그 검증을 우회할 수 있는 경로가 없는지 확인한다.
+  - id: AC5
+    description: |-
+      동작이 순수 view 모듈의 값으로 표현되고 컴포넌트는 그리기만 하며, 만들어진 파일의 전체 경로는 여전히 화면에 보인다.
+    verification:
+      type: verifier
+
+evidence: []
+
+failure_memo: []

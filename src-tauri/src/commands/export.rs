@@ -43,7 +43,7 @@ use crate::domain::{Failure, FailureKind, NoteType, RecordingId};
 use crate::export;
 use crate::platform::app_data_dir::AppDataDirectory;
 
-use super::payload::ExportedFilePayload;
+use super::payload::{ExportedAiRequestPayload, ExportedFilePayload};
 
 /// 앱이 들고 있는 **Markdown export 실행자**.
 ///
@@ -90,7 +90,9 @@ impl Exporter {
     /// 돌려주는 값에는 실제로 쓰인 이름이 함께 들어 있다 — 화면이 이름을 다시 짐작하지 않는다.
     pub fn export(&self, recording_id: &str) -> Result<ExportedFilePayload, Failure> {
         self.write_file(recording_id, |connection, directory, id| {
-            export::run::export(connection, directory, id)
+            let written = export::run::export(connection, directory, id)?;
+
+            Ok(ExportedFilePayload::new(id.as_str(), written))
         })
     }
 
@@ -103,13 +105,21 @@ impl Exporter {
     ///
     /// **provider를 하나도 고르지 않아도 성공한다** (MH-1 · MH-2 · INV-8) — 이 경로에는
     /// provider도 AI 설정도 들어오지 않으므로 그것을 이유로 거절할 수단 자체가 없다.
+    ///
+    /// **문서가 예산을 넘으면 조각마다 파일 하나다** (`phase-prompt/05.6` 성공 기준 4).
+    /// 한 번 부르면 조각 하나를 쓰고, 그것이 몇 번째인가를 함께 돌려준다 — 어느 호출도 앞서
+    /// 쓴 파일을 덮어쓰지 않는다 (ADR-0009 §4.3).
     pub fn export_ai_request(
         &self,
         recording_id: &str,
         mode: NoteType,
-    ) -> Result<ExportedFilePayload, Failure> {
+        portion: Option<usize>,
+    ) -> Result<ExportedAiRequestPayload, Failure> {
         self.write_file(recording_id, |connection, directory, id| {
-            export::handoff::export_ai_request(connection, directory, id, mode)
+            let written =
+                export::handoff::export_ai_request(connection, directory, id, mode, portion)?;
+
+            Ok(ExportedAiRequestPayload::new(id.as_str(), written))
         })
     }
 
@@ -119,17 +129,13 @@ impl Exporter {
     /// 준비한다**: 쓸 자리가 없다는 사실은 무엇을 읽기 전에 알 수 있고, 그 실패에는 사용자가
     /// 할 수 있는 일이 따로 있다 (§13).
     ///
-    /// 무엇을 쓸지는 넘겨받은 실행 순서가 정한다 — 이 함수에는 렌더링 규칙도, 저장소 질의도,
-    /// 저장소에 **쓰는** 코드도 없다 (INV-3 · MH-7).
-    fn write_file(
+    /// 무엇을 쓸지도, 무엇을 돌려줄지도 넘겨받은 실행 순서가 정한다 — 이 함수에는 렌더링 규칙도,
+    /// 저장소 질의도, 저장소에 **쓰는** 코드도 없다 (INV-3 · MH-7).
+    fn write_file<T>(
         &self,
         recording_id: &str,
-        write: impl FnOnce(
-            &rusqlite::Connection,
-            &std::path::Path,
-            &RecordingId,
-        ) -> Result<export::WrittenFile, Failure>,
-    ) -> Result<ExportedFilePayload, Failure> {
+        write: impl FnOnce(&rusqlite::Connection, &std::path::Path, &RecordingId) -> Result<T, Failure>,
+    ) -> Result<T, Failure> {
         let app_data_dir = self.app_data_dir.as_ref().map_err(Clone::clone)?;
 
         let recording_id = recording_id.trim();
@@ -142,9 +148,8 @@ impl Exporter {
 
         let directory = app_data_dir.ensure_exports_dir()?;
         let connection = db::open_in(app_data_dir)?;
-        let written = write(&connection, &directory, &RecordingId::new(recording_id))?;
 
-        Ok(ExportedFilePayload::new(recording_id, written))
+        write(&connection, &directory, &RecordingId::new(recording_id))
     }
 }
 
@@ -199,7 +204,7 @@ mod tests {
         };
 
         let failure = exporter
-            .export_ai_request("rec-1", NoteType::Study)
+            .export_ai_request("rec-1", NoteType::Study, None)
             .expect_err("자리를 모르면 쓸 수 없다");
 
         assert_eq!(failure.kind, FailureKind::Storage);
@@ -212,7 +217,7 @@ mod tests {
         let exporter = Exporter::in_directory(AppDataDirectory::new(&temp));
 
         let failure = exporter
-            .export_ai_request("   ", NoteType::Meeting)
+            .export_ai_request("   ", NoteType::Meeting, None)
             .expect_err("고른 녹음이 없다");
 
         assert_eq!(failure.kind, FailureKind::InvalidInput);

@@ -7,9 +7,12 @@ import type { Failure } from '../ipc/failure';
 import type { Settings } from '../ipc/types';
 import {
   AUTOMATIC_TRANSCRIPTION_STAYS_ON_NOTICE,
+  HOW_TO_SET_A_TRANSCRIPTION_LANGUAGE,
   HOW_TO_SET_A_TRANSCRIPTION_MODEL,
   LOADING_SETTINGS,
   NO_TRANSCRIPTION_MODEL_NOTICE,
+  TRANSCRIPTION_LANGUAGE_IS_DETECTED_NOTICE,
+  TRANSCRIPTION_LANGUAGE_PLACEHOLDER,
   editedSettings,
   failedSave,
   failedSettings,
@@ -18,6 +21,8 @@ import {
   savingSettings,
   toForm,
   toSettings,
+  transcriptionLanguage,
+  transcriptionLanguageNotices,
   transcriptionModel,
   transcriptionNotices,
   type SettingsForm,
@@ -28,6 +33,9 @@ const DEFAULT_SETTINGS: Settings = {
   automaticProcessing: false,
   automaticTranscription: false,
   transcriptionModel: null,
+  // 언어를 고르지 않은 것이 기본이며, 그것은 '비어 있음'이 아니라 자동 감지다
+  // (docs/ADR-0007-transcription-engine.md §17.1.4-1).
+  transcriptionLanguage: null,
   defaultMicrophone: null,
   // provider를 고르지 않은 것이 기본이자 정상 상태다 (ADR-0008 §11.1 · INV-8).
   aiProvider: null,
@@ -71,6 +79,7 @@ describe('설정 읽기', () => {
       automaticProcessing: false,
       automaticTranscription: false,
       transcriptionModel: '',
+      transcriptionLanguage: '',
       defaultMicrophone: '',
       aiProvider: '',
       aiBaseUrl: '',
@@ -97,6 +106,7 @@ describe('설정 읽기', () => {
       automaticProcessing: true,
       automaticTranscription: true,
       transcriptionModel: 'ggml-base.bin',
+      transcriptionLanguage: '',
       defaultMicrophone: '0:Studio Mic',
       aiProvider: '',
       aiBaseUrl: '',
@@ -267,6 +277,7 @@ describe('저장', () => {
       automaticProcessing: true,
       automaticTranscription: true,
       transcriptionModel: 'ggml-base.bin',
+      transcriptionLanguage: '',
       defaultMicrophone: '0:Studio Mic',
       aiProvider: '',
       aiBaseUrl: '',
@@ -330,6 +341,12 @@ describe('폼과 설정의 변환', () => {
       // Notion destination도 마찬가지다 (ADR-0009 §8.4). 왕복에서 사라지면 다른 설정을
       // 저장할 때마다 사용자가 고른 값이 조용히 지워진다.
       { ...DEFAULT_SETTINGS, notionParentPageId: 'some-parent-page' },
+      // 전사 언어도 마찬가지다 (ADR-0007 §17.1.5). 모델과 나란히 있지만 다른 값이므로 둘이
+      // 함께 있는 경우도 본다 — 하나가 다른 하나를 덮지 않는다.
+      { ...DEFAULT_SETTINGS, transcriptionLanguage: 'ko' },
+      { ...DEFAULT_SETTINGS, transcriptionModel: 'ggml-base.bin', transcriptionLanguage: 'ko' },
+      // 이 앱이 모르는 코드라도 왕복에서 달라지지 않는다 — 화면은 언어 코드를 해석하지 않는다.
+      { ...DEFAULT_SETTINGS, transcriptionLanguage: '알-수-없는-코드' },
     ] satisfies Settings[]) {
       expect(toSettings(toForm(settings))).toEqual(settings);
     }
@@ -350,6 +367,103 @@ describe('폼과 설정의 변환', () => {
       ...saved,
       automaticProcessing: true,
     });
+  });
+
+  it('고른 전사 언어가 다른 설정을 저장할 때 지워지지 않는다', () => {
+    // 폼이 이 값을 들고 있지 않으면 여기서 `null`이 되어, 사용자가 고른 언어가 아무 저장에서나
+    // 조용히 사라진다 — 그리고 그 뒤로 전사는 말없이 자동 감지로 돌아간다 (ADR-0007 §17.1).
+    const saved: Settings = { ...DEFAULT_SETTINGS, transcriptionLanguage: 'ko' };
+
+    const edited = editedSettings(loadedSettings(saved), { automaticProcessing: true });
+    expect(edited.kind).toBe('ready');
+    if (edited.kind !== 'ready') {
+      return;
+    }
+
+    expect(toSettings(edited.form).transcriptionLanguage).toBe('ko');
+    expect(toSettings(edited.form)).toEqual({ ...saved, automaticProcessing: true });
+  });
+
+  it('저장 뒤 다시 채워진 폼에도 고른 언어가 남는다', () => {
+    // 저장소가 돌려준 값으로 폼을 다시 채우는 경로에서도 값이 빠지지 않아야 한다 —
+    // 여기서 빠지면 저장 직후의 다음 저장이 그 값을 지운다.
+    const view = savedSettings({ ...DEFAULT_SETTINGS, transcriptionLanguage: 'ko' });
+
+    expect(view.kind).toBe('ready');
+    if (view.kind !== 'ready') return;
+    expect(view.form.transcriptionLanguage).toBe('ko');
+    expect(toSettings(view.form).transcriptionLanguage).toBe('ko');
+  });
+});
+
+describe('언어를 고르지 않은 것은 자동 감지다', () => {
+  // 아무도 고르지 않은 자리에 라이브러리 기본값 `en`이 들어가 72분짜리 한국어 회의가
+  // 통째로 무너졌다 (ADR-0007 §17.1.1). 고르지 않음은 영어가 아니라 감지다 (§17.1.4-1).
+
+  it('고르지 않은 것과 고른 것이 서로 다른 상태다', () => {
+    expect(transcriptionLanguage(form())).toEqual({ kind: 'autoDetect' });
+    expect(transcriptionLanguage(form({ transcriptionLanguage: '   ' }))).toEqual({
+      kind: 'autoDetect',
+    });
+    expect(transcriptionLanguage(form({ transcriptionLanguage: ' ko ' }))).toEqual({
+      kind: 'chosen',
+      value: 'ko',
+    });
+  });
+
+  it('빈 입력은 "고르지 않음"으로 나가고, 앱이 언어를 대신 채우지 않는다', () => {
+    // 로캘을 짐작해 굳혀 두지 않는다 — 화면 언어는 말하는 언어가 아니다.
+    expect(toSettings(form()).transcriptionLanguage).toBeNull();
+    expect(toSettings(form({ transcriptionLanguage: '  \n ' })).transcriptionLanguage).toBeNull();
+  });
+
+  it('적은 언어 값은 앞뒤 공백만 빼고 그대로 저장하러 간다', () => {
+    // 이 앱이 모르는 코드라도 화면이 바꾸지 않는다 — 무엇을 아는 엔진인지 화면은 알지 못한다.
+    expect(toSettings(form({ transcriptionLanguage: '  알-수-없는-코드 ' })).transcriptionLanguage).toBe(
+      '알-수-없는-코드',
+    );
+  });
+
+  it('고르지 않은 상태가 결핍이 아니라 자동 감지라고 화면에 말해진다', () => {
+    const notices = transcriptionLanguageNotices(form());
+
+    expect(notices).toContain(TRANSCRIPTION_LANGUAGE_IS_DETECTED_NOTICE);
+    expect(notices).toContain(HOW_TO_SET_A_TRANSCRIPTION_LANGUAGE);
+    // 할 말이 없는 상태가 아니다 — 빈 목록이면 그 빈칸은 "아직 안 한 일"로 읽힌다.
+    expect(notices.length).toBeGreaterThan(0);
+    expect(TRANSCRIPTION_LANGUAGE_IS_DETECTED_NOTICE).toMatch(/detected automatically/i);
+    // 빈칸 자체도 그렇게 말한다 — `Not set`이 아니다.
+    expect(TRANSCRIPTION_LANGUAGE_PLACEHOLDER).toMatch(/detected automatically/i);
+  });
+
+  it('언어를 골랐으면 감지하지 않는다는 사실이 그 값과 함께 나온다', () => {
+    const notices = transcriptionLanguageNotices(form({ transcriptionLanguage: 'ko' }));
+
+    expect(notices.some((notice) => notice.includes('ko'))).toBe(true);
+    expect(notices).not.toContain(TRANSCRIPTION_LANGUAGE_IS_DETECTED_NOTICE);
+  });
+
+  it('모델과 언어는 서로를 정하지 않는다', () => {
+    // 어떤 모델로 듣는가와 무슨 언어로 듣는가는 다른 질문이다.
+    const modelOnly = toSettings(form({ transcriptionModel: 'ggml-base.bin' }));
+    expect(modelOnly.transcriptionLanguage).toBeNull();
+
+    const languageOnly = toSettings(form({ transcriptionLanguage: 'ko' }));
+    expect(languageOnly.transcriptionModel).toBeNull();
+
+    // 모델이 없다는 사실을 말하는 자리도 언어를 건드리지 않는다.
+    expect(transcriptionNotices(form({ transcriptionLanguage: 'ko' }))).toContain(
+      NO_TRANSCRIPTION_MODEL_NOTICE,
+    );
+  });
+
+  it('상태를 읽는 것이 폼 값을 바꾸지 않는다', () => {
+    const before = form({ transcriptionLanguage: 'ko' });
+
+    transcriptionLanguageNotices(before);
+    transcriptionLanguage(before);
+
+    expect(before).toEqual(form({ transcriptionLanguage: 'ko' }));
   });
 });
 

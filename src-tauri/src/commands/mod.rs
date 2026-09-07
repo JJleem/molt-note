@@ -92,6 +92,7 @@ pub mod export;
 pub mod notes;
 pub mod notion;
 pub mod payload;
+pub mod saved_file;
 pub mod transcriber;
 
 use std::path::{Path, PathBuf};
@@ -124,11 +125,14 @@ pub use notes::NoteGenerator;
 pub use notion::{NotionSendStatus, NotionSender};
 pub use payload::{
     AiNotePayload, AiNoteStatusPayload, AiProviderStatusPayload, CaptureReportPayload,
-    ExportedFilePayload, InputDevicePayload, MissingAudioPayload, NewRecording,
-    NotionConnectionPayload, NotionSendStatusPayload, NotionSyncPayload, NotionTokenStatusPayload,
+    ExportedAiRequestPayload, ExportedFilePayload, HandoffTextPayload, InputDevicePayload,
+    InputLevelPayload, MissingAudioPayload, NewRecording, NotionConnectionPayload,
+    NotionSendStatusPayload, NotionSyncPayload, NotionTokenStatusPayload, PortionPayload,
     RecordingPayload, SessionStatusPayload, SettingsPayload, StoppedRecordingPayload,
-    StructuredNotePayload, TranscriptPayload, TranscriptSegmentPayload, TranscriptionStatusPayload,
+    StructuredNotePayload, TextSizePayload, TranscriptPayload, TranscriptSegmentPayload,
+    TranscriptionStatusPayload,
 };
+pub use saved_file::SavedFiles;
 pub use transcriber::Transcriber;
 
 /// 앱이 들고 있는 로컬 저장소.
@@ -220,10 +224,26 @@ impl Storage {
     ///
     /// **provider를 고르지 않아도 성공한다** (INV-8 · MH-1 · MH-2) — 여기에는 provider도 AI
     /// 설정도 들어오지 않으므로 그것을 이유로 거절할 수단 자체가 없다.
-    pub fn ai_prompt(&self, recording_id: &str, mode: NoteType) -> Result<String, Failure> {
+    ///
+    /// **문자열 하나가 아니라 크기와 자리를 함께 돌려준다** (`phase-prompt/05.6` 성공 기준 4).
+    /// `portion`이 `None`이면 첫 조각이며, 예산 안의 산출물에서는 그것이 전체다.
+    pub fn ai_prompt(
+        &self,
+        recording_id: &str,
+        mode: NoteType,
+        portion: Option<usize>,
+    ) -> Result<HandoffTextPayload, Failure> {
         let connection = self.connection()?;
+        let recording_id = recording_id.trim();
 
-        handoff::ai_prompt(&connection, &RecordingId::new(recording_id.trim()), mode)
+        let taken = handoff::ai_prompt(
+            &connection,
+            &RecordingId::new(recording_id),
+            mode,
+            portion,
+        )?;
+
+        Ok(HandoffTextPayload::new(recording_id, taken))
     }
 
     /// 사람이 그대로 붙여 넣을 수 있는 **Transcript 텍스트**를 돌려준다 (ADR-0010 §5.4).
@@ -233,11 +253,19 @@ impl Storage {
     /// 한 곳에만 있다는 사실이 그 차이를 만든다 (`tests/screen-boundary.test.ts`).
     ///
     /// `ai_prompt`와 같은 규칙을 따른다 — current Transcript만 쓰고(MH-5), 저장소에 쓰지
-    /// 않으며(MH-7), provider를 보지 않는다 (MH-1 · MH-2).
-    pub fn transcript_text(&self, recording_id: &str) -> Result<String, Failure> {
+    /// 않으며(MH-7), provider를 보지 않는다 (MH-1 · MH-2). 크기와 나눔도 같은 규칙이다.
+    pub fn transcript_text(
+        &self,
+        recording_id: &str,
+        portion: Option<usize>,
+    ) -> Result<HandoffTextPayload, Failure> {
         let connection = self.connection()?;
+        let recording_id = recording_id.trim();
 
-        handoff::transcript_text(&connection, &RecordingId::new(recording_id.trim()))
+        let taken =
+            handoff::transcript_text(&connection, &RecordingId::new(recording_id), portion)?;
+
+        Ok(HandoffTextPayload::new(recording_id, taken))
     }
 
     /// 그 Transcript에서 만들어진 **AI 노트 전부**를 만들어진 순서대로 돌려준다 (§7.3).
@@ -639,23 +667,28 @@ impl Recorder {
         Ok(CaptureReportPayload::new(report, summary))
     }
 
-    /// 지금 녹음이 어떤 상태이고 얼마나 진행됐는지.
+    /// 지금 녹음이 어떤 상태이고, 얼마나 진행됐고, **입력 레벨이 어떤지.**
     ///
     /// 진행 중인 녹음이 없으면 **아직 시작하지 않은 session의 답**을 그대로 돌려준다 —
     /// `idle`과 `0:00`이다. 여기에 특별한 빈 값을 따로 만들지 않는다.
+    ///
+    /// **레벨은 그때 없음이다 — 0이 아니다** (ADR-0003 §16.3). 녹음 중이더라도 아직 파일에
+    /// 쓰인 샘플이 하나도 없으면 마찬가지로 없음이다: 재지 않은 것을 "소리 없음"이라고
+    /// 말하지 않는다. 값을 만드는 자리는 [`ActiveCapture::level`]이며 여기서는 옮기기만 한다.
     pub fn status(&self) -> Result<SessionStatusPayload, Failure> {
         let now = self.clock.now_ms();
         let active = self.active()?;
         let idle = RecordingSession::idle();
-        let session = match active.as_ref() {
-            Some(recording) => &recording.session,
-            None => &idle,
+        let (session, level) = match active.as_ref() {
+            Some(recording) => (&recording.session, recording.capture.level()),
+            None => (&idle, None),
         };
 
         Ok(SessionStatusPayload::new(
             session.state(),
             session.elapsed_ms(now),
             session.elapsed_label(now),
+            level,
         ))
     }
 
@@ -1088,13 +1121,25 @@ pub fn export_markdown(
 /// 아직 전사 내용이 없는 녹음이면 실패한다 — 지시만 있고 본문이 없는 프롬프트를 만드는 대신
 /// 무엇이 필요한지 말한다 (§13 · ADR-0010 §5.5). **어떤 실패에서도 저장된 것은 그대로다**
 /// (INV-3 · MH-7).
+///
+/// ## 크기와 나눔이 같은 이름으로 온다 (`phase-prompt/05.6` 성공 기준 4)
+///
+/// **이름을 늘리지 않았다** (ADR-0010 §8.1의 "사용자 동작 하나에 이름 하나"). 늘어난 것은
+/// 인자 하나(`portion` — 가져갈 조각)와 응답의 모양이다: 문자열 대신
+/// [`HandoffTextPayload`]가 오며, 거기에는 **산출물 전체의 크기**와 **이 조각이 몇 번째 중
+/// 몇 번째인가**가 함께 실려 있다.
+///
+/// `portion`을 보내지 않으면 첫 조각이다. 예산 안의 프롬프트에서는 그것이 전체이며, 그 사실도
+/// 값으로 온다(`portionCount == 1`) — 화면이 크기를 짐작할 필요가 없다. 없는 조각을 달라는
+/// 요청은 빈 텍스트가 아니라 실패다: **잘린 것을 온전한 것이라고 말하는 자리를 만들지 않는다.**
 #[tauri::command]
 pub fn get_ai_prompt(
     storage: State<'_, Storage>,
     recording_id: String,
     mode: String,
-) -> Result<String, Failure> {
-    storage.ai_prompt(&recording_id, notes::parse_mode(&mode)?)
+    portion: Option<usize>,
+) -> Result<HandoffTextPayload, Failure> {
+    storage.ai_prompt(&recording_id, notes::parse_mode(&mode)?, portion)
 }
 
 /// 사람이 그대로 붙여 넣을 수 있는 **Transcript 텍스트**를 돌려준다 (ADR-0010 §5.4 · §8.1).
@@ -1104,12 +1149,16 @@ pub fn get_ai_prompt(
 ///
 /// mode를 받지 않는다. 같은 전사에서 언제나 같은 문자열이 나오며, 자기 지시를 직접 쓰고 싶은
 /// 사람을 위한 길이다 ([`get_ai_prompt`]는 지시와 본문을 함께 준다).
+///
+/// 크기와 나눔은 [`get_ai_prompt`]와 **같은 규칙**이다 — 72분 녹음의 전사가 가장 큰 산출물이며,
+/// 여기서만 크기를 말하지 않으면 사용자는 그 자리에서 다시 조용히 실패한다 (성공 기준 4 · R-5).
 #[tauri::command]
 pub fn get_transcript_text(
     storage: State<'_, Storage>,
     recording_id: String,
-) -> Result<String, Failure> {
-    storage.transcript_text(&recording_id)
+    portion: Option<usize>,
+) -> Result<HandoffTextPayload, Failure> {
+    storage.transcript_text(&recording_id, portion)
 }
 
 /// Recording 하나를 **AI-ready Markdown 문서**로 내보내고 쓰인 파일의 경로를 돌려준다
@@ -1123,13 +1172,43 @@ pub fn get_transcript_text(
 /// 쓰지 않는다 (ADR-0010 §7.5).
 ///
 /// `async`인 이유는 [`export_markdown`]과 같다 — 디스크가 느릴 때 창이 함께 멈추지 않게 한다.
+///
+/// ## 나뉜 문서는 조각마다 파일 하나다 (`phase-prompt/05.6` 성공 기준 4)
+///
+/// 여기서도 **이름은 늘지 않았다.** 늘어난 것은 인자 하나(`portion`)와 응답의 모양이며, 응답에는
+/// 쓰인 파일과 함께 **그것이 문서의 몇 번째 조각인가**가 실려 온다. 한 번 부르면 파일 하나이므로
+/// 네 조각짜리 문서는 네 번 불러 네 파일이 되고, **그중 어느 것도 앞서 쓴 파일을 덮어쓰지
+/// 않는다** (ADR-0009 §4.3). 조각의 자리는 파일 이름에도 적힌다 —
+/// `…-ai-request-part-2-of-4.md`.
 #[tauri::command(async)]
 pub fn export_ai_request(
     exporter: State<'_, Exporter>,
     recording_id: String,
     mode: String,
-) -> Result<ExportedFilePayload, Failure> {
-    exporter.export_ai_request(&recording_id, notes::parse_mode(&mode)?)
+    portion: Option<usize>,
+) -> Result<ExportedAiRequestPayload, Failure> {
+    exporter.export_ai_request(&recording_id, notes::parse_mode(&mode)?, portion)
+}
+
+/// 이미 만들어진 파일이 **놓인 자리를 연다** (`phase-prompt/05.6` 성공 기준 2 · R-4).
+///
+/// **파일을 만들지도 고치지도 지우지도 않는다.** 이 이름이 하는 일은 이미 있는 것을 사람에게
+/// 보여 주는 것뿐이며, 그래서 export 표면은 여전히 파일 하나를 만드는 이름 둘이다
+/// ([`export_markdown`] · [`export_ai_request`] · `tests/ipc-boundary.test.ts`).
+///
+/// **화면이 임의 경로를 열 수 없다.** 열리는 것은 이 앱의 `exports/` 아래에 실제로 있는 파일뿐이며,
+/// 그 판정은 [`SavedFiles::show`] 한 곳에 있다 — 저장된 녹음의 재생에서 asset protocol의 범위를
+/// backend가 정하는 것과 같은 규약이다 (`crate::run` · PRODUCT-SPEC §12).
+///
+/// **열 수 없는 시스템에서는 조용히 아무 일도 하지 않지 않는다** — 그 사실이 §13의 실패로
+/// 도착한다 (`crate::platform::file_manager`). 어느 실패에서도 파일은 그 자리에 그대로 있고,
+/// 화면은 전체 경로를 계속 보여 준다 (INV-3).
+///
+/// `async`인 이유는 [`export_markdown`]과 같다 — 파일 관리자를 띄우는 동안 창이 함께 멈추지
+/// 않게 한다.
+#[tauri::command(async)]
+pub fn show_saved_file(saved_files: State<'_, SavedFiles>, path: String) -> Result<(), Failure> {
+    saved_files.show(&path)
 }
 
 /// Recording 하나의 Notion 전송을 시작한다. **돌아오는 것은 접수 사실이지 전송 결과가 아니다.**

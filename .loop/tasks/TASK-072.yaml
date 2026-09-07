@@ -1,0 +1,52 @@
+# AI Handoff 산출물의 크기를 값으로 말하고 예산을 넘으면 순서대로 나눈다 (순수 모듈)
+# Runtime이 PLAN-20260905T201413Z 승인 시점에 생성했다 (proposal P7). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-072
+status: DONE
+
+request: |-
+  성공 기준 4의 규칙을 **파일시스템도 저장소도 네트워크도 모르는 순수 Rust 모듈**로 만든다(72분 녹음의 실측: 99 KB · 5,139줄 · segment마다 `### HH:MM:SS` 제목 1,711개). 셋을 한다. (1) **크기를 값으로 낸다** — 만들어질 문자열이 얼마나 큰지가 값으로 나와야 하며, 그 값이 없으면 화면은 사용자에게 크기를 말할 수 없다. (2) **앱이 고른 예산을 넘으면 순서대로 나눈다** — 내용을 잃지 않고, 순서가 보존되며, 각 조각이 자기 자리(몇 번째 / 전부 몇 개)를 말한다. 조각 경계가 문장 한가운데를 자르지 않도록 하는 규칙도 여기 있다. 예산은 **앱이 고른 값이지 벤더 제약이 아니다** — `src-tauri/src/notion/chunk.rs`는 Notion API의 제약을 표현한 모듈이므로 그 예산을 그대로 가져다 쓰지 않는다(재사용한다면 그 사실이 코드와 주석에서 구분돼야 한다). (3) **AI Handoff 문서의 transcript 렌더링을 압축한다** — segment마다 `### HH:MM:SS` 제목을 만드는 형태가 크기의 이유다. 렌더링 규칙은 지금처럼 `src-tauri/src/export/markdown.rs` **한 자리에** 두고(복제하면 §11 export 파일과 AI 문서가 조용히 갈라진다), 그 안에 AI 경로가 고르는 압축 형태를 더해 `export::ai_request`가 그것을 쓴다. **PRODUCT-SPEC §11의 Markdown export 파일 형식은 바꾸지 않는다** — 기존 export 테스트가 그대로 통과해야 한다. 압축해도 timestamp와 문장의 대응이 사라지지 않아야 하고, 전사 텍스트가 하나도 유실되지 않아야 한다. 이 Task는 command도 화면도 건드리지 않는다 — 규칙과 그 단위 테스트까지다.
+
+execution:
+  role: impl
+
+stop_condition:
+  gates: [build, lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 2
+
+acceptance_criteria:
+  - id: AC1
+    description: |-
+      `npm run lint`가 통과한다.
+    verification:
+      type: gate
+      ref: lint
+  - id: AC2
+    description: |-
+      `npm run test`가 통과한다 — 기존 `export::markdown` · `export::ai_request` 테스트가 §11 형식 불변을 그대로 확인한다.
+    verification:
+      type: gate
+      ref: test
+  - id: AC3
+    description: |-
+      `npm run build`가 통과한다.
+    verification:
+      type: gate
+      ref: build
+  - id: AC4
+    description: |-
+      나눔이 결정적이고, 순서를 보존하며, 이어 붙이면 원래 내용이 그대로 복원된다는 것(텍스트 유실 없음)이 단위 테스트로 고정돼 있다. 각 조각이 자기 자리를 말한다.
+    verification:
+      type: verifier
+      instruction: |-
+        긴 입력·짧은 입력·경계값 입력에 대한 테스트가 있는지, 이어 붙이기 복원 테스트가 실제로 내용 동일성을 확인하는지 본다.
+  - id: AC5
+    description: |-
+      압축된 transcript 렌더링이 §11 Markdown export 파일 형식을 바꾸지 않으며, 렌더링 규칙이 여전히 한 모듈 안에 있다(복제되지 않았다). 예산이 Notion API 제약에서 온 값이 아니라는 것이 코드에서 드러난다.
+    verification:
+      type: verifier
+
+evidence: []
+
+failure_memo: []

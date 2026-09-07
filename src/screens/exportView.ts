@@ -27,9 +27,17 @@
  * 사용자는 방금 만든 파일을 찾을 수 없다. 이 모듈은 그 경로를 **backend가 준 값 그대로** 들고
  * 있으며 문자열을 잘라 이름을 짐작하지 않는다 — 같은 이름이 있었으면 backend가 번호를 붙였고
  * (§4.3), 실제로 쓰인 이름이 함께 온다.
+ *
+ * ## 경로에 더해 그 자리를 여는 수단이 있다 (`phase-prompt/05.6` 성공 기준 2 · R-4)
+ *
+ * **경로는 그대로 남는다.** 2026-09-05의 실사용에서 경로만으로는 파일에 도달하지 못한다는 것이
+ * 드러났으므로 (macOS에서 `~/Library`는 Finder 기본 숨김이다), `done` 상태에 **그 자리를
+ * 여는 동작**이 값으로 하나 더 있다 ({@link ExportedFileView.show} · `savedFileView.ts`).
+ * 대체가 아니라 추가이며, 열지 못했을 때 무엇이 그대로인지도 그 값 안에 있다.
  */
 import { toFailure, type Failure } from '../ipc/failure';
 import type { AiNote, ExportedFile, Recording } from '../ipc/types';
+import { showFile, type ShowFileAttempt, type ShowFileView } from './savedFileView';
 
 /**
  * 이 자리에서 사용자가 할 수 있는 동작 하나.
@@ -74,6 +82,13 @@ export interface ExportedFileView {
   readonly fileName: string;
   /** 사용자에게 그대로 보여줄 수 있는 전체 경로. 화면이 만들어 내는 값이 아니다. */
   readonly path: string;
+  /**
+   * 그 자리를 여는 수단 (`phase-prompt/05.6` 성공 기준 2 · `savedFileView.ts`).
+   *
+   * **{@link path}의 대체가 아니라 추가다** — 여는 수단이 실패해도 경로는 그대로 보이며,
+   * 그때 사용자가 무엇을 할 수 있는지도 이 값이 말한다.
+   */
+  readonly show: ShowFileView;
 }
 
 /** 파일이 만들어졌다는 사실 한 줄. */
@@ -273,6 +288,14 @@ export interface ExportPanelInput {
   readonly notes: readonly AiNote[] | null;
   /** 이 화면이 건 내보내기 한 번. */
   readonly attempt: ExportAttempt;
+  /**
+   * 이 화면이 건 **자리 열기** 한 번 (`phase-prompt/05.6` 성공 기준 2).
+   *
+   * 내보내기와 다른 값인 이유는 다른 사건이기 때문이다 — 파일은 이미 만들어졌고, 그것을
+   * 여는 데 실패해도 만들어진 사실은 그대로다. 다른 파일에 대한 시도는 이 자리에 보이지
+   * 않는다 (`savedFileView.ts`의 `showFile`).
+   */
+  readonly show: ShowFileAttempt;
 }
 
 /**
@@ -283,14 +306,14 @@ export interface ExportPanelInput {
  * 다른 녹음에 대한 내보내기는 이 자리와 아무 상관이 없으므로 보지 않는다.
  */
 export function exportPanel(input: ExportPanelInput): ExportPanelView {
-  const { recording, notes, attempt } = input;
+  const { recording, notes, attempt, show } = input;
   const contents = contentsNotice(notes);
 
   if (recording === null) {
     return { contents, body: { kind: 'loading' } };
   }
 
-  const body = panelBody(recording, mine(attempt, recording.id));
+  const body = panelBody(recording, mine(attempt, recording.id), show);
   return { contents, body };
 }
 
@@ -306,7 +329,11 @@ function mine(attempt: ExportAttempt, recordingId: string): ExportAttempt {
   }
 }
 
-function panelBody(recording: Recording, attempt: ExportAttempt): ExportPanelBody {
+function panelBody(
+  recording: Recording,
+  attempt: ExportAttempt,
+  show: ShowFileAttempt,
+): ExportPanelBody {
   if (attempt.kind === 'running') {
     return { kind: 'exporting', text: EXPORTING_TEXT };
   }
@@ -318,6 +345,8 @@ function panelBody(recording: Recording, attempt: ExportAttempt): ExportPanelBod
         headline: EXPORT_DONE_HEADLINE,
         fileName: attempt.file.fileName,
         path: attempt.file.path,
+        // 경로를 보여 주는 것에 **더해** 그 자리를 여는 수단이 있다 (성공 기준 2 · R-4).
+        show: showFile(attempt.file.path, show),
       },
       text: EXPORT_DONE_TEXT,
       again: againAction(recording.id),

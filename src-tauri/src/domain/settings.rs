@@ -5,7 +5,9 @@
 //! recordings directory · automatic 처리 토글 · default microphone을 두었고, Phase 3이
 //! 전사 두 값(**자동 전사 토글**과 **모델 선택**)을 더하며, Phase 4가 AI provider 세 값을
 //! 더한다 (`docs/ADR-0008-note-ai-provider.md` §11.1). Phase 5가 Notion destination 하나를
-//! 더한다 (`docs/ADR-0009-notion-and-export.md` §8.4).
+//! 더한다 (`docs/ADR-0009-notion-and-export.md` §8.4). Phase 5.6이 **전사 언어**를 더한다 —
+//! §5 D가 처음부터 요구하던 항목이며 새 제품 방향이 아니다
+//! (`docs/ADR-0007-transcription-engine.md` §17.1.5).
 //!
 //! **INV-7: 이 타입에는 secret이 없다.** API key · integration token · password 류 값을
 //! 담는 필드를 두지 않으며, 저장소에도 그런 열이 없다. **Notion 설정이 생겨도 그대로다** —
@@ -54,6 +56,26 @@ pub struct Settings {
     /// 없을 수 있고, 그것은 **이 값이 틀렸다는 뜻이 아니라 지금 그 모델이 없다**는 뜻이다.
     /// 그 사실 때문에 저장된 선택을 조용히 지우거나 바꾸지 않는다.
     pub transcription_model: Option<String>,
+    /// 전사할 때 **무슨 언어로 들을지** (PRODUCT-SPEC §5 D · ADR-0007 §17.1).
+    /// `None`은 **아직 고르지 않았다 = 언어를 자동으로 감지한다**는 정상 상태다.
+    ///
+    /// `None`이 특정 언어를 뜻하지 않는다는 것이 이 필드의 요점이다. 2026-09-05의 첫 실사용에서
+    /// 한국어 회의가 영어로 전사돼 무너진 이유가 그것이었다 — 아무도 고르지 않은 자리에
+    /// 라이브러리의 기본값 `"en"`이 들어가 있었고, 그 값이 감지 결과인 것처럼 Transcript에
+    /// 남았다 (ADR-0007 §17.1.1 · §17.1.2). **고르지 않음은 영어가 아니라 자동 감지다**
+    /// (§17.1.4-1).
+    ///
+    /// [`Self::transcription_model`]과 **다른 값이다.** 어떤 모델로 듣는가와 무슨 언어로
+    /// 듣는가는 서로 다른 질문이며, 하나를 고른다고 나머지가 정해지지 않는다.
+    ///
+    /// domain은 이 문자열이 어떤 코드 체계인지 알지 않는다 (INV-10) — 값을 실제 엔진 호출로
+    /// 옮기는 자리는 `crate::transcription::whisper` 하나이며 (ADR-0007 §17.1.4-4), 저장소는
+    /// 그 코드가 그 엔진이 아는 언어인지 묻지 않는다. `transcription_model`과 같은 이유이고,
+    /// 그 사실 때문에 저장된 선택을 조용히 지우거나 바꾸지 않는다.
+    ///
+    /// **Transcript의 `language`와 같은 값이 아니다.** 이쪽은 앞으로의 전사에 대한 설정이고,
+    /// 저쪽은 이미 만들어진 전사 하나가 어떤 언어로 만들어졌는가의 기록이다 (§7.1 · INV-2).
+    pub transcription_language: Option<String>,
     /// 녹음을 시작할 때 기본으로 고를 입력 장치의 **선택 키**.
     /// `None`은 **아직 고르지 않았다**는 정상 상태다.
     ///
@@ -128,6 +150,15 @@ impl Settings {
     /// - `transcription_model`: 고르지 않은 상태(`None`). 모델 디렉터리에서 아무 파일이나
     ///   찾아 기본값으로 굳히지 않는다 — 어떤 모델로 전사할지는 사용자가 정한다
     ///   (ADR-0007 §8.1).
+    /// - `transcription_language`: 고르지 않은 상태(`None`), 그리고 그것은 **자동 감지**를
+    ///   뜻한다. **사용자의 OS 로캘을 짐작해 언어를 굳혀 두지 않는다** — 앱을 한국어로 쓰는
+    ///   사람이 영어 강의를 녹음하고, 영어 OS를 쓰는 사람이 한국어 회의를 녹음한다. 화면 언어는
+    ///   말하는 언어가 아니며, 짐작한 값이 저장되면 그때부터 그것은 **사용자가 고른 값처럼**
+    ///   보인다 (`default_microphone`이 첫 장치를 골라 두지 않는 것과 같은 이유다). 그리고
+    ///   짐작이 틀렸을 때 무너지는 모습은 이미 봤다 — 아무도 고르지 않은 `"en"` 하나가
+    ///   72분짜리 한국어 회의를 통째로 못 쓰게 만들었다 (ADR-0007 §17.1.1). 어느 언어도 여기
+    ///   기본값으로 오지 않으며, 고르지 않았을 때 할 일은 **엔진에게 감지를 시키는 것**이다
+    ///   (§17.1.4).
     /// - `default_microphone`: 고르지 않은 상태(`None`). 열거된 첫 장치를 기본값으로
     ///   굳혀 두지 않는다 — 사용자가 고른 적 없는 값이 고른 값처럼 보이면, 나중에 그
     ///   장치가 사라져도 무엇이 바뀐 것인지 말할 수 없게 된다.
@@ -148,6 +179,7 @@ impl Settings {
         automatic_processing: false,
         automatic_transcription: false,
         transcription_model: None,
+        transcription_language: None,
         default_microphone: None,
         ai_provider: None,
         ai_base_url: None,

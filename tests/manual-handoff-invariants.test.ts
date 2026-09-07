@@ -134,8 +134,10 @@ describe('이 파일의 검사가 실제 코드를 읽는다', () => {
       getAiPrompt: "'get_ai_prompt'",
       getTranscriptText: "'get_transcript_text'",
       exportAiRequest: "'export_ai_request'",
-      beginCopy: 'copyText(value)',
-      beginAiExport: 'exportAiRequest(id, mode)',
+      // 복사는 돌아온 값의 **텍스트**를 clipboard에 올린다. 그 값에는 크기와 조각의 자리도
+      // 함께 실려 있다 (`phase-prompt/05.6` 성공 기준 4).
+      beginCopy: 'copyText(value.text)',
+      beginAiExport: 'exportAiRequest(id, mode, portion)',
     };
 
     for (const [name, source] of MANUAL_PATH) {
@@ -187,23 +189,39 @@ describe('MH-1 · MH-2 — 이 경로는 AI provider를 읽을 수단이 없다'
   it('아래 줄과 복사 자리의 입력 타입에 provider를 담을 자리가 없다', () => {
     // 담을 자리가 없으면 실수로도 실릴 수 없다. 필드 목록을 **정확히** 고정하는 이유는
     // 하나가 늘어나는 순간 그것이 결정이라는 사실을 드러내기 위해서다.
+    //
+    // **필드가 하나 늘었다 — `show`다** (`phase-prompt/05.6` 성공 기준 2 · R-4). 그것이
+    // 결정이라는 사실이 여기서 드러나는 것이 이 검사의 목적이므로, 무엇이 왜 늘었는지 적는다:
+    // 이 값은 **이미 만들어진 파일 하나가 놓인 자리를 여는 시도**이며 담고 있는 것은 파일
+    // 경로다. AI provider도, AI 설정도, 벤더도 아니다 — 그것을 여기에 담을 자리는 여전히 없고,
+    // 그래서 provider 때문에 아래 줄이 막히는 상태를 만들 수단도 여전히 없다 (MH-1 · MH-2).
     expect(fields(block(aiHandoffViewSource, 'export interface ManualHandoffInput {', '\n}\n')))
-      .toEqual(['recording', 'mode', 'copy', 'aiExport']);
+      .toEqual(['recording', 'mode', 'copy', 'aiExport', 'show']);
 
     expect(fields(block(copyViewSource, 'export interface CopyPanelInput {', '\n}\n')))
       .toEqual(['recording', 'mode', 'attempt']);
   });
 
-  it('세 command가 recordingId와 mode 말고는 아무것도 보내지 않는다', () => {
+  it('세 command가 recordingId · mode · 가져갈 조각 말고는 아무것도 보내지 않는다', () => {
     // wire에 실리는 것이 전부다 — provider도, 주소도, 모델도 실을 자리가 없다.
+    //
+    // **인자가 하나 늘었다 — `portion`이다** (`phase-prompt/05.6` 성공 기준 4). 그것이
+    // 결정이라는 사실이 여기서 드러나는 것이 이 검사의 목적이므로, 무엇이 왜 늘었는지 적는다:
+    // 이 값은 **산출물의 몇 번째 조각을 가져갈 것인가**이며 담고 있는 것은 1부터 세는 번호
+    // 하나다. AI provider도, 벤더도, 옛 Transcript version을 고르는 수단도 아니다 — 그런 것을
+    // 여기 담을 자리는 여전히 없고, 그래서 provider 때문에 이 셋이 막히는 상태를 만들 수단도
+    // 여전히 없다 (MH-1 · MH-2 · MH-5).
+    //
+    // **이름은 늘지 않았다** (ADR-0010 §8.1). 늘어난 것은 인자와 응답의 모양뿐이며,
+    // `tests/ipc-boundary.test.ts`가 세는 command 표면은 그대로 서른둘이다.
     expect(block(commandsSource, 'export function getAiPrompt(', '\n}\n')).toContain(
-      "call<string>('get_ai_prompt', { recordingId, mode })",
+      "call<HandoffText>('get_ai_prompt', { recordingId, mode, portion })",
     );
     expect(block(commandsSource, 'export function getTranscriptText(', '\n}\n')).toContain(
-      "call<string>('get_transcript_text', { recordingId })",
+      "call<HandoffText>('get_transcript_text', { recordingId, portion })",
     );
     expect(block(commandsSource, 'export function exportAiRequest(', '\n}\n')).toContain(
-      "call<ExportedFile>('export_ai_request', { recordingId, mode })",
+      "call<ExportedAiRequest>('export_ai_request', { recordingId, mode, portion })",
     );
   });
 });

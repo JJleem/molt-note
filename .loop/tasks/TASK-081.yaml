@@ -1,0 +1,56 @@
+# 녹음 중에 레벨이 backend에 살아 있고 status가 그것을 말한다
+# Runtime이 PLAN-20260907T032843Z 승인 시점에 생성했다 (proposal P6). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-081
+status: DONE
+
+request: |-
+  P5의 값을 진행 중인 녹음에 붙인다. (1) `src-tauri/src/audio/capture.rs`에서 **파일에 쓰이는 것과 같은 통로**(`drain`)로 지나는 샘플에서 레벨을 갱신한다 — 실시간 오디오 콜백(`system_capture.rs`)에서 계산하지 않는다. 일시정지 구간의 샘플이 파일에 도달하지 않는 것과 같은 이유로 레벨도 그때는 갱신되지 않는다. (2) `ActiveCapture`가 그 값을 읽을 수 있게 하고, `commands::Recorder::status`가 `SessionStatusPayload`에 실어 보낸다. 진행 중인 녹음이 없으면 값은 **없음(null)이지 0이 아니다** — 재지 않은 것을 0이라고 말하지 않는다. (3) 나가는 것은 수치와 문장뿐이며 **오디오 샘플 자체는 payload에 실리지 않는다**(§14.4.2 · INV-6). (4) `src-tauri/tests/` 아래 기존 가짜 `SampleSource` 하네스로 낮은 레벨과 정상 레벨을 흘려보내고 `capture_status`가 둘을 구분해 보고하는 것, 일시정지 중에 값이 갱신되지 않는 것, 녹음 전에는 값이 없음인 것을 고정한다. 마이크 게인 조정도 오디오 정규화도 하지 않는다.
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-080
+
+stop_condition:
+  gates: [build, lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 3
+
+acceptance_criteria:
+  - id: AC-1
+    description: |-
+      `npm run build`가 통과한다.
+    verification:
+      type: gate
+      ref: build
+  - id: AC-2
+    description: |-
+      `npm run lint`가 통과한다.
+    verification:
+      type: gate
+      ref: lint
+  - id: AC-3
+    description: |-
+      `npm run test`가 통과하고, 낮은 레벨/정상 레벨 구분 · 일시정지 중 미갱신 · 녹음 전 값 없음을 마이크 없이 확인하는 새 테스트가 있다.
+    verification:
+      type: gate
+      ref: test
+  - id: AC-4
+    description: |-
+      레벨 계산이 실시간 오디오 콜백이 아니라 파일 쓰기 통로에서 일어나고, 캡처가 만드는 WAV의 샘플 값은 예전과 똑같다 — 게인도 정규화도 적용되지 않는다.
+    verification:
+      type: verifier
+      instruction: |-
+        capture.rs와 system_capture.rs의 변경을 읽고 확인한다. 샘플을 곱하거나 바꾸는 코드가 새로 생겼으면 실패다.
+  - id: AC-5
+    description: |-
+      payload에 오디오 샘플이나 그 배열이 실리지 않고, 새 벤더 고유 개념이 payload에 생기지 않았다 (INV-6 · INV-9).
+    verification:
+      type: verifier
+
+evidence: []
+
+failure_memo: []

@@ -7,15 +7,25 @@
 // 실제 마이크 입력 품질과 녹음된 소리는 이 테스트가 판정하지 않는다 — Human Review 항목이다.
 import { describe, expect, it } from 'vitest';
 import type { Failure } from '../ipc/failure';
-import type { InputDevice, Recording, SessionStatus, StoppedRecording } from '../ipc/types';
+import type {
+  InputDevice,
+  InputLevel,
+  Recording,
+  SessionStatus,
+  StoppedRecording,
+} from '../ipc/types';
 import {
   INITIAL_RECORDING,
   UNKNOWN_ELAPSED,
+  UNKNOWN_LEVEL_TEXT,
+  WEAK_LEVEL_WARNING,
   canRecord,
   editedTitle,
   failedAction,
   failedDevices,
   failedSession,
+  inputLevelDisplay,
+  inputLevelWarning,
   microphoneLabel,
   microphoneNotice,
   observedDevices,
@@ -32,10 +42,47 @@ import {
 const BUILT_IN: InputDevice = { key: 'builtin', label: 'MacBook Pro Microphone', isDefault: true };
 const HEADSET: InputDevice = { key: 'headset', label: 'USB Headset', isDefault: false };
 
-/** backend가 돌려주는 상태. **경과 시간 문자열은 Rust가 만든다.** */
-function status(state: SessionStatus['state'], elapsedMs: number, label: string): SessionStatus {
-  return { state, elapsedMs, elapsedLabel: label };
+/**
+ * backend가 돌려주는 상태. **경과 시간 문자열도 입력 레벨도 Rust가 만든다.**
+ *
+ * 레벨을 넘기지 않으면 `null`이다 — 진행 중인 녹음이 없거나 아직 샘플이 하나도 쓰이지 않은
+ * 상태이며, `0`이 아니다 (ADR-0003 §16.3).
+ */
+function status(
+  state: SessionStatus['state'],
+  elapsedMs: number,
+  label: string,
+  level: InputLevel | null = null,
+): SessionStatus {
+  return { state, elapsedMs, elapsedLabel: label, level };
 }
+
+/**
+ * 세 판정의 값. **전부 backend가 만든 것이며 이 파일은 dBFS를 계산하지도 판정하지도 않는다.**
+ *
+ * 수치는 ADR-0003 §16.1의 실제 관측이다 — 전사가 무너진 2026-09-07의 -42.2 dBFS와 고유 문장
+ * 94.0%가 나온 2026-09-04의 -25.8 dBFS.
+ */
+const USABLE_LEVEL: InputLevel = {
+  averageDbfs: -25.8,
+  peakDbfs: -6.1,
+  verdict: 'usable',
+  message: '입력 레벨이 쓸 만하다 (평균 -25.8 dBFS)',
+};
+
+const LOW_LEVEL: InputLevel = {
+  averageDbfs: -42.2,
+  peakDbfs: -19.4,
+  verdict: 'low',
+  message: '입력 레벨이 낮다 — 마이크와 자리를 확인한다 (평균 -42.2 dBFS)',
+};
+
+const SILENT_LEVEL: InputLevel = {
+  averageDbfs: -90.3,
+  peakDbfs: -90.3,
+  verdict: 'silent',
+  message: '소리가 들어오지 않는다 — 마이크를 확인한다 (평균 -90.3 dBFS 이하)',
+};
 
 const IDLE = status('idle', 0, '0:00');
 const RECORDING = status('recording', 7_000, '0:07');
@@ -300,6 +347,117 @@ describe('경과 시간', () => {
     for (const text of texts) {
       expect(text.length).toBeGreaterThan(0);
     }
+  });
+});
+
+describe('입력 레벨 (ADR-0003 §16.3 · §16.4)', () => {
+  // 지키려는 것: **소리가 담기지 않은 채로 51분이 지나가지 않는다.** 2026-09-07에 실제로
+  // 그 일이 있었고(§16.1), 사람이 그것을 안 것은 전사를 4.3분 기다린 뒤였다. 그러므로 세
+  // 갈래가 화면에서 갈려야 하고, 쓸 수 없을 만큼 낮으면 **정지 전에** 말해야 한다.
+  //
+  // 이 파일은 dBFS를 계산하지도 임계값을 두지도 않는다 — 값도 문장도 backend가 만든 것이다.
+
+  /** 녹음 중이고, backend가 이 레벨을 마지막으로 말해 줬다. */
+  function live(level: InputLevel | null): RecordingView {
+    return observedSession(recording(), status('recording', 7_000, '0:07', level));
+  }
+
+  it('값이 아직 없는 것은 낮은 것이 아니다', () => {
+    // 녹음을 막 시작한 순간이다. 여기서 "낮음"이라고 말하면 그 표시는 그 뒤로 믿을 수 없다.
+    const display = inputLevelDisplay(live(null));
+
+    expect(display.shown).toBe(true);
+    expect(display.kind).toBe('unknown');
+    expect(display.text).toBe(UNKNOWN_LEVEL_TEXT);
+    expect(display.weak).toBe(false);
+    expect(inputLevelWarning(live(null))).toBeNull();
+  });
+
+  it('낮으면 그 갈래로 오고 backend의 문장을 그대로 보여준다', () => {
+    const display = inputLevelDisplay(live(LOW_LEVEL));
+
+    expect(display.shown).toBe(true);
+    expect(display.kind).toBe('low');
+    expect(display.text).toBe(LOW_LEVEL.message);
+    expect(display.weak).toBe(true);
+  });
+
+  it('소리가 들어오지 않는 것도 값 없음과 다른 갈래다', () => {
+    const display = inputLevelDisplay(live(SILENT_LEVEL));
+
+    expect(display.kind).toBe('silent');
+    expect(display.text).toBe(SILENT_LEVEL.message);
+    expect(display.weak).toBe(true);
+  });
+
+  it('쓸 만하면 그렇다고 말하고 경고하지 않는다', () => {
+    const display = inputLevelDisplay(live(USABLE_LEVEL));
+
+    expect(display.kind).toBe('usable');
+    expect(display.text).toBe(USABLE_LEVEL.message);
+    expect(display.weak).toBe(false);
+    expect(inputLevelWarning(live(USABLE_LEVEL))).toBeNull();
+  });
+
+  it('세 갈래가 서로 다른 문장으로 온다', () => {
+    const texts = [null, LOW_LEVEL, SILENT_LEVEL, USABLE_LEVEL].map(
+      (level) => inputLevelDisplay(live(level)).text,
+    );
+
+    expect(new Set(texts).size).toBe(texts.length);
+    for (const text of texts) {
+      expect(text.trim()).not.toBe('');
+    }
+  });
+
+  it('쓸 수 없을 만큼 낮으면 정지 전에 경고가 나온다', () => {
+    // 두 갈래 모두 같은 경고다 — 무엇이 얼마나 낮은지는 backend의 문장이 함께 말한다.
+    expect(inputLevelWarning(live(LOW_LEVEL))).toBe(WEAK_LEVEL_WARNING);
+    expect(inputLevelWarning(live(SILENT_LEVEL))).toBe(WEAK_LEVEL_WARNING);
+  });
+
+  it('경고 문장이 무엇을 해야 하는지 말한다', () => {
+    // 문장을 통째로 고정하면 낱말 하나를 다듬을 때마다 테스트가 깨진다. 고정하는 것은
+    // 이 경고가 반드시 말해야 하는 두 가지다 — 마이크를 확인하라, 그리고 정지 전에.
+    expect(WEAK_LEVEL_WARNING).toMatch(/microphone/i);
+    expect(WEAK_LEVEL_WARNING).toMatch(/stop/i);
+    // 녹음이 사라진다고 말하지 않는다 — 어떤 실패도 이미 녹음된 것을 지우지 않는다 (INV-3).
+    expect(WEAK_LEVEL_WARNING).toMatch(/stays as it is/i);
+  });
+
+  it('녹음 중이 아니면 경고하지 않는다', () => {
+    // 정지한 뒤나 시작하기 전에 "정지 전에 확인하라"고 말하는 것은 할 수 있는 일이 없는
+    // 경고이며, 그런 경고가 남아 있으면 정작 녹음 중의 경고도 배경이 된다.
+    const notRecording: readonly RecordingView[] = [
+      INITIAL_RECORDING,
+      ready(),
+      observedSession(recording(), status('paused', 7_000, '0:07', LOW_LEVEL)),
+      observedSession(recording(), status('stopped', 7_000, '0:07', LOW_LEVEL)),
+      observedSession(recording(), status('idle', 0, '0:00', LOW_LEVEL)),
+    ];
+
+    for (const view of notRecording) {
+      const where = view.session?.state ?? '아직 모르는 상태';
+      expect(inputLevelWarning(view), `${where}에서 경고가 나왔다`).toBeNull();
+    }
+  });
+
+  it('진행 중인 녹음이 없으면 레벨 자리 자체를 두지 않는다', () => {
+    expect(inputLevelDisplay(INITIAL_RECORDING).shown).toBe(false);
+    expect(inputLevelDisplay(ready()).shown).toBe(false);
+    // 일시정지는 아직 끝난 녹음이 아니다 — 지금까지 담긴 것이 무엇인지는 계속 보인다.
+    expect(
+      inputLevelDisplay(observedSession(recording(), status('paused', 7_000, '0:07', LOW_LEVEL))),
+    ).toMatchObject({ shown: true, kind: 'low' });
+  });
+
+  it('레벨이 상태와 경과 시간을 밀어내지 않는다 (§19)', () => {
+    // 화면에서 가장 크고 분명해야 하는 두 값은 레벨이 무엇이든 그대로다.
+    const withLevel = sessionDisplay(live(SILENT_LEVEL));
+
+    expect(withLevel).toEqual(sessionDisplay(live(null)));
+    expect(withLevel.elapsedLabel).toBe('0:07');
+    expect(withLevel.live).toBe(true);
   });
 });
 

@@ -2,14 +2,23 @@
  * AI Note 탭의 **Copy AI Prompt · Copy Transcript** 두 자리 (PRODUCT-SPEC §13 ·
  * `phase-prompt/05.5` 요구 A-1 · A-2 · 5 · docs/ADR-0010-manual-ai-handoff.md §7.5).
  *
- * 이 자리가 답해야 하는 질문은 넷이다.
+ * 이 자리가 답해야 하는 질문은 다섯이다.
  *
  * ```text
  * 지금 복사할 수 있는가            §7.2 — 현재 성공한 전사가 있어야 복사할 재료가 있다
  * 지금 무슨 일이 벌어지고 있는가   아직 안 함 · 복사 중 · 복사됨 · 실패
  * 복사됐다는 것을 어떻게 아는가    §7.5 — **텍스트로 말한다.** 색만으로 말하지 않는다
+ * 얼마나 크고 몇 번째를 가져갔는가 05.6 성공 기준 4 — 크기와 자리와, 나머지를 가져가는 수단
  * 실패했다면 무엇이 남았고 어디로 갈 수 있는가   §13 · §7.5 — 재시도와 Export for AI
  * ```
+ *
+ * ## 크기 때문에 조용히 실패하지 않는다 (`phase-prompt/05.6` 성공 기준 4 · R-5)
+ *
+ * 72분 녹음의 산출물은 채팅 창에 한 번에 들어가지 않았고, 그때 앱은 아무 말도 하지 않았다.
+ * 이제 복사가 끝난 자리는 언제나 셋을 말한다 — **얼마나 큰가**({@link HandoffSizeView}) ·
+ * **지금 올라간 것이 몇 번째 중 몇 번째인가**({@link PortionView}) · **나머지를 마저 가져가는
+ * 수단**(`next`). 조각 하나만 올라갔을 때는 머리글부터 다르다: **잘린 것을 온전한 것이라고
+ * 말하는 상태가 이 모듈에 없다.**
  *
  * React도 DOM도 clipboard도 Tauri도 알지 않는다. 그래서 네 갈래 전부를 **실제 clipboard 없이**
  * vitest로 판정할 수 있다 (§18 · `exportView.ts` · `notionSyncView.ts`와 같은 형태다).
@@ -30,7 +39,88 @@
  */
 import { clipboardTrouble } from '../platform/clipboard';
 import { toFailure, type Failure } from '../ipc/failure';
-import type { NoteMode, Recording } from '../ipc/types';
+import type { HandoffText, NoteMode, PortionOf, Recording } from '../ipc/types';
+
+// --- 산출물의 크기와 나눔 (`phase-prompt/05.6` 성공 기준 4 · R-5) ------------------------
+//
+// 72분 녹음의 산출물은 99 KB · 5,139줄이었다. 사람은 그것을 채팅 창에 붙여 넣으려다 실패했고,
+// **앱은 그 사실을 말해 주지 않았다.** 아래 두 값이 그 침묵을 없앤다 — 화면은 이것으로
+// "얼마나 큰가"와 "지금 가져간 것이 몇 번째 중 몇 번째인가"를 문장으로 말할 수 있다.
+//
+// **나누는 규칙은 여기 없다.** 어디서 자를지도, 예산이 얼마인지도 backend 한 자리에 있고
+// (`src-tauri/src/export/portion.rs`), 이 모듈이 하는 일은 그 결과를 사람이 읽는 값으로
+// 옮기는 것뿐이다. `Export for AI` 자리도 같은 값을 쓴다 (`aiHandoffView.ts`).
+
+/** 큰 수에 자리를 끊어 준다 — `41320` → `41,320`. 세는 값이지 시각이 아니다. */
+function counted(value: number): string {
+  return String(value).replace(/\B(?=(\d{3})+$)/g, ',');
+}
+
+/** 한 번에 들어가지 않을 수 있다는 사실. **실패가 아니라 크기에 대한 안내다.** */
+export const TOO_LONG_NOTICE =
+  'This is long enough that a chat may not take it in one paste, so it comes in parts. Take them in order — nothing is left out.';
+
+/** 산출물 하나가 **얼마나 큰가**. 화면이 사용자에게 그대로 말할 수 있는 모양이다. */
+export interface HandoffSizeView {
+  /** 산출물 전체의 글자 수. */
+  readonly characters: number;
+  /** 산출물 전체의 줄 수. 전사에서는 segment 수에 가깝다. */
+  readonly lines: number;
+  /** 사람이 읽는 한 줄. */
+  readonly label: string;
+  /** 한 조각에 다 들어갔는가. */
+  readonly fitsInOne: boolean;
+  /** 들어가지 않았을 때만 있는 안내. 그 밖에는 `null`이다. */
+  readonly tooLongNotice: string | null;
+}
+
+/** 돌아온 값의 크기를 화면이 말할 수 있는 모양으로 옮긴다. */
+export function handoffSize(of: PortionOf): HandoffSizeView {
+  const fitsInOne = of.portionCount <= 1;
+
+  return {
+    characters: of.totalSize.chars,
+    lines: of.totalSize.lines,
+    label: `About ${counted(of.totalSize.chars)} characters across ${counted(of.totalSize.lines)} lines.`,
+    fitsInOne,
+    tooLongNotice: fitsInOne ? null : TOO_LONG_NOTICE,
+  };
+}
+
+/**
+ * 지금 가져간 것이 **몇 번째 중 몇 번째인가**.
+ *
+ * `whole`이 참인 것과 `Part 1 of 4`는 다른 사실이며, 그 차이가 값으로 있어야 화면이 잘린
+ * 결과를 온전한 것처럼 말하지 않는다.
+ */
+export interface PortionView {
+  /** 몇 번째인가. **1부터 센다.** */
+  readonly index: number;
+  /** 전부 몇 개인가. */
+  readonly count: number;
+  /** 나뉘지 않았는가 — 지금 가져간 것이 전부인가. */
+  readonly whole: boolean;
+  /** 사람이 읽는 한 줄. 나뉘지 않았으면 그 사실을 말한다. */
+  readonly label: string;
+  /** 아직 가져가지 않은 조각이 몇 개 남았는가. */
+  readonly remaining: number;
+}
+
+/** 나뉘지 않았을 때의 문장. **"1/1"이라고 말하지 않는다.** */
+export const WHOLE_PORTION_LABEL = 'This is all of it.';
+
+/** 돌아온 값의 자리를 화면이 말할 수 있는 모양으로 옮긴다. */
+export function portionTaken(of: PortionOf): PortionView {
+  const whole = of.portionCount <= 1;
+
+  return {
+    index: of.portion,
+    count: of.portionCount,
+    whole,
+    label: whole ? WHOLE_PORTION_LABEL : `Part ${of.portion} of ${of.portionCount}.`,
+    remaining: Math.max(of.portionCount - of.portion, 0),
+  };
+}
 
 /**
  * 복사할 수 있는 것 둘 (요구 A-1 · A-2).
@@ -49,7 +139,7 @@ export type CopyTarget = 'prompt' | 'transcript';
  * 지난다.
  */
 export interface CopyAction {
-  readonly kind: 'copy' | 'again' | 'retry';
+  readonly kind: 'copy' | 'again' | 'retry' | 'next';
   readonly target: CopyTarget;
   readonly label: string;
   readonly recordingId: string;
@@ -59,6 +149,13 @@ export interface CopyAction {
    * 전사 복사에는 mode가 없으므로 `null`이다 — 없는 것을 있는 것처럼 싣지 않는다.
    */
   readonly mode: NoteMode | null;
+  /**
+   * 가져갈 조각 (`phase-prompt/05.6` 성공 기준 4). **1부터 센다.**
+   *
+   * 이 값이 동작에 실려 있기 때문에 "나머지를 마저 가져가는 수단"이 화면 값으로 존재한다 —
+   * 컴포넌트는 누른 동작을 그대로 backend에 넘길 뿐 몇 번째를 달라고 할지 스스로 정하지 않는다.
+   */
+  readonly portion: number;
 }
 
 /** 화면에 처음 보이는 이름. Phase Goal이 부르는 이름 그대로다. */
@@ -82,19 +179,37 @@ const RETRY_LABEL: Record<CopyTarget, string> = {
   transcript: 'Try copying the transcript again',
 };
 
+const FIXED_LABEL: Record<Exclude<CopyAction['kind'], 'next'>, Record<CopyTarget, string>> = {
+  copy: START_LABEL,
+  again: AGAIN_LABEL,
+  retry: RETRY_LABEL,
+};
+
+/**
+ * 처음 누르는 조각은 언제나 첫 번째다.
+ *
+ * backend도 아무것도 고르지 않은 요청을 첫 조각으로 읽는다 — 두 자리가 같은 기본값을 갖도록
+ * 여기서도 그 숫자를 값으로 적는다.
+ */
+export const FIRST_PORTION = 1;
+
 function action(
   kind: CopyAction['kind'],
   target: CopyTarget,
   recordingId: string,
   mode: NoteMode,
+  portion: number,
+  count: number,
 ): CopyAction {
-  const label = kind === 'copy' ? START_LABEL : kind === 'again' ? AGAIN_LABEL : RETRY_LABEL;
   return {
     kind,
     target,
-    label: label[target],
+    // 다음 조각의 이름만 상태에 따라 달라진다 — 몇 번째를 가져오는지가 버튼에 보여야
+    // 사용자가 누르기 전에 무엇이 일어날지 안다.
+    label: kind === 'next' ? `Copy part ${portion} of ${count}` : FIXED_LABEL[kind][target],
     recordingId,
     mode: target === 'prompt' ? mode : null,
+    portion,
   };
 }
 
@@ -144,9 +259,30 @@ const COPYING_TEXT: Record<CopyTarget, string> = {
 /** 복사됐다는 사실 한 줄. **색이 아니라 이 문장이 그것을 말한다** (§7.5). */
 export const COPIED_HEADLINE = 'Copied to the clipboard.';
 
+/**
+ * **조각 하나만 올라갔을 때의 사실 한 줄** (`phase-prompt/05.6` 성공 기준 4).
+ *
+ * 이때 "Copied to the clipboard."라고만 말하면 그것은 **잘린 결과를 온전한 것이라고 말하는
+ * 것이다.** 그래서 머리글부터 다르다 — 무엇이 올라갔는지는 바로 아래 자리 문장이 말한다.
+ */
+export const COPIED_PORTION_HEADLINE = 'One part is on your clipboard — not the whole thing yet.';
+
 const COPIED_TEXT: Record<CopyTarget, string> = {
   prompt: 'The prompt is on your clipboard. Paste it into your AI chat.',
   transcript: 'The transcript is on your clipboard. Paste it wherever you need it.',
+};
+
+const COPIED_PORTION_TEXT: Record<CopyTarget, string> = {
+  prompt:
+    'Paste this part into your AI chat, then come back for the next one and paste it after this.',
+  transcript:
+    'Paste this part where you need it, then come back for the next one and paste it after this.',
+};
+
+/** 마지막 조각까지 왔다. **여기서만 "다 가져갔다"고 말한다.** */
+const LAST_PORTION_TEXT: Record<CopyTarget, string> = {
+  prompt: 'That was the last part. Pasted in order, the parts make the whole prompt.',
+  transcript: 'That was the last part. Pasted in order, the parts make the whole transcript.',
 };
 
 /** 무엇을 하다 실패했는가 (§13). 원인은 {@link Failure}가 말한다. */
@@ -227,26 +363,52 @@ function failureCause(failure: Failure): CopyFailureCause {
  */
 export type CopyAttempt =
   | { readonly kind: 'none' }
-  | { readonly kind: 'copying'; readonly target: CopyTarget; readonly recordingId: string }
-  | { readonly kind: 'copied'; readonly target: CopyTarget; readonly recordingId: string }
+  | {
+      readonly kind: 'copying';
+      readonly target: CopyTarget;
+      readonly recordingId: string;
+      readonly portion: number;
+    }
+  | {
+      readonly kind: 'copied';
+      readonly target: CopyTarget;
+      readonly recordingId: string;
+      /**
+       * clipboard에 올라간 것이 **무엇의 어디였는가** (`phase-prompt/05.6` 성공 기준 4).
+       *
+       * 이 값이 실려 있기 때문에 화면은 "복사됐다"에서 멈추지 않고 크기와 자리를 말할 수 있고,
+       * 조각이 남았는지도 안다 — 잘린 것을 온전한 것처럼 말할 수단이 없다.
+       */
+      readonly taken: HandoffText;
+    }
   | {
       readonly kind: 'failed';
       readonly target: CopyTarget;
       readonly recordingId: string;
+      /** 가지러 갔던 조각. 재시도가 **그 조각으로** 돌아가게 하는 값이다. */
+      readonly portion: number;
       readonly failure: Failure;
     };
 
 /** 아무것도 하지 않은 상태. 화면이 열렸을 때의 값이다. */
 export const NO_COPY_ATTEMPT: CopyAttempt = { kind: 'none' };
 
-/** 복사를 시작했을 때 만드는 값. */
-export function startedCopy(target: CopyTarget, recordingId: string): CopyAttempt {
-  return { kind: 'copying', target, recordingId };
+/** 복사를 시작했을 때 만드는 값. 어느 조각을 가지러 갔는지 함께 들고 있다. */
+export function startedCopy(
+  target: CopyTarget,
+  recordingId: string,
+  portion: number,
+): CopyAttempt {
+  return { kind: 'copying', target, recordingId, portion };
 }
 
-/** clipboard가 텍스트를 받았을 때 만드는 값. */
-export function copiedText(target: CopyTarget, recordingId: string): CopyAttempt {
-  return { kind: 'copied', target, recordingId };
+/** clipboard가 텍스트를 받았을 때 만드는 값 — backend가 준 크기와 자리를 그대로 들고 있다. */
+export function copiedText(
+  target: CopyTarget,
+  recordingId: string,
+  taken: HandoffText,
+): CopyAttempt {
+  return { kind: 'copied', target, recordingId, taken };
 }
 
 /**
@@ -256,8 +418,13 @@ export function copiedText(target: CopyTarget, recordingId: string): CopyAttempt
  * "복사되지 않았다"는 하나의 사건이며, 무엇 때문이었는지는 {@link CopyFailureCause}가 가른다.
  * **어느 쪽이든 console로 흘려보내지 않는다.**
  */
-export function failedCopy(target: CopyTarget, recordingId: string, error: unknown): CopyAttempt {
-  return { kind: 'failed', target, recordingId, failure: toFailure(error) };
+export function failedCopy(
+  target: CopyTarget,
+  recordingId: string,
+  portion: number,
+  error: unknown,
+): CopyAttempt {
+  return { kind: 'failed', target, recordingId, portion, failure: toFailure(error) };
 }
 
 /**
@@ -279,11 +446,21 @@ export type CopyBody =
   | { readonly kind: 'copying'; readonly text: string }
   | {
       readonly kind: 'copied';
-      /** 복사됐다는 사실. 색이 아니라 이 문장이 그것을 말한다 (§7.5). */
+      /**
+       * 복사됐다는 사실. 색이 아니라 이 문장이 그것을 말한다 (§7.5).
+       *
+       * **조각 하나만 올라갔으면 다른 문장이다** — 잘린 결과를 온전한 것이라고 말하지 않는다.
+       */
       readonly headline: string;
       readonly text: string;
-      /** 또 복사할 수 있다. 같은 텍스트가 다시 clipboard로 간다. */
+      /** 산출물 전체가 얼마나 큰가 (`phase-prompt/05.6` 성공 기준 4). */
+      readonly size: HandoffSizeView;
+      /** 지금 올라간 것이 몇 번째 중 몇 번째인가. */
+      readonly portion: PortionView;
+      /** 또 복사할 수 있다. **같은 조각이** 다시 clipboard로 간다. */
       readonly again: CopyAction;
+      /** 나머지를 마저 가져가는 수단. 남은 조각이 없으면 `null`이다. */
+      readonly next: CopyAction | null;
     }
   | {
       readonly kind: 'failed';
@@ -389,11 +566,24 @@ function itemBody(
   }
 
   if (attempt.kind === 'copied') {
+    const portion = portionTaken(attempt.taken);
+    const at = (kind: CopyAction['kind'], index: number) =>
+      action(kind, target, recording.id, mode, index, portion.count);
+
     return {
       kind: 'copied',
-      headline: COPIED_HEADLINE,
-      text: COPIED_TEXT[target],
-      again: action('again', target, recording.id, mode),
+      // 잘린 것을 온전한 것이라고 말하지 않는다 (`phase-prompt/05.6` 성공 기준 4).
+      headline: portion.whole ? COPIED_HEADLINE : COPIED_PORTION_HEADLINE,
+      text: portion.whole
+        ? COPIED_TEXT[target]
+        : portion.remaining === 0
+          ? LAST_PORTION_TEXT[target]
+          : COPIED_PORTION_TEXT[target],
+      size: handoffSize(attempt.taken),
+      portion,
+      again: at('again', portion.index),
+      // 남은 것이 있을 때만 다음 조각을 가리킨다. 없는 조각을 달라는 버튼을 만들지 않는다.
+      next: portion.remaining === 0 ? null : at('next', portion.index + 1),
     };
   }
 
@@ -406,7 +596,8 @@ function itemBody(
       cause,
       preservedNotice: COPY_PRESERVED_NOTICE,
       resolution: FAILURE_RESOLUTION[cause],
-      retry: action('retry', target, recording.id, mode),
+      // 실패한 **그 조각을** 다시 가지러 간다 — 건너뛴 조각은 사용자가 알아채지 못한 채 빠진다.
+      retry: action('retry', target, recording.id, mode, attempt.portion, 1),
       alternative: ALTERNATIVE,
     };
   }
@@ -419,6 +610,8 @@ function itemBody(
   return {
     kind: 'notAsked',
     text: READY_TEXT[target],
-    start: action('copy', target, recording.id, mode),
+    // 크기는 아직 알 수 없다 — 물어보기 전에는 backend만 안다. 그래서 첫 조각을 청한다.
+    start: action('copy', target, recording.id, mode, FIRST_PORTION, 1),
   };
 }
+

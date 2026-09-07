@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use molt_note_lib::domain::FailureKind;
 use molt_note_lib::transcription::audio_input::{TARGET_CHANNELS, TARGET_SAMPLE_RATE_HZ};
-use molt_note_lib::transcription::engine::{engine_failed, TranscriptionEngine};
+use molt_note_lib::transcription::engine::{engine_failed, LanguageChoice, TranscriptionEngine};
 use molt_note_lib::transcription::model;
 use molt_note_lib::transcription::testing::StubEngine;
 use molt_note_lib::transcription::{ModelFile, RawSegment, RawTranscription, TranscriptionInput};
@@ -105,7 +105,7 @@ fn a_normal_run_returns_the_engine_output_untouched() {
     let engine = StubEngine::returning(raw_output());
 
     let output = engine
-        .transcribe(&derived_input(), &model)
+        .transcribe(&derived_input(), &model, &LanguageChoice::Detect)
         .expect("정상 출력이어야 한다");
 
     assert_eq!(output, raw_output(), "경계가 값을 바꾸지 않는다");
@@ -160,7 +160,7 @@ fn an_engine_that_fails_is_reported_as_a_retryable_product_failure() {
     );
 
     let failure = engine
-        .transcribe(&derived_input(), &model)
+        .transcribe(&derived_input(), &model, &LanguageChoice::Detect)
         .expect_err("실행 실패여야 한다");
 
     assert_eq!(failure.kind, FailureKind::TranscriptionEngineFailed);
@@ -183,7 +183,7 @@ fn output_that_cannot_be_read_as_a_transcript_is_its_own_failure() {
     });
 
     let failure = engine
-        .transcribe(&derived_input(), &model)
+        .transcribe(&derived_input(), &model, &LanguageChoice::Detect)
         .expect_err("해석할 수 있는 출력이 없다");
 
     assert_eq!(failure.kind, FailureKind::TranscriptionOutputUnusable);
@@ -206,14 +206,14 @@ fn the_four_transcription_failures_reach_the_screen_as_four_different_kinds() {
             .expect_err("쓸 수 없는 모델")
             .kind,
         StubEngine::failing(engine_failed("죽었다"))
-            .transcribe(&derived_input(), &model)
+            .transcribe(&derived_input(), &model, &LanguageChoice::Detect)
             .expect_err("실행 실패")
             .kind,
         StubEngine::returning(RawTranscription {
             language: None,
             segments: Vec::new(),
         })
-        .transcribe(&derived_input(), &model)
+        .transcribe(&derived_input(), &model, &LanguageChoice::Detect)
         .expect_err("빈 출력")
         .kind,
     ];
@@ -225,6 +225,55 @@ fn the_four_transcription_failures_reach_the_screen_as_four_different_kinds() {
         seen.push(text);
     }
     assert_eq!(seen.len(), 4);
+}
+
+#[test]
+fn the_real_engine_sets_the_language_instead_of_letting_whisper_default_to_english() {
+    // ADR-0007 §17.1.4: 언어 파라미터를 건드리지 않는 경로는 남기지 않는다. whisper.cpp의
+    // 기본값은 자동 감지가 아니라 `language = "en"` · `detect_language = false`이며 (§17.1.2),
+    // 아무도 그것을 바꾸지 않은 채로 한국어 회의 하나가 통째로 못 쓰게 됐다 (§17.1.1).
+    //
+    // **모듈 문서가 아니라 실제 호출을 본다** — `params.`로 시작하는 줄만 모은다. 문서가
+    // 무엇을 부른다고 적는 것과 부르는 것은 다른 진술이다.
+    let calls: Vec<&str> = WHISPER_SOURCE
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.starts_with("params."))
+        .collect();
+
+    for call in [
+        "params.set_language(Some(code));",
+        "params.set_detect_language(false);",
+        "params.set_language(None);",
+        "params.set_detect_language(true);",
+        // 번역이 아니라 전사다 (ADR-0007 §2). 언어를 지정하게 됐다고 이것이 바뀌지 않는다.
+        "params.set_translate(false);",
+    ] {
+        assert!(calls.contains(&call), "whisper.rs가 부르지 않는다: {call}");
+    }
+}
+
+#[test]
+fn the_real_engine_never_reads_settings_or_storage_to_decide_the_language() {
+    // §13이 정한 교체 지점 하나이며 (ADR-0007 §17.1.4-4), 그 경계를 넓히지 않는다. 엔진 구현이
+    // 설정을 직접 읽기 시작하면 "고르지 않음이 무엇을 뜻하는가"를 정하는 자리가 둘이 된다 —
+    // 모델 경로를 짓는 자리가 하나인 것과 같은 규칙이다 (INV-10).
+    for symbol in [
+        "settings",
+        "Settings",
+        "rusqlite",
+        "Connection",
+        "crate::db",
+        "app_data_dir::",
+    ] {
+        assert!(
+            !WHISPER_SOURCE
+                .lines()
+                .filter(|line| !line.trim_start().starts_with("//"))
+                .any(|line| line.contains(symbol)),
+            "whisper.rs가 저장소나 설정에 닿았다: {symbol}"
+        );
+    }
 }
 
 #[test]

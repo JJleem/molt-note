@@ -196,6 +196,7 @@ impl Fixture {
             created_at: CREATED_AT.to_string(),
             engine: "stub".to_string(),
             model: "ggml-base.bin".to_string(),
+            transcription_ms: None,
         };
 
         let mut connection = self.connection();
@@ -231,12 +232,19 @@ impl Fixture {
             .expect("노트 하나가 저장돼야 한다")
     }
 
+    /// 프롬프트의 **첫 조각**. 이 파일의 전사는 전부 한 조각에 들어가므로 그것이 전체다.
     fn ai_prompt(&self, recording_id: &RecordingId, mode: NoteType) -> Result<String, Failure> {
-        self.storage.ai_prompt(recording_id.as_str(), mode)
+        Ok(self
+            .storage
+            .ai_prompt(recording_id.as_str(), mode, None)?
+            .text)
     }
 
     fn transcript_text(&self, recording_id: &RecordingId) -> Result<String, Failure> {
-        self.storage.transcript_text(recording_id.as_str())
+        Ok(self
+            .storage
+            .transcript_text(recording_id.as_str(), None)?
+            .text)
     }
 
     fn export_ai_request(
@@ -244,7 +252,10 @@ impl Fixture {
         recording_id: &RecordingId,
         mode: NoteType,
     ) -> Result<ExportedFilePayload, Failure> {
-        self.exporter.export_ai_request(recording_id.as_str(), mode)
+        Ok(self
+            .exporter
+            .export_ai_request(recording_id.as_str(), mode, None)?
+            .file)
     }
 
     /// 세 산출물을 한 값으로 만든다 — **같은 입력에서 언제나 같아야 하는 것**이다.
@@ -875,7 +886,7 @@ fn mh7_four_failures_leave_the_database_bytes_and_the_exported_files_untouched()
     failures.push(
         fixture
             .storage
-            .ai_prompt("   ", NoteType::Meeting)
+            .ai_prompt("   ", NoteType::Meeting, None)
             .expect_err("고른 녹음이 없다"),
     );
 

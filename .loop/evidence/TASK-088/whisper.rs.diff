@@ -1,0 +1,273 @@
+diff --git a/src-tauri/src/transcription/whisper.rs b/src-tauri/src/transcription/whisper.rs
+index f9e8742..fa33556 100644
+--- a/src-tauri/src/transcription/whisper.rs
++++ b/src-tauri/src/transcription/whisper.rs
+@@ -4,9 +4,13 @@
+ //! 16 kHz mono f32 (메모리)        모델 파일 하나 (사용자가 둔다)
+ //!         └──────────┬──────────────────┘
+ //!                    ▼
+-//!        whisper-rs → 앱 바이너리에 링크된 whisper.cpp
++//!        모델 context 하나  ← 전사 한 건에 한 번 연다 (§20.3)
+ //!                    ▼
+-//!        원시 segment (센티초 · 단위 변환 없이 그대로 넘긴다 → parse.rs)
++//!        청크마다:  새 state → whisper-rs → 앱 바이너리에 링크된 whisper.cpp
++//!                    ▼           그 청크의 샘플 슬라이스 하나만 full()에 넘긴다
++//!        청크 로컬 원시 segment (센티초 · 값을 그대로 옮긴다)
++//!                    ▼
++//!        chunking::merge → 전체 시간축의 RawTranscription 하나 → parse.rs
+ //! ```
+ //!
+ //! **배포물에 들어가는 실행 파일이 없다** (ADR-0007 §2 · §4.2). sidecar를 택하지 않았으므로
+@@ -20,19 +24,78 @@
+ //! **오디오는 이 프로세스 밖으로 나가지 않는다** (§12 · INV-6). 라이브러리 호출 하나이며
+ //! 네트워크도, 자식 프로세스도, 임시 파일도 없다.
+ //!
++//! ## 오디오 전체를 한 번에 넘기지 않는다 — **청크 단위로 돈다** (ADR-0007 §20)
++//!
++//! ```text
++//! 모델 context   전사 한 건에 한 번 연다. 청크마다 다시 열지 않는다 — 가중치는 변하지 않는다
++//! state          **청크마다 새로 만든다** (§20.3). 반복 루프에 빠진 디코딩의 흔적이 남는 자리가
++//!                여기이므로, 한 청크의 붕괴가 다음 청크로 이어지지 않게 끊는다
++//! FullParams     청크마다 새로 만든다. 설정 내용은 아래 두 갈래와 출력 억제 넷 그대로다 —
++//!                **디코딩 파라미터를 새로 튜닝하지 않는다** (§20.9)
++//! 샘플           청크 구간으로 자른 슬라이스 하나만 full()에 넘긴다. 오디오를 복사해 들고
++//!                있지 않으며, 파생 파일도 여전히 만들지 않는다
++//! ```
++//!
++//! **그 규칙은 이 파일에 없다.** 어디서 자르는가([`chunking::plan`]) · 청크 로컬 시각을 전체
++//! 시간축으로 어떻게 되돌리고 청크 결과를 어떻게 잇는가 · 청크들이 보고한 언어에서 어떻게
++//! 하나를 정하는가([`chunking::merge`] · §20.7)는 전부 [`super::chunking`] 하나에 있고, 이
++//! 파일은 그 함수를 **부르기만** 한다. 청크 길이도 겹침도 반복 임계값도 여기 숫자로 나타나지
++//! 않는다 (§20.8) — 두 자리에 있으면 한쪽만 고쳐지는 날이 온다. 연속 반복 차단은 붕괴 판정
++//! **뒤에** 오므로 이 파일이 아니라 저장 직전의 자리에서 돈다 (§20.6.2).
++//!
++//! **밖으로 나가는 계약은 지금과 같다** (§20.8). trait의 시그니처도 [`RawTranscription`]의
++//! 모양도 바뀌지 않았고, 돌려주는 것은 여전히 [`ensure_usable`]을 통과한 전사 **하나**다 —
++//! 청크는 이 함수 밖에서 보이지 않는다 (INV-9).
++//!
++//! ## 청크 하나가 실패하면 — **새 실패 종류를 만들지 않는다** (§13)
++//!
++//! ```text
++//! state를 만들지 못했다 · full()이 실패했다   →  TranscriptionEngineFailed   재시도 가능
++//! segment를 읽지 못했다                        →  TranscriptionOutputUnusable 엔진은 끝났다
++//! 시각이 i64를 넘쳤다                          →  chunking이 낸 실패를 그대로 넘긴다
++//!                                                (값을 접지 않는다 · §20.5)
++//! ```
++//!
++//! 어느 쪽이든 **전사 전체가 실패한다.** 앞선 청크의 결과를 부분 전사로 저장하지 않는다 —
++//! Transcript는 immutable하므로(INV-2) 중간까지만 있는 전사가 영구히 남는다. 대신 **몇 번째
++//! 청크였는지가 `detail`에 `chunk k/n`으로 남는다.** 그것이 없으면 72분짜리 녹음에서 어디가
++//! 무너졌는지 아무도 되짚지 못한다.
++//!
+ //! ## 여기 쓰인 API는 문서가 아니라 컴파일러가 확인한 것이다
+ //!
+ //! `whisper-rs` 0.16.0 (`whisper-rs-sys` 0.15.0)에 대해 실제로 확인한 시그니처다.
+ //!
+ //! ```text
++//! WhisperContext::create_state()           -> Result<WhisperState, WhisperError>
++//!                                             ← 하나의 context에서 **청크마다** 부른다 (§20.3)
+ //! WhisperState::full_n_segments()          -> i32
+ //! WhisperState::get_segment(i32)           -> Option<WhisperSegment<'_>>
+ //! WhisperSegment::start_timestamp()        -> i64      ← 단위는 아래를 볼 것
+ //! WhisperSegment::end_timestamp()          -> i64
+ //! WhisperSegment::to_str()                 -> Result<&str, WhisperError>
+ //! WhisperState::full_lang_id_from_state()  -> i32
++//! FullParams::set_language(Option<&str>)   ← 고른 언어를 지정한다 (None이면 지정하지 않는다)
++//! FullParams::set_detect_language(bool)    ← 엔진에게 감지를 시킨다
+ //! ```
+ //!
++//! 마지막 두 줄은 **이 Task가 컴파일러로 확인했다** (TASK-068). 문서를 읽고 옮긴 것이 아니라
++//! Rust Gate가 실제로 이 호출을 컴파일한다 — 시그니처가 다르면 Gate가 실패한다.
++//!
++//! ## 무슨 언어로 들을지는 여기서 정하지 않는다 (ADR-0007 §17.1.4-4)
++//!
++//! 이 파일은 설정도 저장소도 읽지 않는다. 넘어오는 것은 [`LanguageChoice`] 하나이고, 이
++//! 파일이 하는 일은 그 선택을 `FullParams` 호출로 옮기는 것뿐이다.
++//!
++//! ```text
++//! Chosen("ko")  →  set_language(Some("ko")) · set_detect_language(false)
++//! Detect        →  set_language(None)       · set_detect_language(true)
++//! 어느 쪽이든    →  set_translate(false)      번역이 아니라 전사다 (§2)
++//! ```
++//!
++//! **두 갈래 중 어느 쪽도 whisper.cpp의 기본값에 기대지 않는다.** 그 기본값은 자동 감지가
++//! 아니라 `language = "en"` · `detect_language = false`이며 (§17.1.2), 아무도 그것을 바꾸지
++//! 않은 채로 72분짜리 한국어 회의가 통째로 못 쓰게 됐다 (§17.1.1).
++//!
+ //! ⚠️ **타입이 `i64`라는 것과 그 값이 센티초라는 것은 다른 진술이다.** 단위는 실제 추론을
+ //! 한 번 돌려야 드러나며 이 Phase의 자동 검증은 그것을 하지 않는다 (PRODUCT-SPEC §14.4.3의
+ //! 운영자 smoke test). 그래서 이 파일은 값을 **그대로** 넘기고, 단위에 대한 가정은
+@@ -52,8 +115,10 @@ use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextPar
+ use crate::domain::Failure;
+ 
+ use super::audio_input::TranscriptionInput;
++use super::chunking::{self, ChunkTranscription};
+ use super::engine::{
+-    ensure_usable, engine_failed, model_unusable, output_unusable, TranscriptionEngine,
++    ensure_usable, engine_failed, model_unusable, output_unusable, LanguageChoice,
++    TranscriptionEngine,
+ };
+ use super::model::ModelFile;
+ use super::parse::{RawSegment, RawTranscription};
+@@ -110,6 +175,7 @@ impl TranscriptionEngine for WhisperEngine {
+         &self,
+         input: &TranscriptionInput,
+         model: &ModelFile,
++        language: &LanguageChoice,
+     ) -> Result<RawTranscription, Failure> {
+         let path = model.path().to_str().ok_or_else(|| {
+             model_unusable(format!(
+@@ -130,55 +196,109 @@ impl TranscriptionEngine for WhisperEngine {
+                 .with_detail(error)
+             })?;
+ 
+-        let mut state = context
+-            .create_state()
+-            .map_err(|error| engine_failed("전사 엔진을 시작하지 못했다").with_detail(error))?;
+-
+-        let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
+-        params.set_n_threads(self.threads());
+-        // 번역이 아니라 전사다 — 들린 언어 그대로 받는다 (§7의 `language`).
+-        params.set_translate(false);
+-        // whisper.cpp의 진행 출력은 제품 로그가 아니다. 상태는 Recording.transcriptionStatus가
+-        // 말한다 (TASK-027 · TASK-028).
+-        params.set_print_special(false);
+-        params.set_print_progress(false);
+-        params.set_print_realtime(false);
+-        params.set_print_timestamps(false);
+-
+-        // **입력은 이미 16 kHz mono f32다** (ADR-0007 §9 · audio_input.rs). 여기서 오디오를
+-        // 다시 만지지 않고, 파생 파일도 만들지 않는다 — 넘기는 것은 메모리 위의 슬라이스다.
+-        state
+-            .full(params, &input.samples)
+-            .map_err(|error| engine_failed("전사 도중 엔진이 실패했다").with_detail(error))?;
+-
+-        let count = state.full_n_segments();
+-        let mut segments = Vec::with_capacity(count.max(0) as usize);
+-        for index in 0..count {
+-            // 엔진이 segment 개수를 말해 놓고 그 자리의 값을 주지 못하는 것은 **실행 실패가
+-            // 아니라 해석할 수 없는 출력**이다 — 엔진은 정상적으로 끝났다.
+-            let segment = state.get_segment(index).ok_or_else(|| {
+-                output_unusable("전사 결과를 읽지 못했다")
+-                    .with_detail(format!("segment {index}/{count}이(가) 없다"))
+-            })?;
+-            let text = segment.to_str().map_err(|error| {
+-                output_unusable("전사 결과를 읽지 못했다")
+-                    .with_detail(format!("segment {index}/{count}: {error}"))
++        // ① **어디서 자르는가는 여기서 정하지 않는다** (ADR-0007 §20.8). 넘기는 것은 프레임
++        // 수와 샘플레이트뿐이고, 돌아오는 것은 구간과 오프셋이다 — 값도 규칙도 chunking에 있다.
++        // 전체가 청크 하나에 들어가면 목록은 하나이며 지금까지와 완전히 같은 실행이 된다.
++        let chunks = chunking::plan(input.frames(), input.sample_rate_hz)?;
++        let chunk_count = chunks.len();
++        let mut transcribed: Vec<ChunkTranscription> = Vec::with_capacity(chunk_count);
++
++        for (index, chunk) in chunks.iter().enumerate() {
++            // **청크마다 새 state다** (§20.3). 모델 context는 위에서 한 번 열었고 여기서 다시
++            // 열지 않는다 — 끊는 것은 디코딩 중에 값이 변하는 쪽이고, 변하지 않는 가중치를
++            // 청크 수만큼 다시 읽는 비용은 얻는 것 없이 붙는다.
++            let mut state = context.create_state().map_err(|error| {
++                engine_failed("전사 엔진을 시작하지 못했다")
++                    .with_detail(format!("chunk {index}/{chunk_count}: {error}"))
+             })?;
+ 
+-            // **원시 값을 그대로 옮긴다 — 계산하지 않는다.** 센티초 → 밀리초 변환은
+-            // parse.rs 한 곳에서만 일어난다 (ADR-0007 §10).
+-            segments.push(RawSegment {
+-                start_centiseconds: segment.start_timestamp(),
+-                end_centiseconds: segment.end_timestamp(),
+-                text: Some(text.to_owned()),
++            // 파라미터도 청크마다 새로 만든다. **내용은 하나도 잃지 않는다** — 스레드 수,
++            // 번역이 아니라는 것, 언어 선택의 두 갈래, 출력 억제 넷이 **모든 청크에** 그대로
++            // 적용된다. 청크를 나눴다는 이유로 디코딩 파라미터를 새로 튜닝하지 않는다 (§20.9).
++            let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
++            params.set_n_threads(self.threads());
++            // 번역이 아니라 전사다 — 들린 언어 그대로 받는다 (§7의 `language`).
++            params.set_translate(false);
++
++            // **언어 파라미터를 건드리지 않는 경로는 없다** (ADR-0007 §17.1.4-1). 넘어온 선택이
++            // 무엇이든 두 함수를 다 부르며, 정하는 것은 이 파일이 아니라 부르는 쪽이다.
++            match language.chosen() {
++                // 사용자가 고른 언어로 듣는다. 감지는 함께 끈다 — 고른 값이 있는데 엔진이
++                // 스스로 다른 언어로 판단하면 그 선택은 없는 것과 같다.
++                Some(code) => {
++                    params.set_language(Some(code));
++                    params.set_detect_language(false);
++                }
++                // 고르지 않음은 영어가 아니라 감지다. 지정할 언어가 없다는 것을 그대로 넘기고
++                // (`None`), 감지를 켠다 — whisper.cpp의 기본값 `"en"`이 조용히 쓰이지 않게 하는
++                // 것이 이 두 줄의 전부다 (§17.1.1 · §17.1.2).
++                None => {
++                    params.set_language(None);
++                    params.set_detect_language(true);
++                }
++            }
++
++            // whisper.cpp의 진행 출력은 제품 로그가 아니다. 상태는 Recording.transcriptionStatus가
++            // 말한다 (TASK-027 · TASK-028).
++            params.set_print_special(false);
++            params.set_print_progress(false);
++            params.set_print_realtime(false);
++            params.set_print_timestamps(false);
++
++            // **입력은 이미 16 kHz mono f32다** (ADR-0007 §9 · audio_input.rs). 여기서 오디오를
++            // 다시 만지지 않고, 파생 파일도 만들지 않는다 — 넘기는 것은 메모리 위의 슬라이스,
++            // 그중에서도 이 청크의 구간 하나다 (§20.8 — 자르는 일은 부르는 쪽의 몫이다).
++            state
++                .full(params, &input.samples[chunk.range()])
++                .map_err(|error| {
++                    engine_failed("전사 도중 엔진이 실패했다")
++                        .with_detail(format!("chunk {index}/{chunk_count}: {error}"))
++                })?;
++
++            let count = state.full_n_segments();
++            let mut segments = Vec::with_capacity(count.max(0) as usize);
++            for position in 0..count {
++                // 엔진이 segment 개수를 말해 놓고 그 자리의 값을 주지 못하는 것은 **실행 실패가
++                // 아니라 해석할 수 없는 출력**이다 — 엔진은 정상적으로 끝났다.
++                let segment = state.get_segment(position).ok_or_else(|| {
++                    output_unusable("전사 결과를 읽지 못했다").with_detail(format!(
++                        "chunk {index}/{chunk_count}: segment {position}/{count}이(가) 없다"
++                    ))
++                })?;
++                let text = segment.to_str().map_err(|error| {
++                    output_unusable("전사 결과를 읽지 못했다").with_detail(format!(
++                        "chunk {index}/{chunk_count}: segment {position}/{count}: {error}"
++                    ))
++                })?;
++
++                // **원시 값을 그대로 옮긴다 — 계산하지 않는다.** 시각은 이 청크 안에서의 값이며,
++                // 전체 시간축으로 되돌리는 덧셈은 아래 `merge`가 한다 (§20.5). 센티초 → 밀리초
++                // 변환은 그다음의 parse.rs 한 곳에서만 일어난다 (ADR-0007 §10).
++                segments.push(RawSegment {
++                    start_centiseconds: segment.start_timestamp(),
++                    end_centiseconds: segment.end_timestamp(),
++                    text: Some(text.to_owned()),
++                });
++            }
++
++            // **엔진이 이 청크에 대해 보고한 값이다.** 위에서 넘겨받은 선택을 여기에 베껴 넣지
++            // 않는다 — 감지를 켰다는 것이 "언제나 값이 있다"는 뜻이 되지 않으며 (§17.1.4-3),
++            // 엔진이 언어를 말하지 못하면 알 수 없는 id는 `None`이 된다. 코드를 해석하거나
++            // 바꾸지 않는다 (parse.rs와 같다 · §16.2). 여러 청크의 값에서 **하나를 정하는 규칙은
++            // 이 파일이 아니라 `merge`에 있다** (§20.7).
++            let language =
++                whisper_rs::get_lang_str(state.full_lang_id_from_state()).map(str::to_owned);
++
++            transcribed.push(ChunkTranscription {
++                offset_centiseconds: chunk.offset_centiseconds,
++                output: RawTranscription { language, segments },
+             });
+         }
+ 
+-        // 엔진이 언어를 말하지 못하면 지어내지 않는다 — 알 수 없는 id는 `None`이 되고
+-        // §7의 `language`도 비어 있다. 코드를 해석하거나 바꾸지 않는다 (parse.rs와 같다).
+-        let language = whisper_rs::get_lang_str(state.full_lang_id_from_state()).map(str::to_owned);
+-
+-        ensure_usable(RawTranscription { language, segments })
++        // ② **이어 붙이는 규칙도 여기 없다** — 오프셋을 더해 전체 시간축으로 되돌리는 일과
++        // 청크들의 language에서 하나를 정하는 일은 `merge`가 한다 (§20.5 · §20.7). 그리고
++        // 합쳐진 결과 하나가 지금까지와 똑같이 출력 계약을 통과한 뒤 나간다.
++        ensure_usable(chunking::merge(transcribed)?)
+     }
+ }
+ 

@@ -26,6 +26,14 @@
 //! 이미 [`crate::ai::note::parse_note`]에서 끝났고, 그래서 provider가 바뀌어도 이 파일은
 //! 바뀌지 않는다.
 //!
+//! ## Transcript 본문의 모양은 둘이지만 규칙은 하나다 ([`TranscriptShape`])
+//!
+//! §11의 export 파일은 segment 하나를 `### HH:MM:SS` 제목 + 본문으로 적고, AI Handoff 경로는
+//! 같은 segment를 `HH:MM:SS 문장` 한 줄로 적는다. **어느 segment를 적는가 · 어떤 순서로 적는가 ·
+//! 비어 있으면 어떻게 하는가 · segment가 하나도 없을 때 무엇을 적는가는 두 모양이 공유한다** —
+//! 그 규칙이 [`transcript_body`] 하나에만 있기 때문이다. 모양을 고르는 것은 부르는 쪽이며,
+//! 규칙을 복제하는 자리는 이 저장소에 없다 (ADR-0010 §5.4).
+//!
 //! ## 섹션 제목의 출처는 §9.5 하나다
 //!
 //! `## Overview` · `## Key Discussions` … 는 §9.5 표의 **출력 섹션 이름 그대로**이며,
@@ -34,7 +42,7 @@
 //! 자리가 없다.
 
 use crate::ai::note::StructuredNote;
-use crate::domain::{format_duration_ms, Recording, Transcript};
+use crate::domain::{format_duration_ms, Recording, Transcript, TranscriptSegment};
 
 use super::iso_date;
 
@@ -124,7 +132,9 @@ pub fn render(document: &ExportDocument<'_>) -> String {
         }
     }
 
-    blocks.extend(transcript_blocks(document.transcript));
+    // §11의 파일 형식이다 — 이 문서의 모양은 [`TranscriptShape::Sectioned`] 하나뿐이며,
+    // AI 경로가 고른 압축 모양은 여기에 닿지 않는다.
+    blocks.extend(transcript_blocks(document.transcript, TranscriptShape::Sectioned));
 
     let mut markdown = blocks.join("\n\n");
     markdown.push('\n');
@@ -206,6 +216,62 @@ fn render_body(body: SectionBody<'_>) -> Option<String> {
     }
 }
 
+/// segment 하나를 어떤 모양으로 적는가 — **규칙이 아니라 모양이다.**
+///
+/// ```text
+/// Sectioned   ### 00:00:03            §11의 export 파일 · Notion 본문
+///             안녕하세요.
+///
+/// Compact     00:00:03 안녕하세요.     AI Handoff의 세 산출물 (ADR-0010 §5)
+/// ```
+///
+/// **왜 두 번째 모양이 있는가** (`phase-prompt/05.6` R-5). 72분 녹음의 §11 export는 99 KB ·
+/// 5,139줄이었고 그중 1,711줄이 `### HH:MM:SS` 제목이었다. 제목 한 줄과 그것을 앞뒤로 감싸는
+/// 빈 줄은 사람이 읽는 파일에서는 구조지만, 채팅 창에 붙여 넣는 문자열에서는 **내용 없이
+/// 늘어나는 크기**다.
+///
+/// **압축해도 잃는 것이 없다.** segment 하나가 여전히 자기 timestamp를 갖고 (`00:00:03 문장`),
+/// 순서도 개수도 그대로이며, 문장은 한 글자도 지워지지 않는다 — 사라지는 것은 `### ` 네 글자와
+/// 줄바꿈뿐이다. 그래서 이것은 요약이 아니라 **같은 내용의 다른 모양**이다.
+///
+/// **§11의 파일 형식은 이 모양을 모른다.** [`render`]는 언제나 [`TranscriptShape::Sectioned`]로
+/// 적으며, 그 사실이 `markdown_export` 테스트의 기대 문자열로 고정돼 있다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TranscriptShape {
+    /// §11의 모양 — segment 하나가 `### HH:MM:SS` 제목과 그 아래 본문이다.
+    Sectioned,
+    /// AI Handoff가 고르는 모양 — segment 하나가 `HH:MM:SS 문장` 한 줄이다.
+    Compact,
+}
+
+impl TranscriptShape {
+    /// segment 하나가 만드는 문자열.
+    ///
+    /// 압축 모양의 문장은 **한 줄로 접는다** ([`single_line`]) — 한 segment가 한 줄이어야
+    /// "이 줄의 timestamp는 이 문장의 것"이 모양만으로 읽히고, 나중에 조각으로 나눌 때
+    /// 줄 경계가 곧 문장 경계가 된다 (`super::portion`). 목록 항목을 한 줄로 접는 것과 같은
+    /// 이유이며, 접는 것은 공백뿐이라 글자는 하나도 잃지 않는다.
+    fn segment_block(self, segment: &TranscriptSegment) -> String {
+        let timestamp = format_timestamp_ms(segment.start_ms);
+
+        match self {
+            Self::Sectioned => format!("### {timestamp}\n{}", segment.text.trim()),
+            Self::Compact => format!("{timestamp} {}", single_line(&segment.text)),
+        }
+    }
+
+    /// segment 블록들을 잇는 문자열.
+    ///
+    /// §11에서 블록 하나는 문단 하나이므로 빈 줄로 갈린다. 압축 모양에서 블록 하나는 줄
+    /// 하나이므로 개행 하나로 잇는다 — 여기서 빈 줄을 넣으면 압축한 만큼이 도로 늘어난다.
+    fn separator(self) -> &'static str {
+        match self {
+            Self::Sectioned => "\n\n",
+            Self::Compact => "\n",
+        }
+    }
+}
+
 /// Transcript 본문이 만드는 것 — **제목을 붙이지 않은 값**이다 (ADR-0010 §5.4).
 ///
 /// 제목까지 필요한 자리(§11의 문서 · Copy Transcript)와 본문만 필요한 자리(프롬프트의
@@ -213,35 +279,55 @@ fn render_body(body: SectionBody<'_>) -> Option<String> {
 /// 완성된 문자열을 잘라 쓰면 규칙이 두 벌이 된다.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum TranscriptBody<'a> {
-    /// 각 블록이 `### HH:MM:SS\n텍스트`다. 받은 순서 그대로이며 정렬하지 않는다.
-    Segments(Vec<String>),
+    /// 각 블록이 segment 하나다. 받은 순서 그대로이며 정렬하지 않는다.
+    Segments {
+        blocks: Vec<String>,
+        /// 블록을 만든 모양 — 블록 사이를 어떻게 잇는지가 여기서 나온다.
+        shape: TranscriptShape,
+    },
     /// segment가 하나도 남지 않았을 때의 `raw_text` 한 문단.
+    ///
+    /// **모양이 없다.** 지어낼 timestamp가 없으므로 압축할 것도 없고, 그래서 두 경로가
+    /// 여기서는 글자 하나까지 같은 문자열을 만든다.
     Raw(&'a str),
     /// 적을 것이 없다.
     Empty,
 }
 
-/// Transcript 본문을 만드는 **유일한 규칙** (§11).
+impl TranscriptBody<'_> {
+    /// 본문을 한 문자열로 잇는다 — 제목은 붙이지 않는다.
+    ///
+    /// 적을 것이 없으면 **빈 문자열이다.** 제목만 남은 본문을 만들지 않는다.
+    pub(crate) fn text(&self) -> String {
+        match self {
+            Self::Segments { blocks, shape } => blocks.join(shape.separator()),
+            Self::Raw(raw_text) => (*raw_text).to_owned(),
+            Self::Empty => String::new(),
+        }
+    }
+}
+
+/// Transcript 본문을 만드는 **유일한 규칙** (§11 · ADR-0010 §5.4).
 ///
 /// segment가 있으면 그것을 순서대로 적고, 없으면 `raw_text`를 한 문단으로 적는다.
 /// **둘 다 없으면 아무것도 만들지 않는다** — 빈 제목은 "여기 무언가 실패했다"처럼
 /// 보이지만 실제로는 적을 것이 없을 뿐이다 (INV-8과 같은 이유).
-pub(crate) fn transcript_body(transcript: &Transcript) -> TranscriptBody<'_> {
-    let segments: Vec<String> = transcript
+///
+/// `shape`는 **무엇을 적는가가 아니라 어떻게 적는가**만 고른다 ([`TranscriptShape`]). 어느
+/// segment가 살아남는지도, 그 순서도, segment가 없을 때의 대체도 모양과 무관하게 같다.
+pub(crate) fn transcript_body(
+    transcript: &Transcript,
+    shape: TranscriptShape,
+) -> TranscriptBody<'_> {
+    let blocks: Vec<String> = transcript
         .segments
         .iter()
         .filter(|segment| !segment.text.trim().is_empty())
-        .map(|segment| {
-            format!(
-                "### {}\n{}",
-                format_timestamp_ms(segment.start_ms),
-                segment.text.trim()
-            )
-        })
+        .map(|segment| shape.segment_block(segment))
         .collect();
 
-    if !segments.is_empty() {
-        return TranscriptBody::Segments(segments);
+    if !blocks.is_empty() {
+        return TranscriptBody::Segments { blocks, shape };
     }
 
     let raw_text = transcript.raw_text.trim();
@@ -254,14 +340,28 @@ pub(crate) fn transcript_body(transcript: &Transcript) -> TranscriptBody<'_> {
 
 /// Transcript가 만드는 블록들 — `## Transcript`와 [`transcript_body`]가 만든 본문 (§11).
 ///
+/// 블록 하나는 문서를 조립하는 쪽에서 **문단 하나**가 된다(빈 줄로 갈린다). 그래서 §11의
+/// 모양에서는 segment마다 블록이 하나씩이고, 압축 모양에서는 **본문 전체가 블록 하나**다 —
+/// 압축한 줄들 사이에 빈 줄이 다시 끼어들면 압축한 이유가 사라진다.
+///
 /// 적을 것이 없으면 **섹션 자체를 만들지 않는다.**
-pub(crate) fn transcript_blocks(transcript: &Transcript) -> Vec<String> {
-    match transcript_body(transcript) {
-        TranscriptBody::Segments(segments) => {
-            let mut blocks = vec![format!("## {TRANSCRIPT_SECTION}")];
-            blocks.extend(segments);
-            blocks
+pub(crate) fn transcript_blocks(transcript: &Transcript, shape: TranscriptShape) -> Vec<String> {
+    match transcript_body(transcript, shape) {
+        TranscriptBody::Segments {
+            blocks,
+            shape: TranscriptShape::Sectioned,
+        } => {
+            let mut section = vec![format!("## {TRANSCRIPT_SECTION}")];
+            section.extend(blocks);
+            section
         }
+        TranscriptBody::Segments {
+            blocks,
+            shape: shape @ TranscriptShape::Compact,
+        } => vec![format!(
+            "## {TRANSCRIPT_SECTION}\n{}",
+            blocks.join(shape.separator())
+        )],
         TranscriptBody::Raw(raw_text) => vec![format!("## {TRANSCRIPT_SECTION}\n{raw_text}")],
         TranscriptBody::Empty => Vec::new(),
     }
@@ -361,6 +461,7 @@ mod tests {
             created_at: "2026-09-01T11:00:00.000Z".to_owned(),
             engine: "whisper-rs".to_owned(),
             model: "ggml-base".to_owned(),
+            transcription_ms: None,
         }
     }
 
@@ -686,6 +787,174 @@ mod tests {
         let later = markdown.find("나중 것").expect("첫 segment가 있어야 한다");
         let earlier = markdown.find("먼저 것").expect("둘째 segment가 있어야 한다");
         assert!(later < earlier);
+    }
+
+    // ── 압축 모양 (`phase-prompt/05.6` R-5 · ADR-0010 §5.4) ──────────────────────
+
+    #[test]
+    fn the_compact_shape_writes_one_line_per_segment_with_its_own_timestamp() {
+        let transcript = transcript();
+
+        let body = transcript_body(&transcript, TranscriptShape::Compact);
+
+        assert_eq!(
+            body.text(),
+            [
+                "00:00:03 안녕하세요. 오늘은 3DGS를 봅니다.",
+                "00:00:06 먼저 splat 표현부터 보겠습니다.",
+            ]
+            .join("\n")
+        );
+        // 제목 줄이 사라졌다 — 그것이 압축한 것의 전부다.
+        assert!(!body.text().contains("### "));
+        // 줄 수가 segment 수와 같다 — timestamp 하나에 문장 하나다.
+        assert_eq!(body.text().lines().count(), transcript.segments.len());
+    }
+
+    #[test]
+    fn the_compact_shape_keeps_every_timestamp_and_every_word_of_the_transcript() {
+        // 압축은 요약이 아니다 — segment의 timestamp도, 그 문장의 낱말도 하나도 빠지지 않는다.
+        let transcript = Transcript {
+            segments: vec![
+                TranscriptSegment {
+                    start_ms: 3_000,
+                    end_ms: 6_500,
+                    text: "여러 줄로\n나뉜  문장입니다.".to_owned(),
+                },
+                TranscriptSegment {
+                    start_ms: 3_661_000,
+                    end_ms: 3_665_000,
+                    text: "한 시간이 넘은 자리의 문장.".to_owned(),
+                },
+            ],
+            ..transcript()
+        };
+
+        let compact = transcript_body(&transcript, TranscriptShape::Compact).text();
+
+        for segment in &transcript.segments {
+            let timestamp = format_timestamp_ms(segment.start_ms);
+            assert!(compact.contains(&timestamp), "{timestamp}가 사라졌다");
+
+            for word in segment.text.split_whitespace() {
+                assert!(compact.contains(word), "{word}가 사라졌다");
+            }
+        }
+        // segment 안의 개행은 공백으로 접힌다 — 한 segment가 한 줄이다.
+        assert_eq!(compact.lines().count(), 2);
+        assert!(compact.starts_with("00:00:03 여러 줄로 나뉜 문장입니다.\n"));
+        assert!(compact.ends_with("01:01:01 한 시간이 넘은 자리의 문장."));
+    }
+
+    #[test]
+    fn the_compact_shape_is_smaller_than_the_section_11_shape_for_the_same_transcript() {
+        // R-5가 잰 것은 제목 1,711개다. 같은 전사에서 압축 모양이 실제로 더 작다는 것을
+        // 여기서 고정한다 — 작아지지 않으면 이 모양이 있을 이유가 없다.
+        let segments: Vec<TranscriptSegment> = (0..200)
+            .map(|index| TranscriptSegment {
+                start_ms: index * 3_000,
+                end_ms: index * 3_000 + 3_000,
+                text: format!("{index}번째 구간의 문장입니다."),
+            })
+            .collect();
+        let transcript = Transcript {
+            segments,
+            ..transcript()
+        };
+
+        let sectioned = transcript_body(&transcript, TranscriptShape::Sectioned).text();
+        let compact = transcript_body(&transcript, TranscriptShape::Compact).text();
+
+        assert!(
+            compact.len() < sectioned.len(),
+            "압축 모양이 {}바이트로 §11 모양 {}바이트보다 작지 않다",
+            compact.len(),
+            sectioned.len()
+        );
+        // 줄 수도 함께 줄어든다 — 제목 줄과 빈 줄이 사라진 만큼이다.
+        assert_eq!(compact.lines().count(), 200);
+        assert_eq!(sectioned.lines().count(), 200 * 3 - 1);
+    }
+
+    #[test]
+    fn both_shapes_choose_the_same_segments_and_fall_back_the_same_way() {
+        // 모양이 고르는 것은 **어떻게 적는가**뿐이다 — 무엇을 적는가는 규칙 하나가 정한다.
+        let transcript = Transcript {
+            segments: vec![
+                TranscriptSegment {
+                    start_ms: 1_000,
+                    end_ms: 2_000,
+                    text: "   ".to_owned(),
+                },
+                TranscriptSegment {
+                    start_ms: 2_000,
+                    end_ms: 3_000,
+                    text: "남는 문장".to_owned(),
+                },
+            ],
+            ..transcript()
+        };
+
+        for shape in [TranscriptShape::Sectioned, TranscriptShape::Compact] {
+            // 빈 segment는 어느 모양에서도 남지 않는다.
+            let TranscriptBody::Segments { blocks, .. } = transcript_body(&transcript, shape)
+            else {
+                panic!("{shape:?}: segment 본문이어야 한다");
+            };
+            assert_eq!(blocks.len(), 1, "{shape:?}: 고른 segment가 다르다");
+
+            // segment가 하나도 없으면 둘 다 raw_text로 내려가고, 그 문자열은 같다.
+            let without_segments = Transcript {
+                segments: vec![],
+                ..transcript.clone()
+            };
+            assert_eq!(
+                transcript_body(&without_segments, shape).text(),
+                without_segments.raw_text
+            );
+
+            // 적을 것이 하나도 없으면 둘 다 아무것도 만들지 않는다.
+            let nothing = Transcript {
+                segments: vec![],
+                raw_text: "  \n ".to_owned(),
+                ..transcript.clone()
+            };
+            assert_eq!(transcript_body(&nothing, shape), TranscriptBody::Empty);
+            assert_eq!(transcript_blocks(&nothing, shape), Vec::<String>::new());
+        }
+    }
+
+    #[test]
+    fn the_compact_transcript_section_is_one_block_and_the_section_11_one_is_not() {
+        // 조립하는 쪽은 블록 사이에 빈 줄을 넣는다 — 압축 본문이 여러 블록이면 압축한 만큼이
+        // 도로 늘어난다.
+        let transcript = transcript();
+
+        let compact = transcript_blocks(&transcript, TranscriptShape::Compact);
+        assert_eq!(compact.len(), 1);
+        assert_eq!(
+            compact[0],
+            "## Transcript\n00:00:03 안녕하세요. 오늘은 3DGS를 봅니다.\n00:00:06 먼저 splat 표현부터 보겠습니다."
+        );
+
+        let sectioned = transcript_blocks(&transcript, TranscriptShape::Sectioned);
+        assert_eq!(sectioned.len(), 1 + transcript.segments.len());
+        assert_eq!(sectioned[0], "## Transcript");
+    }
+
+    #[test]
+    fn the_section_11_document_is_never_written_in_the_compact_shape() {
+        // §11의 파일 형식은 이 Phase가 바꾸지 않는다 — 문서에는 여전히 `### ` 제목이 있다.
+        let recording = recording();
+        let transcript = transcript();
+
+        let markdown = render(&document(&recording, &transcript, None));
+
+        assert!(markdown.contains("\n### 00:00:03\n안녕하세요. 오늘은 3DGS를 봅니다.\n"));
+        assert!(
+            !markdown.contains("00:00:03 안녕하세요"),
+            "§11 문서에 압축 모양이 새어 들어갔다"
+        );
     }
 
     #[test]

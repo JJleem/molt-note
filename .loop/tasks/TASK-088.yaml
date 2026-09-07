@@ -1,0 +1,59 @@
+# whisper 엔진 구현이 청크 계획대로 실행하도록 결선한다 (trait 형태 불변)
+# Runtime이 PLAN-20260907T074302Z 승인 시점에 생성했다 (proposal P3). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-088
+status: DONE
+
+request: |-
+  P2가 만든 순수 모듈을 `src-tauri/src/transcription/whisper.rs`의 `WhisperEngine::transcribe` **안쪽**에서 쓴다. 밖으로 나가는 계약은 지금과 같다 — `TranscriptionEngine` trait(`src-tauri/src/transcription/engine.rs:106`)의 시그니처를 바꾸지 않고, 돌려주는 것은 여전히 `RawTranscription` 하나다. 바꾸는 것은 실행 방식이다. 모델 context는 지금처럼 한 번 열고, P2가 만든 청크 목록을 따라 **청크마다 새 state를 만들고** 그 청크의 샘플 슬라이스만 `full()`에 넘긴다. `FullParams`는 청크마다 새로 만들되 지금 있는 설정(스레드 수 · `set_translate(false)` · 언어 선택의 두 갈래 · 출력 억제 넷)을 하나도 잃지 않는다 — 디코딩 파라미터를 새로 튜닝하지 않는다. 청크가 낸 원시 segment는 지금처럼 **값을 그대로 옮기고**(센티초 계산을 하지 않는다), 전체 시간축으로 되돌리는 일과 청크 결과를 잇는 일과 연속 반복을 끊는 일은 전부 P2의 모듈에 맡긴다 — 그 규칙을 이 파일에 다시 쓰지 않는다. 엔진이 보고하는 `language`는 P1이 정한 규칙대로 하나로 정한다. 합쳐진 결과는 지금처럼 `ensure_usable`을 통과한 뒤 나간다. 청크 하나가 실패했을 때 어떤 §13 실패가 되는지(그리고 몇 번째 청크였는지가 detail에 남는지)를 기존 네 종류 안에서 정하고, **새 `FailureKind`를 만들지 않는다.** 파일 머리말 문서를 갱신해 이 파일이 이제 청크 단위로 도는 것과 그 규칙이 어느 모듈에 있는지를 적는다. `run.rs`의 저장 직전 붕괴 판정 · `parse.rs`의 단위 변환 · `collapse.rs`의 임계값은 건드리지 않는다.
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-087
+
+stop_condition:
+  gates: [build, lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 3
+
+acceptance_criteria:
+  - id: P3-AC1
+    description: |-
+      `npm run build`가 통과한다 — `whisper-rs` 0.16으로 하나의 context에서 state를 여러 번 만들어 각각 `full()`을 부르는 코드가 실제로 컴파일된다.
+    verification:
+      type: gate
+      ref: build
+  - id: P3-AC2
+    description: |-
+      `npm run lint`가 통과한다.
+    verification:
+      type: gate
+      ref: lint
+  - id: P3-AC3
+    description: |-
+      `npm run test`가 통과한다 — 기존 전사 테스트(`transcription_engine.rs` · `transcription_run.rs` · `transcription_language.rs` · `transcription_background.rs` 등)가 하나도 깨지지 않았다.
+    verification:
+      type: gate
+      ref: test
+  - id: P3-AC4
+    description: |-
+      `TranscriptionEngine` trait의 시그니처와 `RawTranscription` · `RawSegment`의 형태가 바뀌지 않았고, 청킹은 `WhisperEngine` 구현 안쪽에만 있다. `StubEngine`은 청킹을 흉내 내지 않는다.
+    verification:
+      type: verifier
+  - id: P3-AC5
+    description: |-
+      `whisper.rs`에 청크 분할 규칙 · 겹침 병합 규칙 · 반복 차단 임계값이 복제되어 있지 않다 — 그 규칙은 P2의 모듈에만 있고 이 파일은 호출만 한다. 단위 변환(센티초 → 밀리초)도 여기서 일어나지 않는다.
+    verification:
+      type: verifier
+  - id: P3-AC6
+    description: |-
+      언어 선택의 두 갈래(`Chosen` → `set_language(Some)` + `set_detect_language(false)`, `Detect` → `set_language(None)` + `set_detect_language(true)`)와 `set_translate(false)` · 출력 억제 설정이 **모든 청크에** 적용된다. 새 `FailureKind`가 추가되지 않았고 디코딩 파라미터가 새로 추가·변경되지 않았다.
+    verification:
+      type: verifier
+
+evidence: []
+
+failure_memo: []

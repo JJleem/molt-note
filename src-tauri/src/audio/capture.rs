@@ -28,6 +28,16 @@
 //! 두면 큐에 이미 들어와 있던 — 즉 일시정지 **이전에 녹음된** — 샘플이 그 플래그에 휩쓸려
 //! 사라진다. 같은 통로를 쓰면 표시가 샘플 사이의 정확한 자리에 놓인다.
 //!
+//! ## 입력 레벨은 **파일에 쓰이는 그 샘플**에서 잰다 (ADR-0003 §16.2)
+//!
+//! 재는 자리는 [`drain`] 하나다 — 실시간 오디오 콜백([`super::system_capture`])이 아니다.
+//! 그래서 **일시정지 구간의 샘플이 파일에 도달하지 않는 것과 같은 이유로 레벨도 그때는
+//! 갱신되지 않는다.** 콜백에서 재면 사람이 보는 값과 파일에 남은 것이 어긋나 — 파일에 없는
+//! 소리를 보여 주게 된다.
+//!
+//! **이 모듈은 샘플을 읽기만 한다.** 게인 조정도 정규화도 없고, dBFS 환산과 판정 구간도
+//! 여기 없다 — 그 규칙이 사는 자리는 [`super::level`] 하나다 (§16.3 · §16.5).
+//!
 //! ## 만들어지는 포맷 — 확인된 것과 확인되지 않은 것
 //!
 //! **확인된 것**: 이 코드는 `hound`로 **16-bit PCM WAV(RIFF)** 를 쓴다. 샘플레이트와 채널
@@ -42,8 +52,10 @@ use std::fs;
 use std::io::BufWriter;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{sync_channel, Receiver, SyncSender, TrySendError};
+use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 
+use crate::audio::level::{InputLevel, LevelReading};
 use crate::domain::{Failure, FailureKind};
 
 /// 이 경로가 만드는 컨테이너. 코드가 실제로 쓰는 것이며 추정이 아니다.
@@ -226,6 +238,8 @@ pub struct ActiveCapture {
     stop_device: Box<dyn FnOnce() -> Result<(), Failure> + Send>,
     /// 파일에 쓰는 쪽으로 가는 통로. 이것을 닫는 것이 "더 이상 샘플이 없다"는 신호다.
     packets: SyncSender<Packet>,
+    /// 파일에 실제로 쓰인 샘플에서 쌓인 것. 쓰는 쪽과 **같은 값을 함께 본다** (모듈 주석).
+    level: Arc<Mutex<InputLevel>>,
     writer: JoinHandle<Result<(), Failure>>,
 }
 
@@ -233,6 +247,16 @@ impl ActiveCapture {
     /// 확정될 파일의 경로. 아직 쓰는 중이다.
     pub fn output_path(&self) -> &Path {
         &self.output_path
+    }
+
+    /// 지금까지 **파일에 쓰인** 샘플에서 만든 입력 레벨 (ADR-0003 §16.2 · §16.3).
+    ///
+    /// **아직 한 샘플도 파일에 쓰이지 않았으면 없음이다** — 0이 아니다. 일시정지 구간의
+    /// 샘플은 파일에 도달하지 않으므로 그동안 이 값도 자라지 않는다.
+    ///
+    /// 수치와 판정을 만드는 것은 [`super::level`]이며, 여기서는 그 값을 꺼내 오기만 한다.
+    pub fn level(&self) -> Option<LevelReading> {
+        self.level.lock().ok().and_then(|level| level.reading())
     }
 
     /// 여기서부터 들어오는 샘플을 파일에 쓰지 않는다.
@@ -274,6 +298,7 @@ impl ActiveCapture {
             output_path,
             stop_device,
             packets,
+            level: _,
             writer,
         } = self;
 
@@ -348,9 +373,13 @@ pub fn start(
         }
     };
 
+    // 레벨은 쓰는 쪽에서 쌓이고 여기서 읽힌다 — 재는 자리가 파일에 쓰는 자리와 같다 (§16.2).
+    let level = Arc::new(Mutex::new(InputLevel::new()));
+    let measured = Arc::clone(&level);
+
     let writer = match std::thread::Builder::new()
         .name("molt-note-capture-writer".to_string())
-        .spawn(move || drain(receiver, file))
+        .spawn(move || drain(receiver, file, &measured))
     {
         Ok(handle) => handle,
         Err(error) => {
@@ -369,6 +398,7 @@ pub fn start(
         output_path,
         stop_device: open.stop,
         packets: sender,
+        level,
         writer,
     })
 }
@@ -421,13 +451,27 @@ pub fn file_size(path: &Path) -> Result<u64, Failure> {
 /// 일시정지 구간의 샘플은 **여기서 버려진다** — 파일에 도달하지 않는다. 표시가 샘플과 같은
 /// 통로로 오므로 어느 샘플이 그 구간의 것인지 판단할 필요가 없다 (모듈 주석).
 ///
+/// **입력 레벨도 같은 자리에서 갱신된다** (ADR-0003 §16.2). 파일에 쓰인 샘플만 레벨에
+/// 들어가므로, 일시정지 구간은 파일에서 빠지는 것과 똑같이 레벨에서도 빠진다. 여기서 하는
+/// 일은 읽고 넘기는 것뿐이다 — **파일에 쓰이는 샘플을 바꾸지 않는다** (§16.5).
+///
 /// **이 함수 안에 panic 경로가 없다.** 여기서 죽으면 파일이 확정되지 않은 채 남는다.
-fn drain(receiver: Receiver<Packet>, mut file: WavFile) -> Result<(), Failure> {
+/// 레벨을 빌리지 못하는 경우에도 파일 쓰기를 멈추지 않는다 — 녹음이 표시보다 우선한다.
+fn drain(
+    receiver: Receiver<Packet>,
+    mut file: WavFile,
+    level: &Mutex<InputLevel>,
+) -> Result<(), Failure> {
     let mut writing = true;
     for packet in receiver {
         match packet {
-            Packet::Samples(chunk) if writing => file.write(&chunk)?,
-            // 일시정지 구간이다. 이 샘플은 녹음이 아니다.
+            Packet::Samples(chunk) if writing => {
+                file.write(&chunk)?;
+                if let Ok(mut level) = level.lock() {
+                    level.push(&chunk);
+                }
+            }
+            // 일시정지 구간이다. 이 샘플은 녹음이 아니다 — 파일에도 레벨에도 들어가지 않는다.
             Packet::Samples(_) => {}
             Packet::Paused => writing = false,
             Packet::Resumed => writing = true,
@@ -668,6 +712,15 @@ mod tests {
 
     /// 가짜 통로 하나에 정해진 것을 흘려보내고, 만들어진 파일의 샘플을 돌려준다.
     fn drained(label: &str, packets: Vec<Packet>) -> (TempDir, Vec<i16>) {
+        let (temp, samples, _) = drained_measuring(label, packets);
+        (temp, samples)
+    }
+
+    /// [`drained`]와 같은 것을 하고, **그 통로가 재어 놓은 레벨까지** 함께 돌려준다.
+    fn drained_measuring(
+        label: &str,
+        packets: Vec<Packet>,
+    ) -> (TempDir, Vec<i16>, Option<LevelReading>) {
         let temp = TempDir::new(label);
         let path = temp.path().join("drained.wav");
         let file = WavFile::create(&path, CaptureFormat::pcm_16bit(16_000, 1))
@@ -679,9 +732,10 @@ mod tests {
         }
         drop(sender);
 
-        drain(receiver, file).expect("파일을 확정할 수 있어야 한다");
-        let samples = samples_in(&path);
-        (temp, samples)
+        let level = Mutex::new(InputLevel::new());
+        drain(receiver, file, &level).expect("파일을 확정할 수 있어야 한다");
+        let reading = level.lock().expect("레벨을 빌릴 수 있어야 한다").reading();
+        (temp, samples_in(&path), reading)
     }
 
     #[test]
@@ -739,6 +793,43 @@ mod tests {
         );
 
         assert_eq!(samples, [7; 4], "멈춘 뒤의 것은 들어가지 않는다");
+    }
+
+    #[test]
+    fn the_level_sees_exactly_the_samples_that_reached_the_file() {
+        // 재는 자리가 쓰는 자리와 같다는 것 그 자체다 (ADR-0003 §16.2). 멈춰 있는 동안
+        // 들어온 **큰 소리**를 골랐다 — 그것이 레벨에 섞이면 값이 크게 달라지므로 숨을 수 없다.
+        let (_temp, samples, reading) = drained_measuring(
+            "level-follows-the-file",
+            vec![
+                Packet::Samples(vec![1_685; 512]),
+                Packet::Paused,
+                Packet::Samples(vec![31_000; 512]),
+                Packet::Resumed,
+                Packet::Samples(vec![0; 512]),
+            ],
+        );
+        let reading = reading.expect("파일에 쓰인 샘플이 있으면 값이 있다");
+
+        assert_eq!(samples.len(), 1_024, "일시정지 구간은 파일에 없다");
+        assert!(!samples.contains(&31_000));
+        assert_eq!(reading.sample_count, 1_024, "레벨이 본 것도 그 1024개다");
+        assert_eq!(
+            reading.peak_amplitude, 1_685,
+            "멈춰 있는 동안의 큰 소리는 레벨에도 들어가지 않는다"
+        );
+    }
+
+    #[test]
+    fn a_capture_that_wrote_nothing_has_no_level_rather_than_zero() {
+        // 파일이 비어 있는 것과 "소리가 없다"는 다른 말이다 (ADR-0003 §16.3).
+        let (_temp, samples, reading) = drained_measuring(
+            "level-absent",
+            vec![Packet::Paused, Packet::Samples(vec![9_000; 8])],
+        );
+
+        assert!(samples.is_empty(), "쓰인 것이 없다");
+        assert_eq!(reading, None, "재지 않은 것을 0이라고 말하지 않는다");
     }
 
     #[test]

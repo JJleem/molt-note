@@ -1,0 +1,54 @@
+# 붕괴 실패가 화면에서 읽힌다
+# Runtime이 PLAN-20260907T032843Z 승인 시점에 생성했다 (proposal P4). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-079
+status: DONE
+
+request: |-
+  지금 `src/screens/transcriptView.ts`의 `failureCause`는 `transcriptionOutputUnusable`을 `'other'`로 뭉개고, 그 갈래에는 사용자가 먼저 할 일을 담은 문장이 없다(`RESOLUTION.other === null`). Rust가 나눠 보낸 구분을 화면이 다시 뭉개지 않도록 이 갈래를 별도 원인으로 가르고, 그 갈래의 안내 문장을 둔다 — 무엇이 일어났는가(전사가 붕괴했다)와 무엇을 하면 되는가(녹음 입력 레벨을 확인하고 다시 녹음한다 · 다른 모델을 고른다 · 다시 시도한다). 재시도 수단과 `TRANSCRIPTION_PRESERVED_NOTICE`(아무것도 지워지지 않았다)는 그대로 유지한다. **규칙은 순수 모듈에 있고 `RecordingDetailScreen.tsx`는 그리기만 한다.** `src/screens/transcriptView.test.ts`에 새 갈래와 문장, 그리고 다른 갈래(모델 없음 · 모델 사용 불가 · 이유 모름)가 흐려지지 않았다는 것을 고정한다. 새 벤더 고유 개념을 타입에 만들지 않는다 (INV-9) — `tests/ipc-boundary.test.ts`가 그대로 통과해야 한다. UI 리디자인은 하지 않는다.
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-078
+
+stop_condition:
+  gates: [build, lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 3
+
+acceptance_criteria:
+  - id: AC-1
+    description: |-
+      `npm run build`가 통과한다.
+    verification:
+      type: gate
+      ref: build
+  - id: AC-2
+    description: |-
+      `npm run lint`가 통과한다.
+    verification:
+      type: gate
+      ref: lint
+  - id: AC-3
+    description: |-
+      `npm run test`가 통과하고, 붕괴 갈래와 그 안내 문장을 고정하는 새 vitest 케이스가 있으며 `tests/ipc-boundary.test.ts`도 그대로 통과한다.
+    verification:
+      type: gate
+      ref: test
+  - id: AC-4
+    description: |-
+      붕괴 실패에서 사용자가 다음에 할 일이 문장으로 보이고, 재시도 수단과 '아무것도 지워지지 않았다' 안내가 함께 남아 있다.
+    verification:
+      type: verifier
+  - id: AC-5
+    description: |-
+      표현 규칙이 순수 모듈(`transcriptView.ts`)에 있고 React 컴포넌트에 조건 분기로 흩어지지 않았다.
+    verification:
+      type: verifier
+
+evidence: []
+
+failure_memo: []

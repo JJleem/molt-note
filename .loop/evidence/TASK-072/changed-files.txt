@@ -1,0 +1,30 @@
+TASK-072 — 이 Run이 실제로 바꾼 파일 (git status --porcelain · git diff --stat)
+
+?? src-tauri/src/export/portion.rs          새 파일 — 크기와 나눔의 순수 규칙 + 그 단위 테스트
+ M src-tauri/src/export/markdown.rs         TranscriptShape(Sectioned · Compact) 추가. 렌더링 규칙은 여전히 이 파일 하나에 있다
+ M src-tauri/src/export/ai_request.rs       세 산출물이 Compact 모양을 고른다 (SHAPE 상수 하나). 기대 문자열 갱신 + 테스트 2개 추가
+ M src-tauri/src/export/handoff.rs          transcript_body 호출에 모양 인자 하나 (판정은 그대로 — 적을 것이 있는가 하나다)
+ M src-tauri/src/export/mod.rs              pub mod portion + 재수출 3개 + 모듈 지도 한 줄
+ M src-tauri/tests/manual_ai_handoff.rs     AI Handoff 경로의 기대 문자열 하나를 압축 모양으로 갱신 (§11 export의 것이 아니다)
+
+git diff --stat (새 파일 제외):
+ src-tauri/src/export/ai_request.rs   | 146 ++++++++++++----
+ src-tauri/src/export/handoff.rs      |   9 +-
+ src-tauri/src/export/markdown.rs     | 313 ++++++++++++++++++++++++++++++++---
+ src-tauri/src/export/mod.rs          |   3 +
+ src-tauri/tests/manual_ai_handoff.rs |   7 +-
+ 5 files changed, 420 insertions(+), 58 deletions(-)
+
+diff 원문: changed-files.diff (`git diff src-tauri/src/export src-tauri/tests/manual_ai_handoff.rs`)
+           — 아직 추적되지 않는 새 파일 `src-tauri/src/export/portion.rs`는 diff에 없다.
+             그 파일은 저장소에 그대로 있으므로 소스를 직접 읽으면 된다.
+
+건드리지 않은 것 (Task 서술의 범위 밖):
+ - src-tauri/src/commands/**            command 경계 — TASK-073의 몫이다
+ - src/**                               화면과 view 모듈 — TASK-073의 몫이다
+ - src-tauri/src/notion/chunk.rs        Notion API 제약의 표현 — 예산도 코드도 가져오지 않았다
+ - src-tauri/tests/markdown_export.rs   §11 export의 기대 문자열 — 한 글자도 바뀌지 않았다
+
+주의: 이 저장소의 working tree에는 앞선 Task들의 커밋되지 않은 변경이 함께 있다.
+위 목록은 `src-tauri/src/export` 와 `src-tauri/tests/manual_ai_handoff.rs` 로 좁혀 얻은 것이며,
+이 Run이 만든 변경은 그 여섯 파일뿐이다.

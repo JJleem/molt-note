@@ -1,0 +1,9 @@
+ src/App.css                       |  49 +++++++++++
+ src/ipc/types.ts                  |  74 ++++++++++++++++-
+ src/screens/RecordingScreen.tsx   |  19 +++++
+ src/screens/coreWithoutAi.test.ts |   8 +-
+ src/screens/recordingView.test.ts | 166 +++++++++++++++++++++++++++++++++++++-
+ src/screens/recordingView.ts      | 129 ++++++++++++++++++++++++++++-
+ tests/screen-boundary.test.ts     | 136 ++++++++++++++++++++++++++++++-
+ tests/ui-foundation.test.ts       |  15 +++-
+ 8 files changed, 584 insertions(+), 12 deletions(-)

@@ -1,0 +1,24 @@
+Self-check (advisory — the runtime reruns gates independently after the worker finishes)
+
+TASK-085의 stop_condition은 gates: (none enabled)다. 아래는 이 Task가 소스를 바꾸지
+않았다는 것을 확인하기 위해 참고로 돌린 것이며, 완료 판정이 아니다.
+
+명령: node tools/loop-runtime/loopctl.mjs self-check
+Gates: build, lint, test
+
+[build] npm run build
+[lint] npm run lint
+[test] npm run test
+
+build: PASS  exit=0  1.2s
+lint:  PASS  exit=0  2.7s
+test:  PASS  exit=0  8.6s
+
+Self-check: all gates passed
+
+테스트 총계 (같은 실행의 stdout에서 센 값 — .loop-local/self-check/gates/test/stdout.log)
+  vitest      571 passed (Test Files 28 passed)
+  cargo test  834 passed  (0 failed · 0 ignored · 34개 테스트 바이너리의 합)
+  합계        1,405
+
+이 값이 docs/SYSTEM-MAP.md §5(Phase 5.7 절)과 §6(Validation Model)에 적힌 수치의 출처다.

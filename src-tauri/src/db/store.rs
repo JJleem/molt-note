@@ -20,6 +20,11 @@ const RECORDING_COLUMNS: &str = "id, title, created_at, updated_at, duration_ms,
      audio_format, microphone, current_transcript_id,
      transcription_status, ai_status, notion_status";
 
+/// Transcript 조회에 쓰는 열 목록. 단건·목록 조회가 같은 순서를 쓰도록 한 곳에 둔다 —
+/// 한쪽에만 열을 더하면 같은 Transcript가 조회 경로에 따라 다르게 읽힌다.
+const TRANSCRIPT_COLUMNS: &str =
+    "id, recording_id, language, raw_text, created_at, engine, model, transcription_ms";
+
 /// 새 레코드에 쓸 식별자를 만든다.
 ///
 /// SQLite의 난수원을 그대로 쓴다 — 식별자 하나 때문에 새 의존성을 들이지 않는다.
@@ -201,8 +206,9 @@ pub fn append_transcript(
     let transaction = connection.transaction().map_err(DatabaseError::Sql)?;
     transaction
         .execute(
-            "INSERT INTO transcripts (id, recording_id, language, raw_text, created_at, engine, model)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            "INSERT INTO transcripts (id, recording_id, language, raw_text, created_at, engine,
+                                      model, transcription_ms)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             rusqlite::params![
                 transcript.id.as_str(),
                 transcript.recording_id.as_str(),
@@ -211,6 +217,8 @@ pub fn append_transcript(
                 transcript.created_at,
                 transcript.engine,
                 transcript.model,
+                // 재지 않았으면 NULL로 들어간다. 0으로 바꿔 넣지 않는다 (migration 10).
+                transcript.transcription_ms,
             ],
         )
         .map_err(DatabaseError::Sql)?;
@@ -240,8 +248,7 @@ pub fn load_transcript(
     id: &TranscriptId,
 ) -> Result<Option<Transcript>, DatabaseError> {
     let row = connection.query_row(
-        "SELECT id, recording_id, language, raw_text, created_at, engine, model
-         FROM transcripts WHERE id = ?1",
+        &format!("SELECT {TRANSCRIPT_COLUMNS} FROM transcripts WHERE id = ?1"),
         [id.as_str()],
         read_transcript_row,
     );
@@ -258,10 +265,10 @@ pub fn list_transcripts(
     recording_id: &RecordingId,
 ) -> Result<Vec<Transcript>, DatabaseError> {
     let mut statement = connection
-        .prepare(
-            "SELECT id, recording_id, language, raw_text, created_at, engine, model
-             FROM transcripts WHERE recording_id = ?1 ORDER BY created_at, id",
-        )
+        .prepare(&format!(
+            "SELECT {TRANSCRIPT_COLUMNS} FROM transcripts
+             WHERE recording_id = ?1 ORDER BY created_at, id"
+        ))
         .map_err(DatabaseError::Sql)?;
     let rows = statement
         .query_map([recording_id.as_str()], read_transcript_row)
@@ -486,6 +493,7 @@ struct RawTranscript {
     created_at: String,
     engine: String,
     model: String,
+    transcription_ms: Option<i64>,
 }
 
 fn read_transcript_row(row: &Row<'_>) -> rusqlite::Result<RawTranscript> {
@@ -497,6 +505,7 @@ fn read_transcript_row(row: &Row<'_>) -> rusqlite::Result<RawTranscript> {
         created_at: row.get(4)?,
         engine: row.get(5)?,
         model: row.get(6)?,
+        transcription_ms: row.get(7)?,
     })
 }
 
@@ -531,6 +540,8 @@ fn with_segments(
         created_at: raw.created_at,
         engine: raw.engine,
         model: raw.model,
+        // NULL은 "그때는 재지 않았다"는 정상 상태다 (migration 10). 0으로 읽지 않는다.
+        transcription_ms: raw.transcription_ms,
     })
 }
 

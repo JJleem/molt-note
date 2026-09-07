@@ -1,0 +1,59 @@
+# 이 Phase의 불변을 전용 테스트로 못박는다
+# Runtime이 PLAN-20260905T201413Z 승인 시점에 생성했다 (proposal P9). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-074
+status: DONE
+
+request: |-
+  **새 제품 기능을 추가하지 않고**, 이미 만들어진 경로로 Phase 5.6의 불변을 `tests/` 아래 전용 테스트에 고정한다(Phase 4 · 5 · 5.5가 같은 형태로 남긴 것과 같은 자리다). 넷을 본다. (1) **언어가 영어로 강제되지 않는다** — 전사 실행 경로에서 언어 선택이 엔진 경계까지 값으로 도달하고, 고르지 않았을 때 감지가 켜진다는 것. 실제 whisper와 모델 없이 test double로 판정한다. (2) **§D의 language 설정이 실재하고 왕복한다** — 저장 → 재조회, 그리고 다른 설정을 저장할 때 조용히 지워지지 않는다는 것. (3) **내보낸 파일에 도달하는 수단이 있다** — 여는 command가 표면에 있고, 그것이 앱의 exports 디렉터리 밖을 열지 못하며, 화면의 done 상태에 그 동작이 값으로 있다는 것. (4) **긴 handoff가 크기 때문에 조용히 실패하지 않는다** — 큰 입력에서 크기가 값으로 나오고 순서대로 나뉘며 이어 붙이면 내용이 그대로라는 것. 각 테스트에는 **무엇이 깨지면 이 검사가 무엇을 잡는가**를 이 저장소의 기존 테스트와 같은 밀도로 적는다. 판정할 수 없는 것을 판정하는 척하지 않는다 — 한국어 전사 품질과 Metal 체감은 사람의 Human Review 항목이며, 이 테스트가 그것을 대신한다고 적지 않는다.
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-068
+  - TASK-070
+  - TASK-071
+  - TASK-073
+
+stop_condition:
+  gates: [build, lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 2
+
+acceptance_criteria:
+  - id: AC1
+    description: |-
+      `npm run test`가 통과한다.
+    verification:
+      type: gate
+      ref: test
+  - id: AC2
+    description: |-
+      `npm run lint`가 통과한다.
+    verification:
+      type: gate
+      ref: lint
+  - id: AC3
+    description: |-
+      `npm run build`가 통과한다.
+    verification:
+      type: gate
+      ref: build
+  - id: AC4
+    description: |-
+      네 불변 각각에 대응하는 검사가 실재하고, 각 검사가 실제로 그 경로를 지난다 — 상수 비교나 파일 존재 확인으로 대체돼 있지 않다.
+    verification:
+      type: verifier
+      instruction: |-
+        테스트를 하나씩 읽고, 해당 코드를 되돌렸을 때 그 검사가 실패할 것인지 판단한다.
+  - id: AC5
+    description: |-
+      이 Task가 제품 동작을 새로 추가하지 않았다 — 변경은 테스트와 그 문서에 머문다. 자동으로 판정할 수 없는 것을 판정한다고 주장하는 검사가 없다.
+    verification:
+      type: verifier
+
+evidence: []
+
+failure_memo: []

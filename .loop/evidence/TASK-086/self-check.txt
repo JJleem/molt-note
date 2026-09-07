@@ -1,0 +1,21 @@
+$ node tools/loop-runtime/loopctl.mjs self-check
+(RUN-20260907T074814Z-TASK-086 · 2026-09-07)
+
+Self-check (advisory — the runtime reruns gates independently after the worker finishes)
+Gates: build, lint, test
+
+[build] npm run build
+[lint] npm run lint
+[test] npm run test
+
+build: PASS  exit=0  1.2s
+
+lint: PASS  exit=0  2.3s
+
+test: PASS  exit=0  8.4s
+
+Self-check: all gates passed
+Artifacts: .loop-local/self-check/  (advisory only — not a gate report)
+
+주: 이 Task는 docs/ADR-0007-transcription-engine.md 하나만 바꿨다.
+    Gate 결과는 참고용이며 완료 판정이 아니다.

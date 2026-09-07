@@ -22,6 +22,26 @@
 //! [`super::markdown::transcript_body`] **한 자리에만** 있다. 여기서 복제하면 §11의 export
 //! 파일과 AI-ready 문서가 조용히 갈라진다.
 //!
+//! ## 이 경로는 압축 모양을 고른다 (`phase-prompt/05.6` R-5)
+//!
+//! ```text
+//! §11의 export 파일   ### 00:00:03            ← 사람이 읽고 보관하는 문서
+//!                     안녕하세요.
+//!
+//! AI Handoff의 셋     00:00:03 안녕하세요.     ← 채팅 창에 붙여 넣는 문자열
+//! ```
+//!
+//! 72분 녹음의 산출물은 99 KB · 5,139줄이었고 그중 1,711줄이 `### HH:MM:SS` 제목이었다.
+//! 채팅에 붙여 넣는 문자열에서 그 제목 줄과 빈 줄은 **내용 없이 늘어나는 크기**다.
+//!
+//! **고르는 것은 모양뿐이고 규칙은 여전히 한 자리에 있다** ([`TranscriptShape`]) — 어느
+//! segment를 적는지도, 그 순서도, segment가 없을 때의 대체도 §11과 같은 함수가 정한다.
+//! 그래서 압축해도 timestamp와 문장의 대응이 남고 전사 텍스트는 하나도 사라지지 않으며,
+//! §11의 파일 형식은 글자 하나 바뀌지 않는다.
+//!
+//! 그래도 한 번에 들어가지 않는 크기가 남는다 — 그것을 값으로 말하고 순서대로 나누는 일은
+//! [`super::portion`]이 한다.
+//!
 //! ## audio가 들어갈 자리가 없다 (INV-6 · MH-4)
 //!
 //! [`AiRequest`]가 읽는 Recording 필드는 `title` · `created_at` · `duration_ms` **셋뿐**이며,
@@ -39,8 +59,14 @@ use crate::domain::{NoteType, Recording, Transcript};
 
 use super::markdown::{
     heading_text, metadata_block, transcript_blocks, transcript_body, ExportDocument,
-    TranscriptBody, MEETING_SECTIONS, STUDY_SECTIONS, SUMMARY_SECTIONS, TRANSCRIPT_SECTION,
+    TranscriptShape, MEETING_SECTIONS, STUDY_SECTIONS, SUMMARY_SECTIONS, TRANSCRIPT_SECTION,
 };
+
+/// 이 경로가 transcript를 적는 모양 (`phase-prompt/05.6` R-5 · [`TranscriptShape::Compact`]).
+///
+/// **세 산출물이 같은 모양을 쓴다.** 하나만 압축하면 같은 전사가 자리마다 다른 크기와 다른
+/// 모양을 갖게 되고, 그러면 화면이 말하는 크기가 무엇의 크기인지도 흐려진다.
+const SHAPE: TranscriptShape = TranscriptShape::Compact;
 
 /// AI-ready 문서의 첫 `# ` 줄 (ADR-0010 §5.2).
 ///
@@ -164,16 +190,12 @@ impl<'a> AiRequest<'a> {
     /// 답하기 시작한다. 자기 지시를 직접 쓰고 싶은 사람에게는 [`Self::transcript_text`]가
     /// 별개의 길로 남는다 (ADR-0010 §6.2).
     pub fn manual_prompt(&self) -> String {
-        let transcript = match transcript_body(self.document.transcript) {
-            TranscriptBody::Segments(segments) => segments.join("\n\n"),
-            TranscriptBody::Raw(raw_text) => raw_text.to_owned(),
-            TranscriptBody::Empty => String::new(),
-        };
+        let transcript = transcript_body(self.document.transcript, SHAPE).text();
 
         instructions(self.mode, &transcript)
     }
 
-    /// 붙여 넣을 수 있는 **Transcript 텍스트** — `## Transcript`와 §11의 블록 그대로다.
+    /// 붙여 넣을 수 있는 **Transcript 텍스트** — `## Transcript`와 그 아래 압축 모양의 본문.
     ///
     /// 제목을 **포함하는** 이유: 제목을 떼면 "제목 없는 본문"이라는 두 번째 조립 규칙과 두 번째
     /// 기대 문자열이 생긴다. 붙여 넣은 사람에게도 그 한 줄은 무엇을 붙였는지 말해 준다
@@ -181,7 +203,7 @@ impl<'a> AiRequest<'a> {
     ///
     /// 적을 것이 하나도 없으면 **빈 문자열이다** — 제목만 남은 텍스트를 만들지 않는다.
     pub fn transcript_text(&self) -> String {
-        join_document(transcript_blocks(self.document.transcript))
+        join_document(transcript_blocks(self.document.transcript, SHAPE))
     }
 
     /// 외부 AI 채팅이 요청을 이해하기에 충분한 맥락을 담은 **AI-ready Markdown 문서 하나**.
@@ -191,7 +213,7 @@ impl<'a> AiRequest<'a> {
     /// ## Mode          ← §9.5의 표시 이름
     /// ## Instructions  ← Manual 지시문. transcript 본문 대신 아래를 가리키는 한 문장이 들어간다
     /// ## Recording     ← Title · Date · Duration (오디오는 없다 · INV-6)
-    /// ## Transcript    ← §11의 블록 그대로
+    /// ## Transcript    ← 압축 모양의 본문 (segment 하나가 `HH:MM:SS 문장` 한 줄이다)
     /// ```
     ///
     /// 순서는 고정이다 — 읽는 쪽이 **무엇을 해 달라는 요청인지** 먼저 만나고, 가장 긴 것이
@@ -213,7 +235,7 @@ impl<'a> AiRequest<'a> {
             ),
         ];
 
-        blocks.extend(transcript_blocks(self.document.transcript));
+        blocks.extend(transcript_blocks(self.document.transcript, SHAPE));
 
         join_document(blocks)
     }
@@ -320,6 +342,7 @@ mod tests {
             created_at: "2026-09-01T11:00:00.000Z".to_owned(),
             engine: "whisper-rs".to_owned(),
             model: "ggml-base".to_owned(),
+            transcription_ms: None,
         }
     }
 
@@ -423,19 +446,15 @@ mod tests {
     // ── 세 산출물의 기대 문자열 ─────────────────────────────────────────────────
 
     #[test]
-    fn the_transcript_text_is_the_section_11_block_with_its_heading() {
+    fn the_transcript_text_is_the_compact_body_with_its_heading() {
         let text = AiRequest::new(NoteType::Study, &recording(), &transcript()).transcript_text();
 
         assert_eq!(
             text,
             [
                 "## Transcript",
-                "",
-                "### 00:00:03",
-                "안녕하세요. 오늘은 3DGS를 봅니다.",
-                "",
-                "### 00:00:06",
-                "먼저 splat 표현부터 보겠습니다.",
+                "00:00:03 안녕하세요. 오늘은 3DGS를 봅니다.",
+                "00:00:06 먼저 splat 표현부터 보겠습니다.",
                 "",
             ]
             .join("\n")
@@ -498,12 +517,8 @@ mod tests {
                 "Duration: 52:31",
                 "",
                 "## Transcript",
-                "",
-                "### 00:00:03",
-                "안녕하세요. 오늘은 3DGS를 봅니다.",
-                "",
-                "### 00:00:06",
-                "먼저 splat 표현부터 보겠습니다.",
+                "00:00:03 안녕하세요. 오늘은 3DGS를 봅니다.",
+                "00:00:06 먼저 splat 표현부터 보겠습니다.",
                 "",
             ]
             .join("\n")
@@ -543,11 +558,8 @@ mod tests {
                 "- Write the summary in the main language of the transcript.",
                 "",
                 "Transcript:",
-                "### 00:00:03",
-                "안녕하세요. 오늘은 3DGS를 봅니다.",
-                "",
-                "### 00:00:06",
-                "먼저 splat 표현부터 보겠습니다.",
+                "00:00:03 안녕하세요. 오늘은 3DGS를 봅니다.",
+                "00:00:06 먼저 splat 표현부터 보겠습니다.",
             ]
             .join("\n")
         );
@@ -725,8 +737,82 @@ mod tests {
             let earlier = text.find("먼저 것").expect("둘째 segment가 있어야 한다");
             assert!(later < earlier, "정렬하지 않는다");
         }
-        // 타임스탬프는 §11과 같은 함수가 만든 문자열이다.
-        assert!(request.transcript_text().contains("### 00:00:09\n나중 것"));
+        // 타임스탬프는 §11과 같은 함수가 만든 문자열이다 — 모양만 압축이다.
+        assert!(request.transcript_text().contains("00:00:09 나중 것"));
+    }
+
+    // ── 압축 모양 (`phase-prompt/05.6` R-5 · AC5) ────────────────────────────────
+
+    #[test]
+    fn the_three_outputs_use_the_compact_shape_and_the_section_11_document_does_not() {
+        // 같은 전사 하나가 두 자리에서 다른 모양으로 나온다. **그 둘이 같은 규칙에서 나온다**는
+        // 것이 이 Task의 요구다 — 여기서 §11 문서가 그대로인지도 함께 본다.
+        let recording = recording();
+        let transcript = transcript();
+        let request = AiRequest::new(NoteType::Study, &recording, &transcript);
+
+        for text in [
+            request.manual_prompt(),
+            request.transcript_text(),
+            request.ai_ready_document(),
+        ] {
+            assert!(
+                text.contains("00:00:03 안녕하세요. 오늘은 3DGS를 봅니다."),
+                "AI 경로가 압축 모양을 쓰지 않는다"
+            );
+            assert!(!text.contains("### "), "AI 경로에 §11의 제목 줄이 남았다");
+        }
+
+        // §11의 export 파일은 이 Phase가 바꾸지 않는다.
+        let document = ExportDocument {
+            recording: &recording,
+            transcript: &transcript,
+            note: None,
+        };
+        let markdown = crate::export::markdown::render(&document);
+        assert!(markdown.contains("\n### 00:00:03\n안녕하세요. 오늘은 3DGS를 봅니다.\n"));
+        assert!(!markdown.contains("00:00:03 안녕하세요"));
+    }
+
+    #[test]
+    fn the_compact_shape_loses_no_transcript_text_and_no_timestamp() {
+        // 압축은 요약이 아니다 — 크기가 줄어드는 대신 사라지는 문장이 있으면 그것은 유실이다.
+        let recording = recording();
+        let segments: Vec<TranscriptSegment> = (0..50)
+            .map(|index| TranscriptSegment {
+                start_ms: index * 61_000,
+                end_ms: index * 61_000 + 3_000,
+                text: format!("{index}번째 구간의 문장입니다."),
+            })
+            .collect();
+        let transcript = Transcript {
+            segments,
+            ..transcript()
+        };
+        let request = AiRequest::new(NoteType::Meeting, &recording, &transcript);
+
+        let text = request.transcript_text();
+        for segment in &transcript.segments {
+            assert!(
+                text.contains(&format!(
+                    "{} {}",
+                    crate::export::markdown::format_timestamp_ms(segment.start_ms),
+                    segment.text
+                )),
+                "segment 하나가 자기 timestamp와 함께 남지 않았다: {}",
+                segment.text
+            );
+        }
+        // 줄 수는 제목 한 줄 + segment 수다 — 빠진 segment도 늘어난 줄도 없다.
+        assert_eq!(text.trim_end().lines().count(), 1 + transcript.segments.len());
+
+        // 그리고 §11의 같은 전사보다 작다 — 압축이 실제로 크기를 줄인다.
+        let document = ExportDocument {
+            recording: &recording,
+            transcript: &transcript,
+            note: None,
+        };
+        assert!(text.len() < crate::export::markdown::render(&document).len());
     }
 
     // ── MH-4 · MH-6 ──────────────────────────────────────────────────────────────

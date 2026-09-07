@@ -1,0 +1,54 @@
+# Phase 마무리 문서 — 시스템 지도 · 열린 항목 · Human Review
+# Runtime이 PLAN-20260907T032843Z 승인 시점에 생성했다 (proposal P10). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-085
+status: DONE
+
+request: |-
+  **문서만 바꾸는 Task다 — 소스 · 설정 · 의존성 · 테스트는 건드리지 않는다.** 넷을 한다. (1) `docs/SYSTEM-MAP.md`를 갱신한다 — 이 Phase가 **실제로 구현한 것**(녹음 중 입력 레벨 표시 · 저장 직전 붕괴 판정 · 붕괴 실패의 화면 안내)만 적는다. PLANNED · DEFERRED · CANDIDATE를 구현된 것처럼 적지 않고, 이전 Phase가 세운 기록을 덮어쓰지 않으며, Current / Planned / Deferred가 구분된 채로 남는다. (2) `A-TRANS-001`의 현재 상태를 정확히 적는다 — **이 Phase로 닫히지 않는다.** 사람이 레벨을 올려 다시 녹음한 회의가 읽을 만하게 전사되는 것을 확인해야 닫힌다. (3) 다음 Phase 후보를 남긴다: 청크 분할 · 청크마다 state 재생성 · 반복 차단 · VAD · 자동 언어 감지 개선, 그리고 P8의 측정 결과에 따른 입력 정규화 결정. 각각이 왜 이 Phase에서 제외됐는지도 한 줄씩 적는다. (4) Goal의 Human Review 네 항목을 사람이 채울 문서로 남긴다(`docs/PHASE-5.5-HUMAN-REVIEW.md` 선례) — 이들은 자동 Gate가 판정할 수 없는 주관적 항목이라는 것을 문서 안에 명시하고, 결과칸은 비워 둔다.
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-083
+  - TASK-084
+
+stop_condition:
+  gates: []
+  requires_verifier: true
+  max_consecutive_failures: 2
+
+acceptance_criteria:
+  - id: AC-1
+    description: |-
+      SYSTEM-MAP이 이 Phase가 실제로 구현한 것만 DONE으로 적고, 계획·보류 항목을 구현된 것으로 적지 않는다. 이전 Phase 기록이 지워지지 않았다.
+    verification:
+      type: verifier
+      instruction: |-
+        저장소의 실제 코드와 대조한다. 문서가 말하는 기능이 코드에 없으면 실패다.
+  - id: AC-2
+    description: |-
+      A-TRANS-001이 열린 채로 정확히 기술돼 있고, 무엇이 확인돼야 닫히는지가 적혀 있다.
+    verification:
+      type: verifier
+  - id: AC-3
+    description: |-
+      다음 Phase 후보 다섯 항목과 제외 이유가 적혀 있고, 그것들이 이번 Phase에서 구현된 것처럼 읽히지 않는다.
+    verification:
+      type: verifier
+  - id: AC-4
+    description: |-
+      Human Review 문서가 Goal의 네 항목을 담고 있고 결과칸이 비어 있으며, 자동 Gate로 판정할 수 없다는 것이 명시돼 있다.
+    verification:
+      type: verifier
+  - id: AC-5
+    description: |-
+      소스 · 설정 · 의존성 · 테스트가 하나도 바뀌지 않았다.
+    verification:
+      type: verifier
+
+evidence: []
+
+failure_memo: []

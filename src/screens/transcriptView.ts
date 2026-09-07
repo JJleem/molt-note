@@ -24,8 +24,13 @@
  *
  * ```text
  * 길이       52:31       이 녹음은 얼마나 긴가        Rust가 만든다
+ * 걸린 시간  1:47        전사에 얼마나 걸렸는가       Rust가 만든다
  * timestamp  00:02:14    이 문장은 녹음의 어디인가    여기서 만든다
  * ```
+ *
+ * 전사에 걸린 시간도 Rust가 만든 문장을 그대로 받는다 (`transcriptionLabel`) — 이 모듈은 그
+ * 밀리초를 보지 않는다. 그리고 **잰 적이 없으면 `null`이 그대로 지나간다**: 재지 않은 것을
+ * `0:00`이라고 말하면 Metal 전후 비교가 거짓을 말하기 때문이다 (`phase-prompt/05.6` 기준 3).
  *
  * §7의 요구 6이 정한 표시 형태(`00:02:14 → 00:02:21`)는 화면의 문제이고, 그것을 만드는 규칙은
  * **여기 한 곳**에 있다 ({@link formatTimestamp}). 밀리초를 어떤 단위로 볼지는 이미 Rust의 통합
@@ -104,6 +109,33 @@ export function transcriptLines(transcript: Transcript): readonly TranscriptLine
 }
 
 /**
+ * 전사 도중에 나온 문장들을 화면 줄로 옮긴다 (2026-09-07 추가).
+ *
+ * 끝 시각은 **없다** — 엔진이 아직 그 자리를 말하지 않았기 때문이며, 모르는 값을 시작 시각과
+ * 같게 만들어 `00:02:14 → 00:02:14`처럼 그럴듯하게 보이지 않게 한다. 그래서 `rangeLabel`은
+ * 시작 시각 하나이고 `endLabel`은 빈 문자열이다.
+ */
+export function partialLines(status: TranscriptionStatus): readonly TranscriptLine[] {
+  return status.partialLines.map((line) => {
+    const startLabel = formatTimestamp(line.startMs);
+    return { startLabel, endLabel: '', rangeLabel: startLabel, text: line.text };
+  });
+}
+
+/**
+ * `0.37` → `37%`. 모르면 `null`이다.
+ *
+ * 내림한다 — 아직 끝나지 않았는데 `100%`가 보이지 않게 한다.
+ */
+export function progressLabel(progress: number | null): string | null {
+  if (progress === null || Number.isNaN(progress)) {
+    return null;
+  }
+  const clamped = Math.min(Math.max(progress, 0), 1);
+  return `${Math.floor(clamped * 100)}%`;
+}
+
+/**
  * 이 탭에서 사용자가 할 수 있는 동작 하나 (`phase-prompt/03` 요구 2 · 7).
  *
  * **함수가 아니라 값이다.** 순수 모듈이 command를 알지 않기 때문이며, 그래서 "지금 시작할 수
@@ -125,13 +157,26 @@ export interface TranscriptAction {
  * 다시 눌러도 모델은 생기지 않는다. 그래서 이 갈래가 값으로 남는다.
  *
  * ```text
- * modelMissing    전사에 쓸 모델 파일이 없다        모델을 두고 고른 뒤에 다시 시작한다
- * modelUnusable   고른 모델을 쓸 수 없다            다른 모델을 고른다
- * other           그 밖의 실패                      다시 시도할 수 있다
- * unknown         이 앱이 켜진 뒤의 시도가 아니다   이유를 지어내지 않는다
+ * modelMissing     전사에 쓸 모델 파일이 없다        모델을 두고 고른 뒤에 다시 시작한다
+ * modelUnusable    고른 모델을 쓸 수 없다            다른 모델을 고른다
+ * outputUnusable   전사가 붕괴해 결과를 쓸 수 없다   입력 레벨을 확인하거나 모델을 바꾼다
+ * other            그 밖의 실패                      다시 시도할 수 있다
+ * unknown          이 앱이 켜진 뒤의 시도가 아니다   이유를 지어내지 않는다
  * ```
+ *
+ * `outputUnusable`이 `other`와 갈라져 있는 이유는 §13의 갈래가 이미 그렇게 나뉘어 도착하기
+ * 때문이다 (ADR-0007 §18.4). 엔진은 정상적으로 끝났고 결과도 있지만 그 결과를 전사로 쓸 수
+ * 없는 상황이며 (`transcriptionOutputUnusable`), **그대로 다시 눌러도 같은 결과가 나온다** —
+ * 같은 오디오를 같은 조건으로 다시 돌리는 것이기 때문이다. 사용자가 바꿔야 하는 것은
+ * 입력(녹음 레벨)이거나 조건(모델)이므로, 그 사실을 `other`로 뭉개면 화면이 사용자를 같은
+ * 실패로 되돌려 보낸다. **Rust가 나눠 보낸 구분을 화면이 다시 뭉개지 않는다.**
  */
-export type TranscriptFailureCause = 'modelMissing' | 'modelUnusable' | 'other' | 'unknown';
+export type TranscriptFailureCause =
+  | 'modelMissing'
+  | 'modelUnusable'
+  | 'outputUnusable'
+  | 'other'
+  | 'unknown';
 
 /**
  * Transcript 탭이 놓일 수 있는 상태의 전부.
@@ -167,6 +212,15 @@ export type TranscriptTabView =
       readonly kind: 'running';
       readonly text: string;
       readonly kept: readonly TranscriptLine[];
+      /**
+       * **지금까지 나온 문장들.** 아직 아무것도 안 나왔으면 빈 배열이다.
+       *
+       * 저장된 Transcript가 아니라 미리보기다 — 붕괴 판정도 반복 차단도 아직 지나지 않았고,
+       * 그래서 **여기 보이던 문장이 최종 결과에 없을 수 있다.** 화면은 그 사실을 감추지 않는다.
+       */
+      readonly partial: readonly TranscriptLine[];
+      /** `37%`. 아직 모르면 `null`이다 — 모르는 것을 `0%`라고 말하지 않는다. */
+      readonly progressLabel: string | null;
     }
   | {
       readonly kind: 'done';
@@ -176,6 +230,14 @@ export type TranscriptTabView =
       /** 이 문장들이 무엇으로 만들어졌는가 (provenance · §7). */
       readonly engine: string;
       readonly model: string;
+      /**
+       * 이 전사에 **얼마나 걸렸는가** — Rust가 만든 문장 그대로다 (예: `1:47`).
+       *
+       * `null`이면 **그때는 재지 않았다**는 뜻이다 (`phase-prompt/05.6` 성공 기준 3).
+       * 그 상태를 `0:00`으로 말하지 않는다 — 화면은 그 줄을 아예 보이지 않는다.
+       * 모르는 것을 지어내지 않는 규칙은 {@link language}와 같다.
+       */
+      readonly transcriptionLabel: string | null;
     }
   | {
       readonly kind: 'failed';
@@ -235,16 +297,32 @@ export const UNKNOWN_FAILURE_NOTICE =
   'The stored state says the last transcription failed. The reason is not known in this session — start it again to see what happens.';
 
 /**
+ * 전사가 붕괴했을 때 사용자가 할 수 있는 일 (§13 · ADR-0007 §18.4 · `phase-prompt/05.7` 기준 2).
+ *
+ * **무엇이 일어났는가**(전사가 붕괴해 결과를 쓸 수 없다)와 **무엇을 하면 되는가**(입력 레벨을
+ * 확인하고 다시 녹음한다 · 다른 모델을 고른다 · 다시 시도한다)가 함께 있다. 원인을 단정하지
+ * 않는 이유는 Rust가 이미 그렇게 하고 있기 때문이다 (ADR-0007 §18.6) — 같은 판정이 낮은
+ * 입력 레벨에서도 부족한 모델에서도 나오며, 어느 쪽인지는 화면이 더 알지 못한다. 그래서
+ * 하나를 지목하는 대신 **사람이 고를 수 있는 것을 늘어놓는다.**
+ *
+ * 얼마나 붕괴했는지(문장 수 · 반복 횟수)는 이 문장에 없다. 그 수치는 Rust가 만든
+ * `Failure.message`에 이미 들어 있고 화면은 그것을 그대로 보인다 — 여기서 다시 세지 않는다.
+ */
+export const TRANSCRIPTION_COLLAPSED_NOTICE =
+  'The transcription collapsed, so the result could not be used as a transcript. Running it again unchanged gives the same result — check the recording input level and record again, or choose a different model in Settings, then start the transcription again.';
+
+/**
  * 갈래마다 사용자가 **먼저** 해야 하는 일 (§13).
  *
  * 모델이 없는 실패에 "다시 시도"만 보여주면 사용자는 같은 실패를 반복한다 — 그래서 그 갈래는
- * 다시 시도 수단과 **함께** 이 문장을 보여준다.
+ * 다시 시도 수단과 **함께** 이 문장을 보여준다. 붕괴한 전사도 같은 이유로 문장을 갖는다.
  */
 const RESOLUTION: Record<TranscriptFailureCause, string | null> = {
   modelMissing:
     'No transcription model was found. Put a model file in place and choose it in Settings, then start the transcription again.',
   modelUnusable:
     'The chosen model could not be used. Choose a different model in Settings, then start the transcription again.',
+  outputUnusable: TRANSCRIPTION_COLLAPSED_NOTICE,
   other: null,
   unknown: null,
 };
@@ -278,7 +356,13 @@ export function transcriptTab(
 
   // 1. 지금 이 녹음에 대해 벌어지고 있는 일.
   if (mine?.state === 'running') {
-    return { kind: 'running', text: RUNNING_TRANSCRIPT_TEXT, kept };
+    return {
+      kind: 'running',
+      text: RUNNING_TRANSCRIPT_TEXT,
+      kept,
+      partial: partialLines(mine),
+      progressLabel: progressLabel(mine.progress),
+    };
   }
   if (mine?.state === 'failed') {
     return failedTranscript(recording.id, mine.failure, kept);
@@ -289,7 +373,8 @@ export function transcriptTab(
     return { kind: 'pending', text: PENDING_TRANSCRIPT_TEXT, kept };
   }
   if (recording.transcriptionStatus === 'running') {
-    return { kind: 'running', text: RUNNING_TRANSCRIPT_TEXT, kept };
+    // 저장된 상태만 아는 자리다 — 이 앱이 돌리는 전사가 아니므로 보여 줄 미리보기가 없다.
+    return { kind: 'running', text: RUNNING_TRANSCRIPT_TEXT, kept, partial: [], progressLabel: null };
   }
   if (recording.transcriptionStatus === 'failed') {
     // 마지막 시도가 실패한 채로 남아 있다. 이 앱이 그 시도를 하지 않았으므로 이유는 모르며,
@@ -305,6 +390,8 @@ export function transcriptTab(
       language: transcript.language,
       engine: transcript.engine,
       model: transcript.model,
+      // 받은 문장을 그대로 나른다. 없으면 없는 채로 나른다 — 여기서 만들지 않는다.
+      transcriptionLabel: transcript.transcriptionLabel,
     };
   }
   if (recording.currentTranscriptId !== null) {
@@ -384,6 +471,9 @@ function failureCause(failure: Failure | null): TranscriptFailureCause {
       return 'modelMissing';
     case 'transcriptionModelUnusable':
       return 'modelUnusable';
+    // 엔진은 끝났는데 그 결과를 전사로 쓸 수 없다 — 붕괴가 여기로 온다 (ADR-0007 §18.4).
+    case 'transcriptionOutputUnusable':
+      return 'outputUnusable';
     default:
       return 'other';
   }

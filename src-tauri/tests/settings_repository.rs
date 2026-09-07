@@ -23,8 +23,12 @@ static COUNTER: AtomicUsize = AtomicUsize::new(0);
 /// 아래의 "예전 스키마" fixture들은 설정 migration을 흉내 내는 것이 목적이라 `settings`만
 /// 세운다. 하지만 실제 version 3~6 사용자 DB에는 version 2의 테이블도 함께 있고, 그 사실이
 /// 빠져 있으면 domain 테이블에 열을 더하는 migration이 **이 fixture에서만** 실패한다
-/// (`docs/ADR-0009-notion-and-export.md` §8.4의 version 8). 값을 넣지 않으므로 이 파일이
-/// 판정하는 것 — 저장된 설정 값이 그대로 남는가 — 은 달라지지 않는다.
+/// (`docs/ADR-0009-notion-and-export.md` §8.4의 version 8, `phase-prompt/05.6`의 version 10).
+/// 값을 넣지 않으므로 이 파일이 판정하는 것 — 저장된 설정 값이 그대로 남는가 — 은 달라지지
+/// 않는다.
+///
+/// 참조 무결성 절은 적지 않는다. 여기 없는 `recordings`를 가리키게 하려는 것이 아니라,
+/// **열을 더하는 migration이 대상을 찾을 수 있게 하는 것**이 이 fixture의 전부다.
 const LEGACY_DOMAIN_TABLES: &str = "CREATE TABLE IF NOT EXISTS notion_syncs (
          recording_id TEXT PRIMARY KEY,
          page_id      TEXT,
@@ -32,6 +36,17 @@ const LEGACY_DOMAIN_TABLES: &str = "CREATE TABLE IF NOT EXISTS notion_syncs (
          status       TEXT NOT NULL
              CHECK (status IN ('none','pending','running','done','failed')),
          error        TEXT
+     );
+
+     CREATE TABLE IF NOT EXISTS transcripts (
+         id           TEXT PRIMARY KEY,
+         recording_id TEXT NOT NULL,
+         language     TEXT,
+         raw_text     TEXT NOT NULL,
+         created_at   TEXT NOT NULL,
+         engine       TEXT NOT NULL,
+         model        TEXT NOT NULL,
+         UNIQUE (id, recording_id)
      );";
 
 /// 시스템 임시 디렉터리 아래의 빈 디렉터리. Drop 시 지운다.
@@ -131,6 +146,51 @@ fn defaults_are_returned_when_nothing_has_been_saved() {
         loaded.notion_parent_page_id, None,
         "Notion destination의 기본값도 '아직 고르지 않음'이다 — 어떤 페이지도 굳혀 두지 않는다"
     );
+    assert_eq!(
+        loaded.transcription_language, None,
+        "전사 언어의 기본값도 '아직 고르지 않음'이다 — 그것은 자동 감지를 뜻하며, \
+         앱이 로캘을 짐작해 언어를 굳혀 두지 않는다 (ADR-0007 §17.1.4-1)"
+    );
+    close(connection);
+}
+
+#[test]
+fn the_default_transcription_language_is_declared_in_code_and_is_not_a_language() {
+    // ADR-0007 §17.1: 아무도 고르지 않은 자리에 라이브러리 기본값 "en"이 들어가 한국어 회의가
+    // 통째로 무너졌다. 그래서 이 값의 기본은 **어떤 언어도 아닌 '고르지 않음'**이어야 하고,
+    // 그 정책은 스키마의 DEFAULT 절이 아니라 코드에 선언돼 있어야 한다.
+    assert_eq!(
+        Settings::DEFAULT.transcription_language,
+        None,
+        "기본값 정책은 어떤 언어도 고르지 않는다"
+    );
+
+    let dir = TempDir::new("default-language");
+    let connection = open(&dir);
+
+    // 스키마에 DEFAULT 절이 있으면 행을 만들 때 값이 채워진다. 채워지지 않아야 한다.
+    connection
+        .execute("INSERT INTO settings (id, automatic_processing) VALUES (1, 0)", [])
+        .expect("설정 행 하나를 최소한으로 만들 수 있어야 한다");
+    let stored: Option<String> = connection
+        .query_row(
+            "SELECT transcription_language FROM settings WHERE id = 1",
+            [],
+            |row| row.get(0),
+        )
+        .expect("저장된 열을 읽을 수 있어야 한다");
+
+    assert_eq!(
+        stored, None,
+        "스키마가 언어를 채워 넣으면 고른 적 없는 값이 고른 값처럼 보인다"
+    );
+    assert_eq!(
+        settings::load(&connection)
+            .expect("읽을 수 있어야 한다")
+            .transcription_language,
+        None,
+        "읽는 쪽도 비어 있는 값을 다른 언어로 채우지 않는다"
+    );
     close(connection);
 }
 
@@ -227,6 +287,7 @@ fn turning_automatic_transcription_on_does_not_touch_the_other_settings() {
         automatic_processing: false,
         automatic_transcription: false,
         transcription_model: Some("ggml-base.bin".to_string()),
+        transcription_language: Some("ko".to_string()),
         default_microphone: Some("0:Studio Mic".to_string()),
         ai_provider: Some("some-provider".to_string()),
         ai_base_url: Some("http://127.0.0.1:9999".to_string()),
@@ -343,6 +404,8 @@ fn saved_values_survive_closing_and_reopening_the_database() {
         automatic_processing: true,
         automatic_transcription: true,
         transcription_model: Some("ggml-base.bin".to_string()),
+        // ADR-0007 §17.1.5의 전사 언어도 재시작 후에도 그대로여야 한다.
+        transcription_language: Some("ko".to_string()),
         default_microphone: Some("0:Studio Mic".to_string()),
         // ADR-0008 §11.1의 세 값. 재시작 후에도 그대로여야 한다.
         ai_provider: Some("some-provider".to_string()),
@@ -833,6 +896,7 @@ fn saving_settings_does_not_disturb_other_stored_data() {
             automatic_processing: true,
             automatic_transcription: true,
             transcription_model: Some("ggml-base.bin".to_string()),
+            transcription_language: Some("ko".to_string()),
             default_microphone: Some("0:Desk Mic".to_string()),
             ai_provider: Some("some-provider".to_string()),
             ai_base_url: Some("http://127.0.0.1:9999".to_string()),
@@ -890,7 +954,10 @@ fn the_settings_schema_has_no_secret_columns() {
             // Phase 5가 더한 값 하나다 (ADR-0009 §8.4). 어느 페이지 아래에 만드는가일 뿐이며
             // **여기서 멈춘다** — Notion integration 자격증명을 담을 자리도, 언젠가 쓸지 모르는
             // 빈 열도 없다 (INV-7 · ADR-0009 §10.5).
-            "notion_parent_page_id".to_string()
+            "notion_parent_page_id".to_string(),
+            // Phase 5.6이 더한 값 하나다 (ADR-0007 §17.1.5). §5 D가 처음부터 요구하던 항목이며,
+            // 무슨 언어로 듣는가일 뿐이므로 secret이 아니다.
+            "transcription_language".to_string()
         ],
         "설정 테이블에는 지금까지의 Phase가 다루는 값만 있어야 한다"
     );
@@ -1107,4 +1174,230 @@ fn clearing_the_notion_destination_is_remembered_as_not_chosen() {
     );
     assert_eq!(rows(&connection), 1, "행이 늘지 않는다");
     close(connection);
+}
+
+// --- 전사 언어 (version 9 · ADR-0007 §17.1) -------------------------------------------
+
+#[test]
+fn a_chosen_transcription_language_survives_closing_and_reopening_the_database() {
+    let dir = TempDir::new("transcription-language");
+
+    let first = open(&dir);
+    settings::save(
+        &first,
+        &Settings {
+            transcription_language: Some("ko".to_string()),
+            ..Settings::DEFAULT
+        },
+    )
+    .expect("언어만 골라 저장할 수 있어야 한다");
+    close(first);
+
+    let second = open(&dir);
+    let loaded = settings::load(&second).expect("다시 열어도 설정을 읽을 수 있어야 한다");
+
+    assert_eq!(
+        loaded.transcription_language,
+        Some("ko".to_string()),
+        "고른 언어가 재시작 뒤에도 그대로여야 한다 — 자동 감지로 되돌아가지 않는다"
+    );
+    assert_eq!(
+        loaded.transcription_model, None,
+        "언어를 골랐다고 모델이 함께 정해지지 않는다"
+    );
+    assert_eq!(rows(&second), 1, "설정은 여전히 한 행이다");
+    close(second);
+}
+
+#[test]
+fn saving_other_settings_does_not_clear_the_chosen_transcription_language() {
+    // 이 값이 저장 경로를 지나지 않으면, 다른 설정을 한 번 저장한 것만으로 고른 언어가
+    // 조용히 사라지고 그 뒤의 전사는 말없이 자동 감지로 돌아간다 (ADR-0007 §17.1).
+    let dir = TempDir::new("language-kept");
+    let saved = Settings {
+        recordings_directory: Some("/tmp/molt-note-recordings".to_string()),
+        automatic_processing: false,
+        automatic_transcription: true,
+        transcription_model: Some("ggml-base.bin".to_string()),
+        transcription_language: Some("ko".to_string()),
+        default_microphone: Some("0:Studio Mic".to_string()),
+        ai_provider: None,
+        ai_base_url: None,
+        ai_model: None,
+        notion_parent_page_id: None,
+    };
+
+    let connection = open(&dir);
+    settings::save(&connection, &saved).expect("먼저 저장할 수 있어야 한다");
+    settings::save(
+        &connection,
+        &Settings {
+            automatic_processing: true,
+            ..saved.clone()
+        },
+    )
+    .expect("다른 값만 바꿔 저장할 수 있어야 한다");
+
+    let loaded = settings::load(&connection).expect("설정을 읽을 수 있어야 한다");
+
+    assert_eq!(
+        loaded.transcription_language,
+        Some("ko".to_string()),
+        "다른 설정을 저장하는 것이 고른 언어를 지우면 안 된다"
+    );
+    assert_eq!(
+        loaded,
+        Settings {
+            automatic_processing: true,
+            ..saved
+        },
+        "바꾼 값 하나 말고는 전부 그대로여야 한다"
+    );
+    close(connection);
+}
+
+#[test]
+fn a_language_code_the_engine_may_not_know_is_still_the_saved_choice() {
+    // 저장소는 그 코드가 엔진이 아는 언어인지 묻지 않는다 — `transcription_model` ·
+    // `ai_model`과 같은 규칙이며, 모른다고 해서 조용히 지우거나 다른 언어로 바꾸지 않는다.
+    let dir = TempDir::new("unknown-language");
+
+    let connection = open(&dir);
+    settings::save(
+        &connection,
+        &Settings {
+            transcription_language: Some("알-수-없는-코드".to_string()),
+            ..Settings::DEFAULT
+        },
+    )
+    .expect("저장할 수 있어야 한다");
+
+    assert_eq!(
+        settings::load(&connection)
+            .expect("읽을 수 있어야 한다")
+            .transcription_language,
+        Some("알-수-없는-코드".to_string()),
+        "모르는 코드라는 것이 이 값이 틀렸다는 뜻은 아니다"
+    );
+    close(connection);
+}
+
+#[test]
+fn clearing_the_transcription_language_is_remembered_as_automatic_detection() {
+    // '고르지 않음'으로 되돌리는 것도 사용자의 선택이며, 그것은 자동 감지를 뜻한다.
+    // 이전 값이 남아 부활하면 사용자가 끈 지정이 계속 살아 있는 것이 된다.
+    let dir = TempDir::new("clear-language");
+
+    let connection = open(&dir);
+    settings::save(
+        &connection,
+        &Settings {
+            transcription_language: Some("ko".to_string()),
+            ..Settings::DEFAULT
+        },
+    )
+    .expect("먼저 고른 값을 저장할 수 있어야 한다");
+    settings::save(&connection, &Settings::DEFAULT).expect("다시 비운 값을 저장할 수 있어야 한다");
+
+    assert_eq!(
+        settings::load(&connection)
+            .expect("읽을 수 있어야 한다")
+            .transcription_language,
+        None
+    );
+    assert_eq!(rows(&connection), 1, "행이 늘지 않는다");
+    close(connection);
+}
+
+#[test]
+fn a_database_written_before_the_transcription_language_existed_keeps_its_values() {
+    // version 8까지만 적용된 DB에 값이 이미 있는 상황이다 — 전사 언어가 생기기 전이다.
+    // 새 migration은 그 행을 지우거나 다시 만들지 않고 **열만 더한다** (INV-4의 정신).
+    let dir = TempDir::new("before-language");
+
+    let older = Connection::open(dir.database_path()).expect("빈 DB를 만들 수 있어야 한다");
+    older
+        .execute_batch(
+            "CREATE TABLE schema_migrations (
+                 version    INTEGER PRIMARY KEY,
+                 name       TEXT NOT NULL,
+                 applied_at TEXT NOT NULL
+             );
+             INSERT INTO schema_migrations (version, name, applied_at)
+             VALUES (3, 'create_settings', datetime('now')),
+                    (4, 'add_default_microphone_to_settings', datetime('now')),
+                    (5, 'add_transcription_settings', datetime('now')),
+                    (6, 'add_ai_provider_settings', datetime('now')),
+                    (7, 'add_notion_settings', datetime('now'));
+             CREATE TABLE settings (
+                 id                      INTEGER PRIMARY KEY CHECK (id = 1),
+                 recordings_directory    TEXT,
+                 automatic_processing    INTEGER NOT NULL
+                     CHECK (automatic_processing IN (0, 1)),
+                 default_microphone      TEXT,
+                 automatic_transcription INTEGER CHECK (automatic_transcription IN (0, 1)),
+                 transcription_model     TEXT,
+                 ai_provider             TEXT,
+                 ai_base_url             TEXT,
+                 ai_model                TEXT,
+                 notion_parent_page_id   TEXT
+             );
+             INSERT INTO settings (id, recordings_directory, automatic_processing,
+                                   default_microphone, automatic_transcription,
+                                   transcription_model, ai_provider, ai_base_url, ai_model,
+                                   notion_parent_page_id)
+             VALUES (1, '/tmp/before-language', 1, '0:Studio Mic', 1, 'ggml-base.bin',
+                     'some-provider', 'http://127.0.0.1:9999', 'some-model', 'some-parent-page');
+             PRAGMA user_version = 7;",
+        )
+        .expect("사전 조건: 전사 언어가 없던 스키마를 만든다");
+    older
+        .execute_batch(LEGACY_DOMAIN_TABLES)
+        .expect("사전 조건: 그 시점의 domain 테이블도 함께 있다");
+    close(older);
+
+    // 여기서 version 8과 9가 적용된다.
+    let upgraded = open(&dir);
+    let loaded = settings::load(&upgraded).expect("올린 뒤에도 설정을 읽을 수 있어야 한다");
+
+    assert_eq!(
+        loaded.recordings_directory,
+        Some("/tmp/before-language".to_string()),
+        "이미 저장돼 있던 값이 그대로여야 한다"
+    );
+    assert!(loaded.automatic_processing);
+    assert!(loaded.automatic_transcription);
+    assert_eq!(loaded.transcription_model, Some("ggml-base.bin".to_string()));
+    assert_eq!(loaded.default_microphone, Some("0:Studio Mic".to_string()));
+    assert_eq!(loaded.ai_provider, Some("some-provider".to_string()));
+    assert_eq!(loaded.ai_base_url, Some("http://127.0.0.1:9999".to_string()));
+    assert_eq!(loaded.ai_model, Some("some-model".to_string()));
+    assert_eq!(
+        loaded.notion_parent_page_id,
+        Some("some-parent-page".to_string())
+    );
+    assert_eq!(
+        loaded.transcription_language, None,
+        "새로 생긴 열은 '아직 고르지 않음'(= 자동 감지)으로 시작한다 — \
+         다른 값에서 채워지지도, 언어 하나로 굳혀지지도 않는다"
+    );
+    assert_eq!(rows(&upgraded), 1, "행이 늘거나 다시 만들어지지 않았다");
+
+    // 그리고 그 행은 이제 새 값도 담을 수 있다 — 올린 스키마가 반쪽이 아니다.
+    settings::save(
+        &upgraded,
+        &Settings {
+            transcription_language: Some("ko".to_string()),
+            ..loaded
+        },
+    )
+    .expect("올린 뒤에는 새 값도 저장할 수 있어야 한다");
+    let again = settings::load(&upgraded).expect("다시 읽을 수 있어야 한다");
+    assert_eq!(again.transcription_language, Some("ko".to_string()));
+    assert_eq!(
+        again.transcription_model,
+        Some("ggml-base.bin".to_string()),
+        "새 값을 저장하는 것이 예전 값을 지우지 않는다"
+    );
+    close(upgraded);
 }

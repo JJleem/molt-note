@@ -1,0 +1,693 @@
+diff --git a/src-tauri/src/audio/capture.rs b/src-tauri/src/audio/capture.rs
+index 2e08bd4..81e19b4 100644
+--- a/src-tauri/src/audio/capture.rs
++++ b/src-tauri/src/audio/capture.rs
+@@ -28,6 +28,16 @@
+ //! 두면 큐에 이미 들어와 있던 — 즉 일시정지 **이전에 녹음된** — 샘플이 그 플래그에 휩쓸려
+ //! 사라진다. 같은 통로를 쓰면 표시가 샘플 사이의 정확한 자리에 놓인다.
+ //!
++//! ## 입력 레벨은 **파일에 쓰이는 그 샘플**에서 잰다 (ADR-0003 §16.2)
++//!
++//! 재는 자리는 [`drain`] 하나다 — 실시간 오디오 콜백([`super::system_capture`])이 아니다.
++//! 그래서 **일시정지 구간의 샘플이 파일에 도달하지 않는 것과 같은 이유로 레벨도 그때는
++//! 갱신되지 않는다.** 콜백에서 재면 사람이 보는 값과 파일에 남은 것이 어긋나 — 파일에 없는
++//! 소리를 보여 주게 된다.
++//!
++//! **이 모듈은 샘플을 읽기만 한다.** 게인 조정도 정규화도 없고, dBFS 환산과 판정 구간도
++//! 여기 없다 — 그 규칙이 사는 자리는 [`super::level`] 하나다 (§16.3 · §16.5).
++//!
+ //! ## 만들어지는 포맷 — 확인된 것과 확인되지 않은 것
+ //!
+ //! **확인된 것**: 이 코드는 `hound`로 **16-bit PCM WAV(RIFF)** 를 쓴다. 샘플레이트와 채널
+@@ -42,8 +52,10 @@ use std::fs;
+ use std::io::BufWriter;
+ use std::path::{Path, PathBuf};
+ use std::sync::mpsc::{sync_channel, Receiver, SyncSender, TrySendError};
++use std::sync::{Arc, Mutex};
+ use std::thread::JoinHandle;
+ 
++use crate::audio::level::{InputLevel, LevelReading};
+ use crate::domain::{Failure, FailureKind};
+ 
+ /// 이 경로가 만드는 컨테이너. 코드가 실제로 쓰는 것이며 추정이 아니다.
+@@ -226,6 +238,8 @@ pub struct ActiveCapture {
+     stop_device: Box<dyn FnOnce() -> Result<(), Failure> + Send>,
+     /// 파일에 쓰는 쪽으로 가는 통로. 이것을 닫는 것이 "더 이상 샘플이 없다"는 신호다.
+     packets: SyncSender<Packet>,
++    /// 파일에 실제로 쓰인 샘플에서 쌓인 것. 쓰는 쪽과 **같은 값을 함께 본다** (모듈 주석).
++    level: Arc<Mutex<InputLevel>>,
+     writer: JoinHandle<Result<(), Failure>>,
+ }
+ 
+@@ -235,6 +249,16 @@ impl ActiveCapture {
+         &self.output_path
+     }
+ 
++    /// 지금까지 **파일에 쓰인** 샘플에서 만든 입력 레벨 (ADR-0003 §16.2 · §16.3).
++    ///
++    /// **아직 한 샘플도 파일에 쓰이지 않았으면 없음이다** — 0이 아니다. 일시정지 구간의
++    /// 샘플은 파일에 도달하지 않으므로 그동안 이 값도 자라지 않는다.
++    ///
++    /// 수치와 판정을 만드는 것은 [`super::level`]이며, 여기서는 그 값을 꺼내 오기만 한다.
++    pub fn level(&self) -> Option<LevelReading> {
++        self.level.lock().ok().and_then(|level| level.reading())
++    }
++
+     /// 여기서부터 들어오는 샘플을 파일에 쓰지 않는다.
+     ///
+     /// **장치도 파일도 그대로 열려 있다.** 표시가 도착하기 전까지 들어온 샘플은 전부
+@@ -274,6 +298,7 @@ impl ActiveCapture {
+             output_path,
+             stop_device,
+             packets,
++            level: _,
+             writer,
+         } = self;
+ 
+@@ -348,9 +373,13 @@ pub fn start(
+         }
+     };
+ 
++    // 레벨은 쓰는 쪽에서 쌓이고 여기서 읽힌다 — 재는 자리가 파일에 쓰는 자리와 같다 (§16.2).
++    let level = Arc::new(Mutex::new(InputLevel::new()));
++    let measured = Arc::clone(&level);
++
+     let writer = match std::thread::Builder::new()
+         .name("molt-note-capture-writer".to_string())
+-        .spawn(move || drain(receiver, file))
++        .spawn(move || drain(receiver, file, &measured))
+     {
+         Ok(handle) => handle,
+         Err(error) => {
+@@ -369,6 +398,7 @@ pub fn start(
+         output_path,
+         stop_device: open.stop,
+         packets: sender,
++        level,
+         writer,
+     })
+ }
+@@ -421,13 +451,27 @@ pub fn file_size(path: &Path) -> Result<u64, Failure> {
+ /// 일시정지 구간의 샘플은 **여기서 버려진다** — 파일에 도달하지 않는다. 표시가 샘플과 같은
+ /// 통로로 오므로 어느 샘플이 그 구간의 것인지 판단할 필요가 없다 (모듈 주석).
+ ///
++/// **입력 레벨도 같은 자리에서 갱신된다** (ADR-0003 §16.2). 파일에 쓰인 샘플만 레벨에
++/// 들어가므로, 일시정지 구간은 파일에서 빠지는 것과 똑같이 레벨에서도 빠진다. 여기서 하는
++/// 일은 읽고 넘기는 것뿐이다 — **파일에 쓰이는 샘플을 바꾸지 않는다** (§16.5).
++///
+ /// **이 함수 안에 panic 경로가 없다.** 여기서 죽으면 파일이 확정되지 않은 채 남는다.
+-fn drain(receiver: Receiver<Packet>, mut file: WavFile) -> Result<(), Failure> {
++/// 레벨을 빌리지 못하는 경우에도 파일 쓰기를 멈추지 않는다 — 녹음이 표시보다 우선한다.
++fn drain(
++    receiver: Receiver<Packet>,
++    mut file: WavFile,
++    level: &Mutex<InputLevel>,
++) -> Result<(), Failure> {
+     let mut writing = true;
+     for packet in receiver {
+         match packet {
+-            Packet::Samples(chunk) if writing => file.write(&chunk)?,
+-            // 일시정지 구간이다. 이 샘플은 녹음이 아니다.
++            Packet::Samples(chunk) if writing => {
++                file.write(&chunk)?;
++                if let Ok(mut level) = level.lock() {
++                    level.push(&chunk);
++                }
++            }
++            // 일시정지 구간이다. 이 샘플은 녹음이 아니다 — 파일에도 레벨에도 들어가지 않는다.
+             Packet::Samples(_) => {}
+             Packet::Paused => writing = false,
+             Packet::Resumed => writing = true,
+@@ -668,6 +712,15 @@ mod tests {
+ 
+     /// 가짜 통로 하나에 정해진 것을 흘려보내고, 만들어진 파일의 샘플을 돌려준다.
+     fn drained(label: &str, packets: Vec<Packet>) -> (TempDir, Vec<i16>) {
++        let (temp, samples, _) = drained_measuring(label, packets);
++        (temp, samples)
++    }
++
++    /// [`drained`]와 같은 것을 하고, **그 통로가 재어 놓은 레벨까지** 함께 돌려준다.
++    fn drained_measuring(
++        label: &str,
++        packets: Vec<Packet>,
++    ) -> (TempDir, Vec<i16>, Option<LevelReading>) {
+         let temp = TempDir::new(label);
+         let path = temp.path().join("drained.wav");
+         let file = WavFile::create(&path, CaptureFormat::pcm_16bit(16_000, 1))
+@@ -679,9 +732,10 @@ mod tests {
+         }
+         drop(sender);
+ 
+-        drain(receiver, file).expect("파일을 확정할 수 있어야 한다");
+-        let samples = samples_in(&path);
+-        (temp, samples)
++        let level = Mutex::new(InputLevel::new());
++        drain(receiver, file, &level).expect("파일을 확정할 수 있어야 한다");
++        let reading = level.lock().expect("레벨을 빌릴 수 있어야 한다").reading();
++        (temp, samples_in(&path), reading)
+     }
+ 
+     #[test]
+@@ -741,6 +795,43 @@ mod tests {
+         assert_eq!(samples, [7; 4], "멈춘 뒤의 것은 들어가지 않는다");
+     }
+ 
++    #[test]
++    fn the_level_sees_exactly_the_samples_that_reached_the_file() {
++        // 재는 자리가 쓰는 자리와 같다는 것 그 자체다 (ADR-0003 §16.2). 멈춰 있는 동안
++        // 들어온 **큰 소리**를 골랐다 — 그것이 레벨에 섞이면 값이 크게 달라지므로 숨을 수 없다.
++        let (_temp, samples, reading) = drained_measuring(
++            "level-follows-the-file",
++            vec![
++                Packet::Samples(vec![1_685; 512]),
++                Packet::Paused,
++                Packet::Samples(vec![31_000; 512]),
++                Packet::Resumed,
++                Packet::Samples(vec![0; 512]),
++            ],
++        );
++        let reading = reading.expect("파일에 쓰인 샘플이 있으면 값이 있다");
++
++        assert_eq!(samples.len(), 1_024, "일시정지 구간은 파일에 없다");
++        assert!(!samples.contains(&31_000));
++        assert_eq!(reading.sample_count, 1_024, "레벨이 본 것도 그 1024개다");
++        assert_eq!(
++            reading.peak_amplitude, 1_685,
++            "멈춰 있는 동안의 큰 소리는 레벨에도 들어가지 않는다"
++        );
++    }
++
++    #[test]
++    fn a_capture_that_wrote_nothing_has_no_level_rather_than_zero() {
++        // 파일이 비어 있는 것과 "소리가 없다"는 다른 말이다 (ADR-0003 §16.3).
++        let (_temp, samples, reading) = drained_measuring(
++            "level-absent",
++            vec![Packet::Paused, Packet::Samples(vec![9_000; 8])],
++        );
++
++        assert!(samples.is_empty(), "쓰인 것이 없다");
++        assert_eq!(reading, None, "재지 않은 것을 0이라고 말하지 않는다");
++    }
++
+     #[test]
+     fn a_file_that_cannot_be_created_becomes_a_failure_instead_of_a_panic() {
+         // 디렉터리가 없다. 존재하지 않는 자리에 파일을 만들 수는 없다.
+diff --git a/src-tauri/src/commands/mod.rs b/src-tauri/src/commands/mod.rs
+index cb8bc97..57df45e 100644
+--- a/src-tauri/src/commands/mod.rs
++++ b/src-tauri/src/commands/mod.rs
+@@ -92,6 +92,7 @@ pub mod export;
+ pub mod notes;
+ pub mod notion;
+ pub mod payload;
++pub mod saved_file;
+ pub mod transcriber;
+ 
+ use std::path::{Path, PathBuf};
+@@ -124,11 +125,12 @@ pub use notes::NoteGenerator;
+ pub use notion::{NotionSendStatus, NotionSender};
+ pub use payload::{
+     AiNotePayload, AiNoteStatusPayload, AiProviderStatusPayload, CaptureReportPayload,
+-    ExportedFilePayload, InputDevicePayload, MissingAudioPayload, NewRecording,
++    ExportedFilePayload, InputDevicePayload, InputLevelPayload, MissingAudioPayload, NewRecording,
+     NotionConnectionPayload, NotionSendStatusPayload, NotionSyncPayload, NotionTokenStatusPayload,
+     RecordingPayload, SessionStatusPayload, SettingsPayload, StoppedRecordingPayload,
+     StructuredNotePayload, TranscriptPayload, TranscriptSegmentPayload, TranscriptionStatusPayload,
+ };
++pub use saved_file::SavedFiles;
+ pub use transcriber::Transcriber;
+ 
+ /// 앱이 들고 있는 로컬 저장소.
+@@ -639,23 +641,28 @@ impl Recorder {
+         Ok(CaptureReportPayload::new(report, summary))
+     }
+ 
+-    /// 지금 녹음이 어떤 상태이고 얼마나 진행됐는지.
++    /// 지금 녹음이 어떤 상태이고, 얼마나 진행됐고, **입력 레벨이 어떤지.**
+     ///
+     /// 진행 중인 녹음이 없으면 **아직 시작하지 않은 session의 답**을 그대로 돌려준다 —
+     /// `idle`과 `0:00`이다. 여기에 특별한 빈 값을 따로 만들지 않는다.
++    ///
++    /// **레벨은 그때 없음이다 — 0이 아니다** (ADR-0003 §16.3). 녹음 중이더라도 아직 파일에
++    /// 쓰인 샘플이 하나도 없으면 마찬가지로 없음이다: 재지 않은 것을 "소리 없음"이라고
++    /// 말하지 않는다. 값을 만드는 자리는 [`ActiveCapture::level`]이며 여기서는 옮기기만 한다.
+     pub fn status(&self) -> Result<SessionStatusPayload, Failure> {
+         let now = self.clock.now_ms();
+         let active = self.active()?;
+         let idle = RecordingSession::idle();
+-        let session = match active.as_ref() {
+-            Some(recording) => &recording.session,
+-            None => &idle,
++        let (session, level) = match active.as_ref() {
++            Some(recording) => (&recording.session, recording.capture.level()),
++            None => (&idle, None),
+         };
+ 
+         Ok(SessionStatusPayload::new(
+             session.state(),
+             session.elapsed_ms(now),
+             session.elapsed_label(now),
++            level,
+         ))
+     }
+ 
+@@ -1132,6 +1139,27 @@ pub fn export_ai_request(
+     exporter.export_ai_request(&recording_id, notes::parse_mode(&mode)?)
+ }
+ 
++/// 이미 만들어진 파일이 **놓인 자리를 연다** (`phase-prompt/05.6` 성공 기준 2 · R-4).
++///
++/// **파일을 만들지도 고치지도 지우지도 않는다.** 이 이름이 하는 일은 이미 있는 것을 사람에게
++/// 보여 주는 것뿐이며, 그래서 export 표면은 여전히 파일 하나를 만드는 이름 둘이다
++/// ([`export_markdown`] · [`export_ai_request`] · `tests/ipc-boundary.test.ts`).
++///
++/// **화면이 임의 경로를 열 수 없다.** 열리는 것은 이 앱의 `exports/` 아래에 실제로 있는 파일뿐이며,
++/// 그 판정은 [`SavedFiles::show`] 한 곳에 있다 — 저장된 녹음의 재생에서 asset protocol의 범위를
++/// backend가 정하는 것과 같은 규약이다 (`crate::run` · PRODUCT-SPEC §12).
++///
++/// **열 수 없는 시스템에서는 조용히 아무 일도 하지 않지 않는다** — 그 사실이 §13의 실패로
++/// 도착한다 (`crate::platform::file_manager`). 어느 실패에서도 파일은 그 자리에 그대로 있고,
++/// 화면은 전체 경로를 계속 보여 준다 (INV-3).
++///
++/// `async`인 이유는 [`export_markdown`]과 같다 — 파일 관리자를 띄우는 동안 창이 함께 멈추지
++/// 않게 한다.
++#[tauri::command(async)]
++pub fn show_saved_file(saved_files: State<'_, SavedFiles>, path: String) -> Result<(), Failure> {
++    saved_files.show(&path)
++}
++
+ /// Recording 하나의 Notion 전송을 시작한다. **돌아오는 것은 접수 사실이지 전송 결과가 아니다.**
+ ///
+ /// 실제 전송은 배경 스레드에서 돌므로 이 호출은 바로 끝난다 — 1시간짜리 transcript를 걸어도 이
+diff --git a/src-tauri/src/commands/payload.rs b/src-tauri/src/commands/payload.rs
+index 4e42c26..c95c4bf 100644
+--- a/src-tauri/src/commands/payload.rs
++++ b/src-tauri/src/commands/payload.rs
+@@ -17,10 +17,12 @@ use serde::{Deserialize, Serialize};
+ 
+ use crate::ai::note::{decode_content, MeetingNote, StructuredNote, StudyNote, SummaryNote};
+ use crate::ai::provider::{Availability, ProviderDescriptor};
+-use crate::audio::{CaptureReport, InputDevice, SessionState, SessionSummary};
++use crate::audio::{
++    CaptureReport, InputDevice, LevelReading, LevelVerdict, SessionState, SessionSummary,
++};
+ use crate::domain::{
+-    AiNote, Failure, NoteType, NotionSync, ProcessingStatus, Recording, RecordingId, RecordingView,
+-    Settings, Transcript, TranscriptSegment,
++    format_duration_ms, AiNote, Failure, NoteType, NotionSync, ProcessingStatus, Recording,
++    RecordingId, RecordingView, Settings, Transcript, TranscriptSegment,
+ };
+ 
+ use super::notion::NotionSendStatus;
+@@ -250,7 +252,10 @@ impl From<&RecordingPayload> for MissingAudioPayload {
+ /// **길이는 Rust가 세고 Rust가 문장까지 만든다.** `elapsed_ms`와 `elapsed_label`을 함께
+ /// 보내는 이유가 그것이다 — TypeScript에 길이 계산을 만들지 않는다
+ /// (`tests/screen-boundary.test.ts` · [`RecordingPayload::duration_label`]).
+-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
++///
++/// 입력 레벨도 같은 규약을 따른다 ([`InputLevelPayload`]) — 수치와 문장이 함께 오고,
++/// **오디오 샘플은 오지 않는다** (INV-6 · ADR-0003 §16.3).
++#[derive(Debug, Clone, PartialEq, Serialize)]
+ #[serde(rename_all = "camelCase")]
+ pub struct SessionStatusPayload {
+     /// `idle · recording · paused · stopped` 중 하나.
+@@ -259,19 +264,75 @@ pub struct SessionStatusPayload {
+     pub elapsed_ms: i64,
+     /// 같은 길이를 사람이 읽는 문장으로 (예: `0:07`).
+     pub elapsed_label: String,
++    /// 지금까지 **파일에 쓰인** 샘플의 입력 레벨.
++    ///
++    /// **진행 중인 녹음이 없거나 아직 샘플이 하나도 없으면 없음이다 — 0이 아니다**
++    /// (ADR-0003 §16.3). 재지 않은 것을 "소리 없음"이라고 말하지 않는다.
++    pub level: Option<InputLevelPayload>,
+ }
+ 
+ impl SessionStatusPayload {
+-    /// 상태와 경과 시간 하나를 값으로 만든다.
+-    pub(super) fn new(state: SessionState, elapsed_ms: i64, elapsed_label: String) -> Self {
++    /// 상태 · 경과 시간 · 입력 레벨 하나를 값으로 만든다.
++    pub(super) fn new(
++        state: SessionState,
++        elapsed_ms: i64,
++        elapsed_label: String,
++        level: Option<LevelReading>,
++    ) -> Self {
+         Self {
+             state: state.as_str().to_string(),
+             elapsed_ms,
+             elapsed_label,
++            level: level.map(InputLevelPayload::from),
++        }
++    }
++}
++
++/// 진행 중인 녹음의 입력 레벨 (ADR-0003 §16.3).
++///
++/// **나가는 것은 네 값뿐이다** — 평균 RMS의 dBFS · 전체 피크의 dBFS · 판정 하나 · 사람이 읽는
++/// 짧은 문장. **오디오 샘플은 이 경계를 지나지 않는다**: 파형도 스펙트럼도 샘플 배열도 없다.
++/// INV-6이 오디오가 기기 밖으로 나가는 길을 막고, 이 값은 **앱 안의 IPC 경계에서도 같은 선**을
++/// 지킨다 — 화면이 오디오를 받을 이유가 없다 (§12 Privacy Boundary).
++///
++/// 수치도 판정도 문장도 [`crate::audio::level`] 한 자리에서 만들어진 것을 그대로 옮긴다.
++/// **여기서 dBFS를 다시 계산하지 않고 임계값을 다시 두지도 않는다** — 화면도 마찬가지다.
++#[derive(Debug, Clone, PartialEq, Serialize)]
++#[serde(rename_all = "camelCase")]
++pub struct InputLevelPayload {
++    /// 평균 RMS의 dBFS. 소수 한 자리이며 판정은 이 값으로 한다.
++    pub average_dbfs: f64,
++    /// 전체 피크의 dBFS. 소수 한 자리. **판정에 쓰이지 않는다** — 함께 보는 값이다.
++    pub peak_dbfs: f64,
++    /// `usable · low · silent` 중 하나. 사람이 읽는 이름은 `message` 안에 있다.
++    pub verdict: String,
++    /// 사람이 읽는 짧은 문장. **화면이 이 문장을 다시 만들지 않는다.**
++    pub message: String,
++}
++
++impl From<LevelReading> for InputLevelPayload {
++    fn from(reading: LevelReading) -> Self {
++        Self {
++            average_dbfs: reading.average_dbfs,
++            peak_dbfs: reading.peak_dbfs,
++            verdict: verdict_name(reading.verdict).to_string(),
++            message: reading.message,
+         }
+     }
+ }
+ 
++/// 판정 하나의 wire 이름 — `SessionState::as_str`과 같은 성질의 값이다.
++///
++/// 사람이 읽는 이름([`LevelVerdict::label`])을 그대로 보내지 않는다. 화면이 갈래를 나누는 데
++/// 쓰는 값과 사람에게 보이는 문장은 서로 다른 이유로 바뀌기 때문이다.
++fn verdict_name(verdict: LevelVerdict) -> &'static str {
++    match verdict {
++        LevelVerdict::Usable => "usable",
++        LevelVerdict::Low => "low",
++        LevelVerdict::Silent => "silent",
++    }
++}
++
+ /// 지금 전사가 어떤 상태인지 (`phase-prompt/03` 요구 3).
+ ///
+ /// [`SessionStatusPayload`]와 같은 자리에 있는 값이다 — **진행 중인 전사를 들고 있는 것은
+@@ -398,6 +459,21 @@ pub struct TranscriptPayload {
+     pub engine: String,
+     /// 전사에 실제로 쓴 모델 식별자.
+     pub model: String,
++    /// 이 전사 한 건에 **걸린 시간**(밀리초). 재지 않은 옛 Transcript면 없다
++    /// (`phase-prompt/05.6` 성공 기준 3).
++    ///
++    /// **[`RecordingPayload::duration_ms`]와 다른 축의 값이다** — 저쪽은 오디오가 얼마나
++    /// 긴가이고 이쪽은 그것을 옮기는 데 얼마나 걸렸는가다.
++    pub transcription_ms: Option<i64>,
++    /// 같은 시간을 **Rust가 만든 문장으로** (예: `1:47`).
++    ///
++    /// 밀리초와 함께 보내는 이유는 [`RecordingPayload::duration_label`]과 같다 — 초를
++    /// `1:47`로 바꾸는 규칙이 TypeScript에 다시 구현되지 않게 하는 것이다
++    /// (`tests/screen-boundary.test.ts` · [`format_duration_ms`]).
++    ///
++    /// **없으면 없는 채로 간다.** 재지 않은 전사를 `0:00`이라고 말하지 않는다 — 그 문장은
++    /// "0초 만에 끝났다"로 읽히고, 그 순간 이 값으로 하려던 비교가 거짓이 된다.
++    pub transcription_label: Option<String>,
+ }
+ 
+ impl From<Transcript> for TranscriptPayload {
+@@ -415,6 +491,9 @@ impl From<Transcript> for TranscriptPayload {
+             created_at: transcript.created_at,
+             engine: transcript.engine,
+             model: transcript.model,
++            transcription_ms: transcript.transcription_ms,
++            // 잰 적이 없으면 문장도 만들지 않는다. `map`이 그 사실을 그대로 나른다.
++            transcription_label: transcript.transcription_ms.map(format_duration_ms),
+         }
+     }
+ }
+@@ -442,6 +521,17 @@ pub struct SettingsPayload {
+     /// `crate::transcription::model` 하나이고, 없으면 §13의 정의된 실패로 드러난다.
+     #[serde(default)]
+     pub transcription_model: Option<String>,
++    /// 전사할 때 **무슨 언어로 들을지** (§5 D · ADR-0007 §17.1).
++    ///
++    /// **고르지 않은 상태(`null`)가 기본이고, 그것은 '자동 감지'를 뜻한다** — 오류도 아니고
++    /// 특정 언어도 아니다 (§17.1.4-1). 화면은 그 상태를 빈칸이 아니라 자동 감지로 말한다
++    /// (`src/screens/settingsView.ts`).
++    ///
++    /// **secret이 아니다** — 무슨 언어로 듣는지일 뿐이며, 그래서 INV-7과 충돌하지 않는다.
++    /// 이 값이 엔진이 아는 언어 코드인지는 여기서 말하지 않는다. 그것을 실제 호출로 옮기는
++    /// 자리는 `crate::transcription::whisper` 하나다 (ADR-0007 §17.1.4-4).
++    #[serde(default)]
++    pub transcription_language: Option<String>,
+     /// 기본으로 고를 입력 장치의 **선택 키** ([`InputDevicePayload::key`]).
+     ///
+     /// 고르지 않은 상태(`null`)도 정상이다. 이 값이 가리키는 장치가 지금 목록에 있는지는
+@@ -487,6 +577,7 @@ impl From<Settings> for SettingsPayload {
+             automatic_processing: settings.automatic_processing,
+             automatic_transcription: settings.automatic_transcription,
+             transcription_model: settings.transcription_model,
++            transcription_language: settings.transcription_language,
+             default_microphone: settings.default_microphone,
+             ai_provider: settings.ai_provider,
+             ai_base_url: settings.ai_base_url,
+@@ -515,6 +606,13 @@ impl From<SettingsPayload> for Settings {
+                 .transcription_model
+                 .map(|model| model.trim().to_string())
+                 .filter(|model| !model.is_empty()),
++            // 언어도 같은 규칙이다 — 공백뿐인 입력은 '고르지 않음'(= 자동 감지)이며, **그것뿐이다.**
++            // 이 자리에서 언어 코드의 모양을 검사하지도, 모르는 코드를 다른 언어로 바꾸지도,
++            // 비어 있다고 해서 로캘을 짐작해 채우지도 않는다 (INV-10 · ADR-0007 §17.1.4).
++            transcription_language: payload
++                .transcription_language
++                .map(|language| language.trim().to_string())
++                .filter(|language| !language.is_empty()),
+             // 같은 이유로 빈 선택은 '고르지 않음'이다. **다만 그것뿐이다** — 알아볼 수 없는
+             // 키가 와도 여기서 다른 장치로 바꾸지 않는다. 저장된 값과 지금 있는 장치를
+             // 맞춰 보는 일은 목록을 아는 쪽의 일이고, 그 결과는 값으로 구분된다.
+diff --git a/src-tauri/tests/recording_lifecycle.rs b/src-tauri/tests/recording_lifecycle.rs
+index cbdb1b5..4392a1a 100644
+--- a/src-tauri/tests/recording_lifecycle.rs
++++ b/src-tauri/tests/recording_lifecycle.rs
+@@ -14,15 +14,20 @@
+ //! 이 파일의 핵심 주장 하나: **일시정지 구간에 들어온 샘플은 파일에 없다.** 크기가 아니라
+ //! 확정된 WAV를 다시 읽어 샘플 값을 직접 본다.
+ //!
++//! 같은 주장이 **입력 레벨**에도 그대로 적용된다 (ADR-0003 §16.2). 레벨은 파일에 쓰이는 그
++//! 통로에서 재므로, 멈춰 있는 동안 들어온 소리는 파일에 없는 것과 똑같이 레벨에도 없다.
++//!
+ //! 실제 장치에서만 알 수 있는 것(권한 프롬프트 · 녹음된 소리가 들리는가 · 실제 컨테이너와
+ //! 코덱)은 사람이 확인하며, 이 테스트가 그것을 대신 판정하지 않는다 (ADR-0003 §12).
+ 
+ use std::path::{Path, PathBuf};
+ use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
+ use std::sync::{Arc, Mutex};
++use std::thread;
++use std::time::{Duration, Instant};
+ 
+ use molt_note_lib::audio::{CaptureFormat, OpenCapture, SampleSink, SampleSource};
+-use molt_note_lib::commands::Recorder;
++use molt_note_lib::commands::{InputLevelPayload, Recorder};
+ use molt_note_lib::domain::{format_duration_ms, Failure, FailureKind};
+ use molt_note_lib::platform::app_data_dir::AppDataDirectory;
+ use molt_note_lib::platform::clock::Clock;
+@@ -170,6 +175,35 @@ fn wav_files(directory: &Path) -> Vec<PathBuf> {
+     files
+ }
+ 
++/// 파일에 쓰는 쪽은 자기 스레드에서 돈다. 조건에 맞는 레벨이 상태에 나타날 때까지 기다린다.
++///
++/// **기다리는 길이를 짐작하지 않는다** — 값이 언제 도착하든 도착한 값만 본다. 여기서 하는
++/// 판정은 하나도 없다: 무엇이 맞는 값인지는 부르는 쪽이 정한다.
++fn level_matching(
++    recorder: &Recorder,
++    accepted: impl Fn(&InputLevelPayload) -> bool,
++) -> InputLevelPayload {
++    let deadline = Instant::now() + Duration::from_secs(10);
++    loop {
++        let status = recorder.status().expect("상태를 물어볼 수 있어야 한다");
++        if let Some(level) = status.level {
++            if accepted(&level) {
++                return level;
++            }
++        }
++        assert!(
++            Instant::now() < deadline,
++            "기다리던 입력 레벨이 도착하지 않았다"
++        );
++        thread::sleep(Duration::from_millis(5));
++    }
++}
++
++/// 레벨이 나타날 때까지 기다린다.
++fn level_of(recorder: &Recorder) -> InputLevelPayload {
++    level_matching(recorder, |_| true)
++}
++
+ /// 확정된 WAV 파일에 실제로 들어 있는 샘플 전부.
+ fn samples_in(path: &Path) -> Vec<i16> {
+     hound::WavReader::open(path)
+@@ -275,6 +309,167 @@ fn the_status_answer_carries_the_state_the_elapsed_ms_and_a_label_made_by_rust()
+     assert_eq!(after.elapsed_label, "0:00");
+ }
+ 
++#[test]
++fn the_status_answer_tells_a_low_input_level_apart_from_a_usable_one() {
++    // 두 값은 지어낸 것이 아니다 — 2026-09-07에 전사가 붕괴한 녹음의 평균 RMS가 약 256이고,
++    // 9/4에 성공한 녹음이 약 1685였다 (ADR-0003 §16.1). **마이크 없이 그 둘을 흘려보낸다.**
++    let quiet_temp = TempRoot::new("level-low");
++    let (recorder, microphone, _clock, _) = recorder_with(&quiet_temp);
++
++    recorder.start(DEVICE_KEY).expect("시작");
++    microphone.speak(256);
++    let low = level_of(&recorder);
++    recorder.stop().expect("정지");
++
++    assert_eq!(low.verdict, "low");
++    assert_eq!(low.average_dbfs, -42.1, "9/7 수준이다");
++    assert_eq!(low.peak_dbfs, -42.1);
++    assert!(
++        low.message.contains("낮다") && low.message.contains("-42.1 dBFS"),
++        "판정과 수치가 함께 온다: {}",
++        low.message
++    );
++
++    let loud_temp = TempRoot::new("level-usable");
++    let (recorder, microphone, _clock, _) = recorder_with(&loud_temp);
++
++    recorder.start(DEVICE_KEY).expect("시작");
++    microphone.speak(1_685);
++    let usable = level_of(&recorder);
++    recorder.stop().expect("정지");
++
++    assert_eq!(usable.verdict, "usable");
++    assert_eq!(usable.average_dbfs, -25.8, "9/4 수준이다");
++    assert!(
++        usable.message.contains("쓸 만하다"),
++        "{}",
++        usable.message
++    );
++
++    // 같은 경로로 흘려보낸 두 녹음이 **서로 다른 답**을 받는다. 그것이 이 표시의 전부다.
++    assert_ne!(low.verdict, usable.verdict);
++    assert_ne!(low.message, usable.message);
++    assert!(usable.average_dbfs > low.average_dbfs);
++}
++
++#[test]
++fn the_input_level_does_not_move_while_the_recording_is_paused() {
++    // 레벨을 실시간 콜백이 아니라 **파일에 쓰이는 통로**에서 재는 이유 그 자체다
++    // (ADR-0003 §16.2) — 파일에 없는 소리를 사람에게 보여 주지 않는다.
++    let temp = TempRoot::new("level-paused");
++    let (recorder, microphone, clock, app_data_dir) = recorder_with(&temp);
++
++    recorder.start(DEVICE_KEY).expect("시작");
++    microphone.speak(1_685);
++    let recording = level_of(&recorder);
++    assert_eq!(recording.average_dbfs, -25.8);
++    assert_eq!(recording.peak_dbfs, -25.8);
++
++    // 멈춰 있는 동안 아주 큰 소리가 들어온다. 파일에 도달하지 않으므로 레벨도 이것을 보지 않는다.
++    recorder.pause().expect("일시정지");
++    clock.advance(60_000);
++    microphone.speak(31_000);
++
++    // 다시 녹음하고 **디지털 무음**을 흘려보낸다. 표시와 샘플은 같은 통로를 지나므로, 이 무음이
++    // 반영된 것을 본 시점에는 멈춰 있는 동안의 큰 소리도 이미 그 통로를 지나갔다 — 그래서
++    // 이 검사는 얼마나 기다렸는가에 의존하지 않는다.
++    recorder.resume().expect("재개");
++    microphone.speak(0);
++    let after = level_matching(&recorder, |level| level.average_dbfs != recording.average_dbfs);
++
++    assert_eq!(
++        after.average_dbfs, -28.8,
++        "1685짜리 512개와 무음 512개의 평균이다 — 31000은 섞이지 않았다"
++    );
++    assert_eq!(
++        after.peak_dbfs, -25.8,
++        "멈춰 있는 동안의 큰 소리는 피크에도 남지 않는다"
++    );
++    assert_eq!(after.verdict, "usable");
++
++    // 확정된 파일도 같은 말을 한다 — 레벨이 본 것과 파일에 남은 것이 같다.
++    recorder.stop().expect("정지");
++    let written = wav_files(&app_data_dir.recordings_dir());
++    assert_eq!(written.len(), 1);
++    assert_eq!(
++        samples_in(&written[0]),
++        [vec![1_685; CHUNK], vec![0; CHUNK]].concat()
++    );
++}
++
++#[test]
++fn there_is_no_input_level_before_a_recording_and_none_again_after_it() {
++    // **재지 않은 것을 0이라고 말하지 않는다** (ADR-0003 §16.3). 값 없음과 '소리 없음'은
++    // 사람이 해야 할 일이 다르다.
++    let temp = TempRoot::new("level-absent");
++    let (recorder, microphone, _clock, _) = recorder_with(&temp);
++
++    let idle = recorder.status().expect("상태를 물어볼 수 있어야 한다");
++    assert_eq!(idle.state, "idle");
++    assert_eq!(idle.level, None, "녹음 전에는 잰 것이 없다");
++
++    // 장치는 열렸지만 아직 한 샘플도 파일에 쓰이지 않았다. 여전히 없음이다.
++    recorder.start(DEVICE_KEY).expect("시작");
++    let started = recorder.status().expect("상태를 물어본다");
++    assert_eq!(started.state, "recording");
++    assert_eq!(started.level, None, "'소리 없음'이 아니라 값 없음이다");
++
++    microphone.speak(1_685);
++    assert_eq!(level_of(&recorder).verdict, "usable");
++
++    recorder.stop().expect("정지");
++    let after = recorder.status().expect("상태를 물어본다");
++    assert_eq!(after.state, "idle");
++    assert_eq!(after.level, None, "끝난 녹음의 레벨은 남지 않는다");
++}
++
++#[test]
++fn the_status_that_reaches_the_screen_carries_numbers_and_a_sentence_but_no_audio() {
++    // INV-6은 오디오가 기기 밖으로 나가는 길을 막는다. 이 검사는 **앱 안의 IPC 경계에서도**
++    // 같은 선을 지키는지 본다 (ADR-0003 §16.3) — 화면이 샘플을 받을 이유가 없다.
++    let temp = TempRoot::new("level-wire");
++    let (recorder, microphone, _clock, _) = recorder_with(&temp);
++
++    recorder.start(DEVICE_KEY).expect("시작");
++    microphone.speak(1_685);
++    level_of(&recorder);
++
++    let status = recorder.status().expect("상태를 물어본다");
++    let json = serde_json::to_value(&status).expect("직렬화할 수 있어야 한다");
++    let text = json.to_string();
++
++    let mut keys: Vec<String> = json
++        .as_object()
++        .expect("객체여야 한다")
++        .keys()
++        .cloned()
++        .collect();
++    keys.sort();
++    assert_eq!(keys, ["elapsedLabel", "elapsedMs", "level", "state"]);
++
++    let mut level_keys: Vec<String> = json["level"]
++        .as_object()
++        .expect("레벨도 객체다")
++        .keys()
++        .cloned()
++        .collect();
++    level_keys.sort();
++    assert_eq!(
++        level_keys,
++        ["averageDbfs", "message", "peakDbfs", "verdict"],
++        "나가는 것은 수치 둘 · 판정 하나 · 문장 하나뿐이다"
++    );
++
++    // 파형도 스펙트럼도 샘플 배열도 없다. 배열이 하나도 없다는 것으로 그 자리를 막는다.
++    assert!(!text.contains('['), "payload에 배열이 실렸다: {text}");
++    assert!(
++        !text.contains("1685"),
++        "샘플 값 자체가 payload에 새어 나왔다: {text}"
++    );
++
++    recorder.stop().expect("정지");
++}
++
+ #[test]
+ fn a_recording_stopped_while_paused_keeps_exactly_what_was_recorded() {
+     // 멈춰 둔 녹음을 그대로 끝내는 것은 정상적인 사용이다.

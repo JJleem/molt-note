@@ -93,14 +93,58 @@ pub const AI_REQUEST_MARKER: &str = "-ai-request";
 /// 같은 이름이 이미 쓰이고 있는지는 여기서 알 수 없다 — 그 판단은
 /// [`super::file::write_new`]의 몫이며, 덮어쓰지 않고 번호를 붙인다 (ADR-0009 §4.3).
 pub fn ai_request_file_name(created_at: &str, title: &str) -> String {
-    let name = export_file_name(created_at, title);
+    with_marker(&export_file_name(created_at, title), AI_REQUEST_MARKER)
+}
+
+/// 나뉜 조각 하나의 자리를 이름에 적는 꼴 — `-part-2-of-4` (`phase-prompt/05.6` 성공 기준 4).
+///
+/// **조각이 하나뿐이면 이 표식은 붙지 않는다** ([`ai_request_portion_file_name`]) — 나뉘지
+/// 않은 문서의 이름이 이 Phase 때문에 달라지지 않는다.
+pub const PORTION_MARKER: &str = "-part-";
+
+/// 조각의 자리에서 `2`와 `4`를 잇는 낱말.
+const PORTION_OF: &str = "-of-";
+
+/// 나뉜 **AI-ready 문서 한 조각**이 가질 파일 이름 —
+/// `2026-09-01-3dgs-study-04-ai-request-part-2-of-4.md`.
+///
+/// **세 번째 이름 규칙을 만들지 않는다.** 날짜 · 슬러그 · 예약 이름 · 80바이트 상한은 여전히
+/// [`export_file_name`] 한 자리에 있고, 여기서 더하는 것은 확장자 앞의 표식 하나뿐이다.
+///
+/// 표식이 필요한 이유는 **덮어쓰지 않는 것만으로는 부족하기 때문이다.** 같은 이름으로 네 조각을
+/// 쓰면 [`super::file::write_new`]가 `-2` · `-3` · `-4`를 붙여 파일은 지키지만 (ADR-0009 §4.3),
+/// 그 번호는 **조각의 자리가 아니라 충돌의 순서**다 — 앞서 한 번 내보낸 적이 있으면 둘이
+/// 어긋나고, 사용자는 파일 목록만 보고 어느 파일이 몇 번째 조각인지 알 수 없다.
+///
+/// 표식 길이는 조각이 아무리 많아도 스무 바이트 남짓이며, ADR-0009 §4.2가 남겨 둔 여유 안에
+/// 들어간다 [A].
+pub fn ai_request_portion_file_name(
+    created_at: &str,
+    title: &str,
+    portion: usize,
+    portion_count: usize,
+) -> String {
+    let name = ai_request_file_name(created_at, title);
+
+    if portion_count <= 1 {
+        return name;
+    }
+
+    with_marker(
+        &name,
+        &format!("{PORTION_MARKER}{portion}{PORTION_OF}{portion_count}"),
+    )
+}
+
+/// 확장자 **앞에** 표식 하나를 끼워 넣는다.
+fn with_marker(name: &str, marker: &str) -> String {
     let extension = format!(".{MARKDOWN_EXTENSION}");
 
     match name.strip_suffix(&extension) {
-        Some(stem) => format!("{stem}{AI_REQUEST_MARKER}{extension}"),
+        Some(stem) => format!("{stem}{marker}{extension}"),
         // [`export_file_name`]은 언제나 확장자를 붙이므로 여기 오지 않는다. 그래도 이름을
         // 만들지 못하는 대신 표식을 붙인 이름을 낸다 — 파일 이름 하나 때문에 앱이 멈추지 않는다.
-        None => format!("{name}{AI_REQUEST_MARKER}"),
+        None => format!("{name}{marker}"),
     }
 }
 
@@ -246,6 +290,78 @@ mod tests {
         assert_eq!(
             ai_request_file_name("2026-09-01T10:00:00.000Z", "3DGS Study #04"),
             ai_request_file_name("2026-09-01T10:00:00.000Z", "3DGS Study #04")
+        );
+    }
+
+    // ── 나뉜 조각의 이름 (`phase-prompt/05.6` 성공 기준 4) ───────────────────────
+
+    #[test]
+    fn one_whole_document_keeps_the_name_it_already_had() {
+        // 나뉘지 않은 문서의 이름이 이 Phase 때문에 달라지지 않는다.
+        for portion_count in [0, 1] {
+            assert_eq!(
+                ai_request_portion_file_name(
+                    "2026-09-01T10:00:00.000Z",
+                    "3DGS Study #04",
+                    1,
+                    portion_count
+                ),
+                ai_request_file_name("2026-09-01T10:00:00.000Z", "3DGS Study #04")
+            );
+        }
+    }
+
+    #[test]
+    fn a_split_document_says_which_portion_each_file_holds() {
+        let names: Vec<String> = (1..=4)
+            .map(|portion| {
+                ai_request_portion_file_name(
+                    "2026-09-01T10:00:00.000Z",
+                    "3DGS Study #04",
+                    portion,
+                    4,
+                )
+            })
+            .collect();
+
+        assert_eq!(
+            names,
+            [
+                "2026-09-01-3dgs-study-04-ai-request-part-1-of-4.md",
+                "2026-09-01-3dgs-study-04-ai-request-part-2-of-4.md",
+                "2026-09-01-3dgs-study-04-ai-request-part-3-of-4.md",
+                "2026-09-01-3dgs-study-04-ai-request-part-4-of-4.md",
+            ]
+        );
+
+        // 네 이름이 전부 다르다 — 충돌 번호(`-2`)에 기대지 않고 이름 자체가 자리를 말한다.
+        let mut unique = names.clone();
+        unique.sort();
+        unique.dedup();
+        assert_eq!(unique.len(), names.len());
+    }
+
+    #[test]
+    fn a_portion_name_is_still_a_safe_file_name_and_still_marks_the_ai_request() {
+        for (created_at, title) in [
+            ("2026-09-01T10:00:00.000Z", "회의: 로드맵 / Q4 🎯"),
+            ("어제", "con"),
+            ("", "../../etc/passwd"),
+            ("2026-09-01", &"가".repeat(200)),
+        ] {
+            let name = ai_request_portion_file_name(created_at, title, 12, 137);
+
+            assert_is_a_safe_file_name(&name);
+            assert!(name.contains(AI_REQUEST_MARKER), "AI 문서라는 표식이 없다");
+            assert!(name.ends_with("-part-12-of-137.md"), "조각의 자리가 없다: {name}");
+        }
+    }
+
+    #[test]
+    fn the_same_portion_always_gets_the_same_name() {
+        assert_eq!(
+            ai_request_portion_file_name("2026-09-01T10:00:00.000Z", "3DGS Study #04", 2, 4),
+            ai_request_portion_file_name("2026-09-01T10:00:00.000Z", "3DGS Study #04", 2, 4)
         );
     }
 

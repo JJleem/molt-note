@@ -74,6 +74,8 @@ function transcript(overrides: Partial<Transcript> = {}): Transcript {
     createdAt: '2026-09-03T04:50:26.000Z',
     engine: 'whisper.cpp',
     model: 'ggml-base.bin',
+    transcriptionMs: null,
+    transcriptionLabel: null,
     ...overrides,
   };
 }

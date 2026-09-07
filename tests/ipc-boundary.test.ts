@@ -76,6 +76,22 @@ const payloadSource = readText('../src-tauri/src/commands/payload.rs');
  * 고를 방법이 wire에 없다는 것이 그 표현이다. **provider나 벤더를 아는 이름도 없다**
  * (MH-1 · MH-2 · MH-6) — AI를 하나도 설정하지 않아도 셋이 전부 동작한다.
  *
+ * 마지막 하나가 Phase 5.6의 **자리 열기**다 — `show_saved_file`
+ * (`phase-prompt/05.6` 성공 기준 2 · R-4). 31 → 32이며, **늘어난 이유는 새 기능이 아니라
+ * 2026-09-05의 실사용에서 드러난 사실이다**: 화면은 만들어진 파일의 전체 경로를 이미 글자로
+ * 보여 주고 있었는데도 사람이 그 파일에 도달하지 못했다. macOS에서 `~/Library`가 Finder 기본
+ * 숨김이기 때문이며, "경로를 보여 주면 찾을 수 있다"는 가정이 이 플랫폼에서 틀렸다.
+ *
+ * **이 이름은 파일을 만들지도 고치지도 지우지도 않는다** (INV-3). 이미 있는 파일이 놓인 자리를
+ * 열 뿐이며, 그래서 아래 'export 표면은 파일 하나를 만드는 이름 둘뿐이다'가 세는 집합은 여전히
+ * 둘이다 — 이 이름은 거기 속하지 않는다. 이름에 `export`가 들어 있지 않은 것도 그 사실의
+ * 표현이다: 내보내는 이름이 셋이 된 것이 아니다.
+ *
+ * **webview가 임의 경로를 여는 이름도 아니다.** 무엇을 열어도 되는지 정하는 것은 backend이며,
+ * 열리는 것은 그 앱이 자기 `exports/` 아래에 있다고 확인한 파일뿐이다
+ * (`src-tauri/src/commands/saved_file.rs`). 저장된 녹음의 재생에서 asset protocol의 범위를
+ * backend가 정하는 것과 같은 규약이다 (PRODUCT-SPEC §12 · ADR-0006).
+ *
  * 이 목록에 없는 이름이 등록되면 그것은 Phase 범위가 넘쳤다는 뜻이다 — 그래서 이 검사는
  * 부분집합이 아니라 **정확히 같은 집합**을 요구한다.
  */
@@ -111,6 +127,8 @@ const REGISTERED_COMMANDS = [
   'get_ai_prompt',
   'get_transcript_text',
   'export_ai_request',
+  // 이미 만들어진 파일이 **놓인 자리를 연다.** 만들지도 고치지도 지우지도 않는다 (INV-3).
+  'show_saved_file',
 ];
 
 /** lib.rs의 generate_handler![...]에 등록된 command 이름. */
@@ -171,6 +189,15 @@ describe('command 표면', () => {
     // (phase-prompt/05의 Out of Scope · §16 DEFERRED), 이름 하나가 더 필요해지면 여기서 먼저
     // 걸린다.
     //
+    // **Phase 5.6이 더한 이름은 이 정규식을 느슨하게 만들지 않았다.** `show_saved_file`은
+    // 내보내는 이름이 아니므로 `export`가 들어 있지 않고, 저장된 녹음을 재생하는 이름도
+    // 아니므로 `play`도 없다.
+    //
+    // 대신 **막는 이름이 둘 늘었다** — `finder`와 `explorer`다. 자리를 여는 표면이 실제로
+    // 열렸으므로, 그 표면의 이름이 어느 OS의 파일 관리자인지 말하기 시작하면 플랫폼 지식이
+    // command 이름으로 새어 나온 것이다 (INV-10). 그것을 아는 자리는
+    // `src-tauri/src/platform/file_manager.rs` 하나이며, 벤더 이름을 막는 것과 같은 태도다.
+    //
     // **`notion`은 이제 여기 없다** — 전송 표면이 실제로 열렸기 때문이다 (§10). 그 대신 아래의
     // 'Notion 표면은 여섯뿐이다'가 그 선을 지킨다: 이름이 하나 늘면 그쪽에서 먼저 드러난다.
     //
@@ -179,7 +206,7 @@ describe('command 표면', () => {
     // 있다. `ollama_*` 같은 이름이 등록되면 그 경계가 새어 나온 것이다. Notion은 그와 다르다 —
     // 제품이 보내기로 한 목적지 그 자체이며 (PRODUCT-SPEC §10), 고를 수 있는 provider가 아니다.
     const outOfScope =
-      /(start|stop|pause|resume)_recording|play|whisper|ollama|llama|openai|anthropic|claude|gemini|export(?!_(markdown|ai_request)\b)|pdf|docx|queue|batch|schedule/i;
+      /(start|stop|pause|resume)_recording|play|whisper|ollama|llama|openai|anthropic|claude|gemini|finder|explorer|export(?!_(markdown|ai_request)\b)|pdf|docx|queue|batch|schedule/i;
 
     for (const command of registeredCommands()) {
       expect(command, `${command}는 아직 만들지 않은 기능의 command다`).not.toMatch(outOfScope);
@@ -249,6 +276,23 @@ describe('command 표면', () => {
     const exports = registeredCommands().filter((command) => /export/i.test(command));
 
     expect(exports.sort()).toEqual(['export_ai_request', 'export_markdown']);
+
+    // **Phase 5.6에서 이름이 하나 늘었지만 이 집합은 그대로 둘이다** (`phase-prompt/05.6`
+    // 성공 기준 2 · R-4). 늘어난 `show_saved_file`은 **파일을 만들지도 고치지도 지우지도
+    // 않고 이미 있는 것이 놓인 자리를 열 뿐이며**, 그래서 여기 속하지 않는다 — 만드는 이름은
+    // 여전히 둘이고, 그 둘이 만든 파일을 사람이 찾지 못하던 것이 이번에 더해진 사실이다.
+    //
+    // 두 가지를 함께 못박는다. 그 이름이 실제로 등록돼 있다는 것과(등록되지 않았다면 위의
+    // 정확-집합 검사가 먼저 실패한다), **그 이름이 무언가를 만들거나 바꾸는 동사를 쓰지
+    // 않는다**는 것이다 (INV-3). 여는 이름이 언젠가 `save_`나 `write_`로 바뀌면 그것은
+    // 이 표면이 하는 일이 달라졌다는 뜻이며, 그 결정은 조용히 일어나면 안 된다.
+    const opening = registeredCommands().filter((command) => /saved_file/i.test(command));
+
+    expect(opening).toEqual(['show_saved_file']);
+    expect(exports).not.toContain('show_saved_file');
+    for (const command of opening) {
+      expect(command).not.toMatch(/^(create|write|update|set|edit|delete|remove|save|move|rename)_/);
+    }
   });
 
   it('Notion 표면은 전송 둘 · 저장된 기록 읽기 · 연결 확인 · token 둘뿐이다', () => {

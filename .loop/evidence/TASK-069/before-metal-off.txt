@@ -1,0 +1,91 @@
+TASK-069 — Metal feature를 켜기 **전**의 관측 (이 Run이 직접 실행한 명령의 출력 그대로)
+작업 디렉터리: /Users/molt/orca/projects/molt-note
+
+--------------------------------------------------------------------------------
+1) src-tauri/Cargo.toml 의 whisper-rs 줄 (feature 지정 없음)
+--------------------------------------------------------------------------------
+whisper-rs = "0.16"
+
+--------------------------------------------------------------------------------
+2) cargo fingerprint — 실제로 켜져 있던 feature
+   $ grep -o '"features":"\[[^]]*\]"' \
+       src-tauri/target/debug/.fingerprint/whisper-rs-d6c13803281996e9/lib-whisper_rs.json
+--------------------------------------------------------------------------------
+"features":"[\"default\"]"
+
+   $ grep -o '"features":"[^"]*"' \
+       src-tauri/target/debug/.fingerprint/whisper-rs-sys-*/lib-whisper_rs_sys.json
+src-tauri/target/debug/.fingerprint/whisper-rs-sys-937543fec3ce9af6/lib-whisper_rs_sys.json:"features":"[]"
+src-tauri/target/debug/.fingerprint/whisper-rs-sys-c774acbcc09ac244/lib-whisper_rs_sys.json:"features":"[]"
+
+--------------------------------------------------------------------------------
+3) ★ whisper-rs-sys 의 build.rs 가 CMake 에 넘긴 정의 — CMakeCache.txt
+   $ grep -i metal src-tauri/target/debug/build/whisper-rs-sys-3a8019dcfcfe9c4c/out/build/CMakeCache.txt
+--------------------------------------------------------------------------------
+//ggml: use Metal
+GGML_METAL:BOOL=OFF
+//ggml: embed Metal library
+GGML_METAL_EMBED_LIBRARY:BOOL=OFF
+//ggml: metal minimum macOS version
+GGML_METAL_MACOSX_VERSION_MIN:STRING=
+//ggml: disable Metal debugging
+GGML_METAL_NDEBUG:BOOL=OFF
+//ggml: compile Metal with -fno-fast-math
+GGML_METAL_SHADER_DEBUG:BOOL=OFF
+//ggml: metal standard version (-std flag)
+GGML_METAL_STD:STRING=
+
+   $ grep -i '^GGML_METAL' src-tauri/target/debug/build/whisper-rs-sys-f9ac82e95845cca2/out/build/CMakeCache.txt
+GGML_METAL:BOOL=OFF
+GGML_METAL_EMBED_LIBRARY:BOOL=OFF
+GGML_METAL_MACOSX_VERSION_MIN:STRING=
+GGML_METAL_NDEBUG:BOOL=OFF
+GGML_METAL_SHADER_DEBUG:BOOL=OFF
+GGML_METAL_STD:STRING=
+
+   (whisper-rs-sys 의 out 디렉터리는 두 개다. 둘 다 OFF였다.)
+
+--------------------------------------------------------------------------------
+4) 링크된 산출물 — metal 백엔드 라이브러리가 없다
+   $ ls src-tauri/target/debug/build/whisper-rs-sys-3a8019dcfcfe9c4c/out/lib
+--------------------------------------------------------------------------------
+cmake
+libggml-base.a
+libggml-blas.a
+libggml-cpu.a
+libggml.a
+libwhisper.a
+pkgconfig
+
+   $ ls src-tauri/target/debug/build/whisper-rs-sys-f9ac82e95845cca2/out/lib
+cmake
+libggml-base.a
+libggml-blas.a
+libggml-cpu.a
+libggml.a
+libwhisper.a
+pkgconfig
+
+--------------------------------------------------------------------------------
+5) Cargo.lock 의 whisper 항목 (before)
+   $ grep -n -A9 'name = "whisper-rs' src-tauri/Cargo.lock
+--------------------------------------------------------------------------------
+4673:name = "whisper-rs"
+4674-version = "0.16.0"
+4675-source = "registry+https://github.com/rust-lang/crates.io-index"
+4676-checksum = "2088172d00f936c348d6a72f488dc2660ab3f507263a195df308a3c2383229f6"
+4677-dependencies = [
+4678- "whisper-rs-sys",
+4679-]
+4680-
+4681-[[package]]
+4682:name = "whisper-rs-sys"
+4683-version = "0.15.0"
+4684-source = "registry+https://github.com/rust-lang/crates.io-index"
+4685-checksum = "6986c0fe081241d391f09b9a071fbcbb59720c3563628c3c829057cf69f2a56f"
+4686-dependencies = [
+4687- "bindgen",
+4688- "cfg-if",
+4689- "cmake",
+4690- "fs_extra",
+4691- "semver",

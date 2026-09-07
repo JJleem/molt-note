@@ -750,6 +750,45 @@ p.loading {
   letter-spacing: 0.01em;
 }
 
+/*
+ * 입력 레벨 (ADR-0003 §16.3).
+ *
+ * 상태와 경과 시간 아래에 오는 **한 줄**이다. 미터도 파형도 두지 않는다 — 이 화면에서 가장
+ * 큰 것은 여전히 그 둘이며 (§19), 레벨은 문장 하나로 충분하다. 문장은 backend가 만든 것을
+ * 그대로 그린다.
+ */
+
+.recording__level {
+  margin: var(--space-2) 0 0;
+  font-size: var(--type-secondary);
+  color: var(--text-muted);
+}
+
+/* 쓸 수 없을 만큼 낮은 두 갈래만 조용한 회색에서 벗어난다. **색은 거들 뿐이다** — 낮다는
+   사실은 언제나 문장으로 함께 있다 (요구 12). */
+
+.recording__level--low,
+.recording__level--silent {
+  color: var(--warning);
+}
+
+/*
+ * 정지 전에 보이는 경고.
+ *
+ * 실패가 아니므로 `FailureNotice`의 모양을 쓰지 않고, 녹음을 막지도 않는다 (§16.5).
+ * 조작 위에 놓여 Stop을 누르기 전에 읽힌다.
+ */
+
+.recording__level-warning {
+  max-width: 520px;
+  margin: 0 0 var(--space-4);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--warning);
+  border-radius: var(--radius);
+  font-size: var(--type-body);
+  color: var(--text);
+}
+
 .recording__controls {
   display: flex;
   flex-wrap: wrap;
@@ -880,6 +919,16 @@ p.loading {
   font-size: var(--type-caption);
   color: var(--text-muted);
   word-break: break-all;
+}
+
+/*
+ * 그 자리를 여는 수단 (`phase-prompt/05.6` 성공 기준 2 · R-4). **경로 줄 아래에 놓인다** —
+ * 경로를 대체하는 것이 아니라 그 옆에 더해지는 수단이며, 열지 못했을 때 남는 길이 바로 위의
+ * `.share__path`이기 때문이다.
+ */
+
+.share__show {
+  margin: 0 0 var(--space-2);
 }
 
 /* 무엇이 나가는가 (INV-5 · INV-6). 본문이 어느 상태든 같은 자리에 있다. */

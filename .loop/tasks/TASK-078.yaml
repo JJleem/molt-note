@@ -1,0 +1,54 @@
+# 붕괴한 전사를 저장 직전에 막는다
+# Runtime이 PLAN-20260907T032843Z 승인 시점에 생성했다 (proposal P3). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-078
+status: DONE
+
+request: |-
+  `src-tauri/src/transcription/run.rs`의 저장 직전 검사가 개수만 보던 자리에 P2의 규칙을 붙인다. 지금은 `transcription.segments.is_empty()` 하나이며, 그래서 2026-09-07의 103개짜리 붕괴가 통과해 `done`으로 저장됐다. 기존의 '빈 결과' 판정을 잃지 않은 채 붕괴 판정을 더한다. 붕괴로 판정되면: Transcript를 추가하지 않고 · `current_transcript_id`를 바꾸지 않고 · `transcription_status`가 `failed`가 되고 · 실패 종류는 §13의 `TranscriptionOutputUnusable`이며 · 사용자가 읽는 문장이 무엇이 잘못됐는지 말하고 P2가 계산한 수치를 담는다. 원본 오디오 · Recording 레코드 · 이미 있던 Transcript는 그대로다 (INV-1 · INV-2 · INV-3). `src-tauri/tests/transcription_run.rs`에 붕괴한 출력을 내는 test double을 흘려보내는 테스트를 더해 위의 다섯을 전부 고정한다 — transcripts 행 수가 늘지 않는 것과 current가 그대로인 것을 저장소에서 직접 확인한다. 언어 처리 · 모델 해석 · Metal · 청크 분할은 건드리지 않는다.
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-077
+
+stop_condition:
+  gates: [build, lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 3
+
+acceptance_criteria:
+  - id: AC-1
+    description: |-
+      `npm run build`가 통과한다.
+    verification:
+      type: gate
+      ref: build
+  - id: AC-2
+    description: |-
+      `npm run lint`가 통과한다.
+    verification:
+      type: gate
+      ref: lint
+  - id: AC-3
+    description: |-
+      `npm run test`가 통과하고, 붕괴한 출력이 Transcript를 남기지 않고 current를 바꾸지 않으며 status가 failed가 되는 것을 저장소에서 확인하는 새 테스트가 있다.
+    verification:
+      type: gate
+      ref: test
+  - id: AC-4
+    description: |-
+      붕괴 실패의 kind가 `TranscriptionOutputUnusable`이고 문장에 무엇이 잘못됐는지와 수치가 들어 있다. 빈 결과 판정도 그대로 남아 있다.
+    verification:
+      type: verifier
+  - id: AC-5
+    description: |-
+      판정 규칙 자체는 여전히 P2의 모듈에만 있다 — run.rs가 임계값이나 비율을 스스로 계산하지 않는다. 저장된 Transcript를 고치거나 지우는 경로가 새로 생기지 않았다 (INV-2).
+    verification:
+      type: verifier
+
+evidence: []
+
+failure_memo: []

@@ -87,6 +87,7 @@ fn transcript(id: &str, recording_id: &str, text: &str) -> Transcript {
         created_at: "2026-09-02T10:05:00Z".to_string(),
         engine: "whisper.cpp".to_string(),
         model: "base".to_string(),
+        transcription_ms: None,
     }
 }
 
@@ -140,6 +141,9 @@ fn the_four_concepts_live_in_four_separate_tables_with_the_fields_section_7_list
             "notion_status",
         ]
     );
+    // 앞의 일곱이 §7이 요구하는 전부이고, 마지막 하나는 **전사 한 건에 걸린 시간**이다
+    // (migration 10 · `phase-prompt/05.6` 성공 기준 3). 나중에 생긴 열이므로 NULL일 수 있고,
+    // NULL은 '그때는 재지 않았다'는 정상 상태다.
     assert_eq!(
         columns_of(&connection, "transcripts"),
         [
@@ -150,6 +154,7 @@ fn the_four_concepts_live_in_four_separate_tables_with_the_fields_section_7_list
             "created_at",
             "engine",
             "model",
+            "transcription_ms",
         ]
     );
     // segments[]는 Transcript의 자식 테이블이다 (ADR-0001 §5.4).

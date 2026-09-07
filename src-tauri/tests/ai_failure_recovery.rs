@@ -156,6 +156,7 @@ impl Fixture {
                 created_at: "2026-09-03T10:01:00.000Z".to_owned(),
                 engine: "fixture-engine".to_owned(),
                 model: "fixture-model".to_owned(),
+                transcription_ms: None,
             },
         )
         .expect("사전 조건: Transcript를 추가한다");
@@ -215,14 +216,15 @@ impl Fixture {
 
         let mut transcripts = connection
             .prepare(
-                "SELECT id, recording_id, language, raw_text, created_at, engine, model
+                "SELECT id, recording_id, language, raw_text, created_at, engine, model,
+                        transcription_ms
                  FROM transcripts ORDER BY id",
             )
             .expect("transcripts를 질의할 수 있어야 한다");
         let rows = transcripts
             .query_map([], |row| {
                 Ok(format!(
-                    "transcript|{}|{}|{:?}|{}|{}|{}|{}\n",
+                    "transcript|{}|{}|{:?}|{}|{}|{}|{}|{:?}\n",
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
                     row.get::<_, Option<String>>(2)?,
@@ -230,6 +232,7 @@ impl Fixture {
                     row.get::<_, String>(4)?,
                     row.get::<_, String>(5)?,
                     row.get::<_, String>(6)?,
+                    row.get::<_, Option<i64>>(7)?,
                 ))
             })
             .expect("transcripts 행을 읽을 수 있어야 한다");

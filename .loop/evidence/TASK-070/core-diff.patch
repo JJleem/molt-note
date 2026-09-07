@@ -1,0 +1,273 @@
+diff --git a/src-tauri/src/commands/payload.rs b/src-tauri/src/commands/payload.rs
+index 4e42c26..77005f8 100644
+--- a/src-tauri/src/commands/payload.rs
++++ b/src-tauri/src/commands/payload.rs
+@@ -19,8 +19,8 @@ use crate::ai::note::{decode_content, MeetingNote, StructuredNote, StudyNote, Su
+ use crate::ai::provider::{Availability, ProviderDescriptor};
+ use crate::audio::{CaptureReport, InputDevice, SessionState, SessionSummary};
+ use crate::domain::{
+-    AiNote, Failure, NoteType, NotionSync, ProcessingStatus, Recording, RecordingId, RecordingView,
+-    Settings, Transcript, TranscriptSegment,
++    format_duration_ms, AiNote, Failure, NoteType, NotionSync, ProcessingStatus, Recording,
++    RecordingId, RecordingView, Settings, Transcript, TranscriptSegment,
+ };
+ 
+ use super::notion::NotionSendStatus;
+@@ -398,6 +398,21 @@ pub struct TranscriptPayload {
+     pub engine: String,
+     /// 전사에 실제로 쓴 모델 식별자.
+     pub model: String,
++    /// 이 전사 한 건에 **걸린 시간**(밀리초). 재지 않은 옛 Transcript면 없다
++    /// (`phase-prompt/05.6` 성공 기준 3).
++    ///
++    /// **[`RecordingPayload::duration_ms`]와 다른 축의 값이다** — 저쪽은 오디오가 얼마나
++    /// 긴가이고 이쪽은 그것을 옮기는 데 얼마나 걸렸는가다.
++    pub transcription_ms: Option<i64>,
++    /// 같은 시간을 **Rust가 만든 문장으로** (예: `1:47`).
++    ///
++    /// 밀리초와 함께 보내는 이유는 [`RecordingPayload::duration_label`]과 같다 — 초를
++    /// `1:47`로 바꾸는 규칙이 TypeScript에 다시 구현되지 않게 하는 것이다
++    /// (`tests/screen-boundary.test.ts` · [`format_duration_ms`]).
++    ///
++    /// **없으면 없는 채로 간다.** 재지 않은 전사를 `0:00`이라고 말하지 않는다 — 그 문장은
++    /// "0초 만에 끝났다"로 읽히고, 그 순간 이 값으로 하려던 비교가 거짓이 된다.
++    pub transcription_label: Option<String>,
+ }
+ 
+ impl From<Transcript> for TranscriptPayload {
+@@ -415,6 +430,9 @@ impl From<Transcript> for TranscriptPayload {
+             created_at: transcript.created_at,
+             engine: transcript.engine,
+             model: transcript.model,
++            transcription_ms: transcript.transcription_ms,
++            // 잰 적이 없으면 문장도 만들지 않는다. `map`이 그 사실을 그대로 나른다.
++            transcription_label: transcript.transcription_ms.map(format_duration_ms),
+         }
+     }
+ }
+@@ -442,6 +460,17 @@ pub struct SettingsPayload {
+     /// `crate::transcription::model` 하나이고, 없으면 §13의 정의된 실패로 드러난다.
+     #[serde(default)]
+     pub transcription_model: Option<String>,
++    /// 전사할 때 **무슨 언어로 들을지** (§5 D · ADR-0007 §17.1).
++    ///
++    /// **고르지 않은 상태(`null`)가 기본이고, 그것은 '자동 감지'를 뜻한다** — 오류도 아니고
++    /// 특정 언어도 아니다 (§17.1.4-1). 화면은 그 상태를 빈칸이 아니라 자동 감지로 말한다
++    /// (`src/screens/settingsView.ts`).
++    ///
++    /// **secret이 아니다** — 무슨 언어로 듣는지일 뿐이며, 그래서 INV-7과 충돌하지 않는다.
++    /// 이 값이 엔진이 아는 언어 코드인지는 여기서 말하지 않는다. 그것을 실제 호출로 옮기는
++    /// 자리는 `crate::transcription::whisper` 하나다 (ADR-0007 §17.1.4-4).
++    #[serde(default)]
++    pub transcription_language: Option<String>,
+     /// 기본으로 고를 입력 장치의 **선택 키** ([`InputDevicePayload::key`]).
+     ///
+     /// 고르지 않은 상태(`null`)도 정상이다. 이 값이 가리키는 장치가 지금 목록에 있는지는
+@@ -487,6 +516,7 @@ impl From<Settings> for SettingsPayload {
+             automatic_processing: settings.automatic_processing,
+             automatic_transcription: settings.automatic_transcription,
+             transcription_model: settings.transcription_model,
++            transcription_language: settings.transcription_language,
+             default_microphone: settings.default_microphone,
+             ai_provider: settings.ai_provider,
+             ai_base_url: settings.ai_base_url,
+@@ -515,6 +545,13 @@ impl From<SettingsPayload> for Settings {
+                 .transcription_model
+                 .map(|model| model.trim().to_string())
+                 .filter(|model| !model.is_empty()),
++            // 언어도 같은 규칙이다 — 공백뿐인 입력은 '고르지 않음'(= 자동 감지)이며, **그것뿐이다.**
++            // 이 자리에서 언어 코드의 모양을 검사하지도, 모르는 코드를 다른 언어로 바꾸지도,
++            // 비어 있다고 해서 로캘을 짐작해 채우지도 않는다 (INV-10 · ADR-0007 §17.1.4).
++            transcription_language: payload
++                .transcription_language
++                .map(|language| language.trim().to_string())
++                .filter(|language| !language.is_empty()),
+             // 같은 이유로 빈 선택은 '고르지 않음'이다. **다만 그것뿐이다** — 알아볼 수 없는
+             // 키가 와도 여기서 다른 장치로 바꾸지 않는다. 저장된 값과 지금 있는 장치를
+             // 맞춰 보는 일은 목록을 아는 쪽의 일이고, 그 결과는 값으로 구분된다.
+diff --git a/src-tauri/src/transcription/run.rs b/src-tauri/src/transcription/run.rs
+index 90b24cd..4b326e1 100644
+--- a/src-tauri/src/transcription/run.rs
++++ b/src-tauri/src/transcription/run.rs
+@@ -42,13 +42,15 @@
+ //!
+ //! ## 여기서 하지 않는 것
+ //!
+-//! 스레드를 만들지 않고, Tauri command를 열지 않으며, 어떤 모델을 쓸지 설정에서 읽지
+-//! **않는다** — 설정을 읽어 [`ModelChoice`]로 넘기는 것은 부르는 쪽의 일이다.
+-//! 이 함수를 배경 스레드에서 부르고 그 상태를 화면에 여는 자리는
+-//! [`crate::commands::Transcriber`]다. 모델 위치를 아는 코드는 여전히 [`model`] 하나뿐이므로
+-//! (INV-10) 이 모듈은 설정 값을 [`ModelChoice`]로 **받아서 넘기기만** 한다.
++//! 스레드를 만들지 않고, Tauri command를 열지 않으며, 어떤 모델을 쓸지도 무슨 언어로 들을지도
++//! 설정에서 읽지 **않는다** — 설정을 읽어 [`ModelChoice`]와 [`LanguageChoice`]로 넘기는 것은
++//! 부르는 쪽의 일이다. 이 함수를 배경 스레드에서 부르고 그 상태를 화면에 여는 자리는
++//! [`crate::commands::Transcriber`]다. 모델 위치를 아는 코드는 여전히 [`model`] 하나뿐이고
++//! (INV-10) 언어를 실제 엔진 호출로 옮기는 자리는 [`super::whisper`] 하나이므로
++//! (ADR-0007 §17.1.4-4), 이 모듈은 두 값을 **받아서 넘기기만** 한다.
+ 
+ use std::path::Path;
++use std::time::Instant;
+ 
+ use rusqlite::Connection;
+ 
+@@ -59,7 +61,7 @@ use crate::domain::{
+ };
+ 
+ use super::audio_input;
+-use super::engine::{output_unusable, TranscriptionEngine};
++use super::engine::{output_unusable, LanguageChoice, TranscriptionEngine};
+ use super::model;
+ use super::parse::{self, Anomaly};
+ 
+@@ -98,11 +100,16 @@ pub struct Completed {
+ /// 실패해도 원본 오디오와 Recording 레코드는 그대로다 (INV-1 · INV-3). 바뀌는 것은
+ /// `transcription_status`와 `updated_at`뿐이며, 그 둘이 바뀌는 것이 §13이 요구하는
+ /// "실패가 사용자에게 보인다"의 저장 형태다.
++///
++/// 언어 선택([`LanguageChoice`])은 이 모듈이 해석하지 않는다. 모델 값이 [`model::resolve`]로
++/// 가는 것처럼 그대로 엔진 경계로 지나가며, 저장되는 `language`는 여전히 **엔진이 보고한
++/// 값**이다 (§7 · ADR-0007 §17.1.4-3).
+ pub fn transcribe(
+     connection: &mut Connection,
+     recording_id: &RecordingId,
+     engine: &dyn TranscriptionEngine,
+     model_choice: ModelChoice<'_>,
++    language: &LanguageChoice,
+ ) -> Result<Completed, Failure> {
+     // 상태를 쓸 대상이 실재하는지부터 본다. 없는 Recording에 대해서는 아무것도 쓰지 않는다.
+     let recording = store::load_recording(connection, recording_id)?
+@@ -113,7 +120,7 @@ pub fn transcribe(
+     mark(connection, &recording, ProcessingStatus::Pending)?;
+     mark(connection, &recording, ProcessingStatus::Running)?;
+ 
+-    attempt(connection, &recording, engine, model_choice)
++    attempt(connection, &recording, engine, model_choice, language)
+         .map_err(|failure| record_failure(connection, &recording, failure))
+ }
+ 
+@@ -123,14 +130,24 @@ fn attempt(
+     recording: &Recording,
+     engine: &dyn TranscriptionEngine,
+     model_choice: ModelChoice<'_>,
++    language: &LanguageChoice,
+ ) -> Result<Completed, Failure> {
++    // **걸린 시간을 재는 자리는 여기 하나다** (`phase-prompt/05.6` 성공 기준 3). 재는 것은
++    // 오디오를 문장으로 옮기는 일 전체이며 — 모델을 찾고, 읽고, 엔진을 돌리고, 출력을
++    // 정규화하는 데까지다 — 그 뒤의 영속화는 세지 않는다. 저장이 느린 것은 전사가 느린 것이
++    // 아니고, 사람이 Metal 전후로 비교하려는 것은 전사 쪽이다.
++    //
++    // `Instant`는 **단조 시계다.** 시스템 시각이 도중에 조정돼도 값이 뒤로 가지 않는다 —
++    // 벽시계 두 번을 빼서 재면 음수 소요 시간이 저장될 수 있다.
++    let started = Instant::now();
++
+     // 모델 없음도 여기서 나온다 — 조용한 skip이 아니라 §13의 실패이며, 그래서 아래의
+     // `failed` 기록을 거쳐 사용자에게 도달한다.
+     let model = model::resolve(model_choice.models_dir, model_choice.configured)?;
+ 
+     // 원본은 읽기 전용으로만 열린다 ([`audio_input::load`] · INV-1).
+     let input = audio_input::load(Path::new(&recording.audio_path))?;
+-    let raw = engine.transcribe(&input, &model)?;
++    let raw = engine.transcribe(&input, &model, language)?;
+ 
+     // 파생 입력은 여기서 쓸모를 다한다. 1시간짜리 녹음이면 수백 MB이므로 영속화 전에
+     // 놓아 준다. **정리는 이것뿐이다** — 디스크에 자리를 갖지 않는 파생물이라 지울 파일도,
+@@ -148,9 +165,15 @@ fn attempt(
+         )));
+     }
+ 
++    // 여기까지가 "전사 한 건"이다. 실패한 시도의 시간은 남지 않는다 — 실패 경로는 Transcript를
++    // 만들지 않으며, 이 값은 Transcript와 함께만 존재한다.
++    let transcription_ms = elapsed_ms(started);
++
+     let transcript = Transcript {
+         id: TranscriptId::new(store::new_id(connection)?),
+         recording_id: recording.id.clone(),
++        // **엔진이 보고한 값이다** — 사용자가 고른 언어를 여기에 베껴 넣지 않는다. 엔진이
++        // 말하지 못했으면 비어 있다 (ADR-0007 §16.2 · §17.1.4-3 · parse::normalize).
+         language: transcription.language,
+         segments: transcription
+             .segments
+@@ -167,6 +190,8 @@ fn attempt(
+         // (§7 · ADR-0007 §8.2.4).
+         engine: engine.engine_id(),
+         model: model.id().to_owned(),
++        // 이 전사에 실제로 걸린 시간. 저장하지 않으면 비교할 것이 남지 않는다.
++        transcription_ms: Some(transcription_ms),
+     };
+ 
+     // 순서가 규칙이다: 추가 → current로 올리기 → `done`.
+@@ -182,6 +207,14 @@ fn attempt(
+     })
+ }
+ 
++/// 잰 시간을 밀리초 정수로 옮긴다.
++///
++/// 단조 시계로 잰 값이므로 음수가 될 수 없고, 넘칠 만큼 긴 전사에서도 패닉하지 않는다 —
++/// 오래 걸렸다는 사실 때문에 전사 결과를 잃지 않는다.
++fn elapsed_ms(started: Instant) -> i64 {
++    i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX)
++}
++
+ /// 전사 상태 하나를 저장한다. 다른 후처리 상태는 읽은 값을 그대로 다시 쓴다.
+ fn mark(
+     connection: &Connection,
+diff --git a/src/screens/RecordingDetailScreen.tsx b/src/screens/RecordingDetailScreen.tsx
+index 5735925..c814190 100644
+--- a/src/screens/RecordingDetailScreen.tsx
++++ b/src/screens/RecordingDetailScreen.tsx
+@@ -1040,6 +1040,12 @@ function TranscriptTab({
+           <p className="hint">
+             {[tab.language, tab.engine, tab.model].filter((fact) => fact !== null).join(' · ')}
+           </p>
++          {/* 이 전사에 얼마나 걸렸는가 (phase-prompt/05.6 성공 기준 3). 문장은 Rust가 만든
++              것을 그대로 쓴다. **재지 않은 옛 Transcript에서는 이 줄이 아예 없다** —
++              모르는 것을 0초라고 말하지 않는다. */}
++          {tab.transcriptionLabel !== null && (
++            <p className="hint">Transcribed in {tab.transcriptionLabel}</p>
++          )}
+           <TranscriptLines lines={tab.lines} />
+         </>
+       )}
+diff --git a/src/screens/transcriptView.ts b/src/screens/transcriptView.ts
+index 3a52542..e1a096e 100644
+--- a/src/screens/transcriptView.ts
++++ b/src/screens/transcriptView.ts
+@@ -24,9 +24,14 @@
+  *
+  * ```text
+  * 길이       52:31       이 녹음은 얼마나 긴가        Rust가 만든다
++ * 걸린 시간  1:47        전사에 얼마나 걸렸는가       Rust가 만든다
+  * timestamp  00:02:14    이 문장은 녹음의 어디인가    여기서 만든다
+  * ```
+  *
++ * 전사에 걸린 시간도 Rust가 만든 문장을 그대로 받는다 (`transcriptionLabel`) — 이 모듈은 그
++ * 밀리초를 보지 않는다. 그리고 **잰 적이 없으면 `null`이 그대로 지나간다**: 재지 않은 것을
++ * `0:00`이라고 말하면 Metal 전후 비교가 거짓을 말하기 때문이다 (`phase-prompt/05.6` 기준 3).
++ *
+  * §7의 요구 6이 정한 표시 형태(`00:02:14 → 00:02:21`)는 화면의 문제이고, 그것을 만드는 규칙은
+  * **여기 한 곳**에 있다 ({@link formatTimestamp}). 밀리초를 어떤 단위로 볼지는 이미 Rust의 통합
+  * 경계에서 한 번 정규화됐으므로 (`src-tauri/src/transcription/parse.rs`), 여기서 하는 일은
+@@ -176,6 +181,14 @@ export type TranscriptTabView =
+       /** 이 문장들이 무엇으로 만들어졌는가 (provenance · §7). */
+       readonly engine: string;
+       readonly model: string;
++      /**
++       * 이 전사에 **얼마나 걸렸는가** — Rust가 만든 문장 그대로다 (예: `1:47`).
++       *
++       * `null`이면 **그때는 재지 않았다**는 뜻이다 (`phase-prompt/05.6` 성공 기준 3).
++       * 그 상태를 `0:00`으로 말하지 않는다 — 화면은 그 줄을 아예 보이지 않는다.
++       * 모르는 것을 지어내지 않는 규칙은 {@link language}와 같다.
++       */
++      readonly transcriptionLabel: string | null;
+     }
+   | {
+       readonly kind: 'failed';
+@@ -305,6 +318,8 @@ export function transcriptTab(
+       language: transcript.language,
+       engine: transcript.engine,
+       model: transcript.model,
++      // 받은 문장을 그대로 나른다. 없으면 없는 채로 나른다 — 여기서 만들지 않는다.
++      transcriptionLabel: transcript.transcriptionLabel,
+     };
+   }
+   if (recording.currentTranscriptId !== null) {

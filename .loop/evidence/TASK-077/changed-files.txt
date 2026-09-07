@@ -1,0 +1,29 @@
+TASK-077 — 이 Run이 바꾼 파일 전부
+
+새 파일
+  src-tauri/src/transcription/collapse.rs
+      붕괴 판정 규칙 하나 + 그 규칙의 단위 테스트 16개.
+      use 구문은 두 개뿐이다:  std::collections::BTreeMap  ·  super::parse::TranscriptSegment
+
+수정
+  src-tauri/src/transcription/mod.rs
+      (1) 모듈 지도에 collapse.rs 한 줄 추가 (문서)
+      (2) pub mod collapse;
+      (3) pub use collapse::{assess, CollapseAssessment, CollapseMetrics, CollapseVerdict,
+                             COLLAPSED_TOP_REPEAT_SHARE_AT_OR_ABOVE,
+                             COLLAPSED_UNIQUE_RATIO_AT_OR_BELOW,
+                             MINIMUM_SENTENCES_TO_JUDGE};
+
+Evidence (이 Task 전용 디렉터리)
+  .loop/evidence/TASK-077/gate-results.md
+  .loop/evidence/TASK-077/collapse-unit-tests.txt
+  .loop/evidence/TASK-077/changed-files.txt
+  .loop/evidence/TASK-077/acceptance-mapping.md
+
+건드리지 않은 것 — 이 Task는 저장도 상태 변경도 하지 않는다
+  src-tauri/src/transcription/run.rs        (저장 직전 자리는 다른 Task의 몫이다)
+  src-tauri/src/transcription/engine.rs     (실패 생성 경로를 새로 만들지 않았다)
+  src-tauri/src/transcription/whisper.rs
+  src-tauri/src/domain/**  ·  src-tauri/src/db/**  ·  src-tauri/src/commands/**
+  src/**  (화면)  ·  Cargo.toml  ·  package.json  ·  설정 · 의존성
+  docs/**  (ADR은 TASK-076이 이미 확정했다 — 이 Run은 그 값을 코드로 옮겼을 뿐이다)

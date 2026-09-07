@@ -1,0 +1,920 @@
+diff --git a/src-tauri/src/commands/mod.rs b/src-tauri/src/commands/mod.rs
+index cb8bc97..e7d8cbf 100644
+--- a/src-tauri/src/commands/mod.rs
++++ b/src-tauri/src/commands/mod.rs
+@@ -92,6 +92,7 @@ pub mod export;
+ pub mod notes;
+ pub mod notion;
+ pub mod payload;
++pub mod saved_file;
+ pub mod transcriber;
+ 
+ use std::path::{Path, PathBuf};
+@@ -129,6 +130,7 @@ pub use payload::{
+     RecordingPayload, SessionStatusPayload, SettingsPayload, StoppedRecordingPayload,
+     StructuredNotePayload, TranscriptPayload, TranscriptSegmentPayload, TranscriptionStatusPayload,
+ };
++pub use saved_file::SavedFiles;
+ pub use transcriber::Transcriber;
+ 
+ /// 앱이 들고 있는 로컬 저장소.
+@@ -1132,6 +1134,27 @@ pub fn export_ai_request(
+     exporter.export_ai_request(&recording_id, notes::parse_mode(&mode)?)
+ }
+ 
++/// 이미 만들어진 파일이 **놓인 자리를 연다** (`phase-prompt/05.6` 성공 기준 2 · R-4).
++///
++/// **파일을 만들지도 고치지도 지우지도 않는다.** 이 이름이 하는 일은 이미 있는 것을 사람에게
++/// 보여 주는 것뿐이며, 그래서 export 표면은 여전히 파일 하나를 만드는 이름 둘이다
++/// ([`export_markdown`] · [`export_ai_request`] · `tests/ipc-boundary.test.ts`).
++///
++/// **화면이 임의 경로를 열 수 없다.** 열리는 것은 이 앱의 `exports/` 아래에 실제로 있는 파일뿐이며,
++/// 그 판정은 [`SavedFiles::show`] 한 곳에 있다 — 저장된 녹음의 재생에서 asset protocol의 범위를
++/// backend가 정하는 것과 같은 규약이다 (`crate::run` · PRODUCT-SPEC §12).
++///
++/// **열 수 없는 시스템에서는 조용히 아무 일도 하지 않지 않는다** — 그 사실이 §13의 실패로
++/// 도착한다 (`crate::platform::file_manager`). 어느 실패에서도 파일은 그 자리에 그대로 있고,
++/// 화면은 전체 경로를 계속 보여 준다 (INV-3).
++///
++/// `async`인 이유는 [`export_markdown`]과 같다 — 파일 관리자를 띄우는 동안 창이 함께 멈추지
++/// 않게 한다.
++#[tauri::command(async)]
++pub fn show_saved_file(saved_files: State<'_, SavedFiles>, path: String) -> Result<(), Failure> {
++    saved_files.show(&path)
++}
++
+ /// Recording 하나의 Notion 전송을 시작한다. **돌아오는 것은 접수 사실이지 전송 결과가 아니다.**
+ ///
+ /// 실제 전송은 배경 스레드에서 돌므로 이 호출은 바로 끝난다 — 1시간짜리 transcript를 걸어도 이
+diff --git a/src-tauri/src/lib.rs b/src-tauri/src/lib.rs
+index afdacae..514f074 100644
+--- a/src-tauri/src/lib.rs
++++ b/src-tauri/src/lib.rs
+@@ -12,7 +12,7 @@ pub mod transcription;
+ use tauri::Manager;
+ 
+ use commands::{
+-    AudioDevices, Exporter, NoteGenerator, NotionSender, Recorder, Storage, Transcriber,
++    AudioDevices, Exporter, NoteGenerator, NotionSender, Recorder, SavedFiles, Storage, Transcriber,
+ };
+ use platform::app_data_dir::AppDataDirectory;
+ 
+@@ -70,6 +70,22 @@ pub fn run() {
+             // 경로를 얻지 못한 실패는 값으로 남아 내보내려 할 때 사용자에게 전달된다 (§13).
+             app.manage(Exporter::open_for(app));
+ 
++            // 내보낸 파일이 **놓인 자리를 여는** 수단도 같은 루트 하나에서 나온다
++            // (`phase-prompt/05.6` 성공 기준 2 · R-4). 경로를 글자로 보여 주는 것만으로는
++            // 사람이 파일에 도달하지 못한다는 것이 2026-09-05의 실사용에서 드러났다 —
++            // macOS에서 `~/Library`는 Finder 기본 숨김이기 때문이다.
++            //
++            // **여기서도 디렉터리를 만들지 않는다.** 이 자리가 하는 일은 이미 있는 것을 여는
++            // 것뿐이며, 한 번도 내보낸 적이 없으면 열 것도 없다 (crate::commands::saved_file).
++            //
++            // **webview가 임의 경로를 열 수 없다** — 열리는 것은 이 앱의 `exports/` 아래에
++            // 실제로 있는 파일뿐이고, 그 판정은 backend에 있다. 저장된 녹음의 재생에서 asset
++            // protocol의 범위를 아래에서 backend가 정하는 것과 같은 규약이다 (§12).
++            //
++            // OS를 부르는 코드는 이 자리에도 없다. 그것을 아는 것은 platform 경계 하나다
++            // (crate::platform::file_manager · INV-10).
++            app.manage(SavedFiles::open_for(app));
++
+             // 진행 중인 **Notion 전송**의 소유자도 여기다 — 전사 · 노트 생성과 같은 이유이며
+             // (R-001), 하나가 더 있다: 긴 transcript는 여러 요청으로 나뉘어 나가고 속도 제한을
+             // 만나면 그 사이에 기다린다 (ADR-0009 §6 · §9). 그동안 목록을 보거나 설정을 바꾸는
+@@ -161,6 +177,20 @@ pub fn run() {
+             commands::get_ai_prompt,
+             commands::get_transcript_text,
+             commands::export_ai_request,
++            // Phase 5.6이 더하는 이름 하나 — **이미 만들어진 파일이 놓인 자리를 연다**
++            // (`phase-prompt/05.6` 성공 기준 2 · R-4).
++            //
++            // **파일을 만들지도 고치지도 지우지도 않는다.** 그래서 export 표면은 여전히 파일
++            // 하나를 만드는 이름 둘이며 (INV-3 · tests/ipc-boundary.test.ts), 이 이름이 여는
++            // 것은 그 둘이 이미 만들어 둔 파일이다.
++            //
++            // **화면이 임의 경로를 열 수 없다** — 무엇을 열어도 되는지 정하는 것은 backend이며
++            // (`src/commands/saved_file.rs`), 그 범위는 이 앱의 `exports/` 하나다. 위의 asset
++            // protocol이 녹음 디렉터리 하나만 여는 것과 같은 규약이다 (§12).
++            //
++            // (이 주석에 그 모듈을 `commands::…` 경로로 적지 않는다 —
++            //  `tests/ipc-boundary.test.ts`가 등록 목록을 그 모양으로 읽는다.)
++            commands::show_saved_file,
+             // Notion 전송의 표면은 이 여섯이다 — 전송 시작 · 진행 상태 조회 · 저장된 전송 기록
+             // 읽기 · 연결 확인 · token 저장 · token 삭제. **저장된 것을 고치거나 지우는 이름은
+             // 여기에도 없다**: 지우는 하나는 이 앱이 넣은 자격증명 항목이며, 녹음 · 전사 · 노트 ·
+diff --git a/src-tauri/src/platform/mod.rs b/src-tauri/src/platform/mod.rs
+index 0f3a443..a65a0ab 100644
+--- a/src-tauri/src/platform/mod.rs
++++ b/src-tauri/src/platform/mod.rs
+@@ -10,11 +10,18 @@
+ //! ```text
+ //! app_data_dir.rs   앱 데이터가 놓이는 자리   (Tauri가 플랫폼 차이를 안다)
+ //! clock.rs          흐르는 시간
++//! file_manager.rs   그 자리를 여는 수단        (OS 파일 관리자를 아는 유일한 자리)
+ //! microphone.rs     마이크 접근 권한          (macOS 설정 경로를 아는 유일한 자리)
+ //! secret_store.rs   secret이 놓이는 자리      (OS 자격증명 저장소를 아는 유일한 자리)
+ //! ```
++//!
++//! `app_data_dir.rs`와 `file_manager.rs`는 한 쌍이다 — 앞의 것이 **파일이 어디에 놓이는가**를
++//! 답하고, 뒤의 것이 **그 자리를 사람이 어떻게 여는가**를 답한다. 경로를 글자로 보여 주는
++//! 것만으로는 부족하다는 것이 2026-09-05의 실사용에서 드러났기 때문이다
++//! (`phase-prompt/05.6` R-4).
+ 
+ pub mod app_data_dir;
+ pub mod clock;
++pub mod file_manager;
+ pub mod microphone;
+ pub mod secret_store;
+diff --git a/src/App.css b/src/App.css
+index 908f189..470c3f0 100644
+--- a/src/App.css
++++ b/src/App.css
+@@ -882,6 +882,16 @@ p.loading {
+   word-break: break-all;
+ }
+ 
++/*
++ * 그 자리를 여는 수단 (`phase-prompt/05.6` 성공 기준 2 · R-4). **경로 줄 아래에 놓인다** —
++ * 경로를 대체하는 것이 아니라 그 옆에 더해지는 수단이며, 열지 못했을 때 남는 길이 바로 위의
++ * `.share__path`이기 때문이다.
++ */
++
++.share__show {
++  margin: 0 0 var(--space-2);
++}
++
+ /* 무엇이 나가는가 (INV-5 · INV-6). 본문이 어느 상태든 같은 자리에 있다. */
+ 
+ .share__contents {
+diff --git a/src/ipc/commands.ts b/src/ipc/commands.ts
+index e45a94a..6d13dc8 100644
+--- a/src/ipc/commands.ts
++++ b/src/ipc/commands.ts
+@@ -1,7 +1,7 @@
+ /**
+  * 프론트엔드가 부를 수 있는 동작의 전부.
+  *
+- * `src-tauri/src/lib.rs`가 등록한 서른한 개 command와 1:1이며, 그 밖의 경로는 없다 —
++ * `src-tauri/src/lib.rs`가 등록한 서른두 개 command와 1:1이며, 그 밖의 경로는 없다 —
+  * **임의의 질의를 보낼 수단이 없다.** 저장소를 아는 코드는 Rust 안에만 있고, Notion으로
+  * 나가는 요청을 만드는 코드도 마찬가지다 — webview에는 그 통로가 없다
+  * (`docs/ADR-0001-local-persistence.md` · `docs/ADR-0009-notion-and-export.md` §5 ·
+@@ -406,6 +406,31 @@ export function exportAiRequest(recordingId: string, mode: NoteMode): Promise<Ex
+   return call<ExportedFile>('export_ai_request', { recordingId, mode });
+ }
+ 
++/**
++ * 이미 만들어진 파일이 **놓인 자리를 연다** (`phase-prompt/05.6` 성공 기준 2 · R-4).
++ *
++ * **파일을 만들지도 고치지도 지우지도 않는다.** 그래서 export 표면은 여전히 파일 하나를 만드는
++ * 이름 둘이며 ({@link exportMarkdown} · {@link exportAiRequest}), 이 이름이 여는 것은 그 둘이
++ * 이미 만들어 둔 파일이다.
++ *
++ * 경로를 글자로 보여 주는 것은 그대로다 — **이것은 그 대체가 아니라 추가다.** macOS에서
++ * `~/Library`는 Finder 기본 숨김이라 경로를 알아도 걸어 들어갈 수 없다는 것이 2026-09-05의
++ * 실사용에서 드러났고, 그래서 여는 수단이 화면에 함께 있다.
++ *
++ * **이 함수로 아무 경로나 열 수 없다.** 무엇을 열어도 되는지 정하는 것은 backend이며, 열리는
++ * 것은 그 앱이 자기 `exports/` 아래에 있다고 확인한 파일뿐이다 — 그 밖의 경로는 거절되고 그
++ * 사실이 {@link Failure}로 온다 (`src-tauri/src/commands/saved_file.rs` · PRODUCT-SPEC §12).
++ * 저장된 녹음의 재생에서 열리는 자리를 backend가 정하는 것과 같은 규약이다
++ * ({@link recordingAudioSource}).
++ *
++ * **어느 OS에서 무엇을 부르는지 화면은 알지 않는다** (INV-10). 그 지식은 backend의 platform
++ * 경계 하나에 있고, 열 수 없는 시스템에서는 조용히 아무 일도 하지 않는 대신 그 사실이 §13의
++ * 실패로 온다. 어떤 실패에서도 파일은 그 자리에 그대로 있다 (INV-3).
++ */
++export function showSavedFile(path: string): Promise<void> {
++  return call<void>('show_saved_file', { path });
++}
++
+ /**
+  * 녹음 하나를 Notion 페이지로 보내기 시작한다. **돌아오는 것은 접수 사실이지 전송 결과가 아니다.**
+  *
+diff --git a/src/screens/aiHandoffView.test.ts b/src/screens/aiHandoffView.test.ts
+index 861dff1..c3601c1 100644
+--- a/src/screens/aiHandoffView.test.ts
++++ b/src/screens/aiHandoffView.test.ts
+@@ -41,6 +41,15 @@ import {
+ } from './aiHandoffView';
+ import { aiNoteTab, type AiNoteInput } from './aiNoteView';
+ import { COPY_PROMPT_LABEL, COPY_TRANSCRIPT_LABEL, NO_COPY_ATTEMPT, startedCopy } from './copyView';
++import {
++  NO_SHOW_FILE_ATTEMPT,
++  SHOW_FILE_LABEL,
++  SHOW_FILE_PRESERVED_NOTICE,
++  SHOW_FILE_RESOLUTION,
++  SHOW_FILE_RETRY_LABEL,
++  failedShowFile,
++  showingFile,
++} from './savedFileView';
+ 
+ // --- 사실들 --------------------------------------------------------------------------
+ 
+@@ -73,6 +82,8 @@ function transcript(): Transcript {
+     createdAt: '2026-09-03T04:50:26.000Z',
+     engine: 'whisper.cpp',
+     model: 'ggml-base.bin',
++    transcriptionMs: null,
++    transcriptionLabel: null,
+   };
+ }
+ 
+@@ -102,6 +113,8 @@ function input(overrides: Partial<ManualHandoffInput> = {}): ManualHandoffInput
+     mode: 'meeting',
+     copy: NO_COPY_ATTEMPT,
+     aiExport: NO_AI_EXPORT_ATTEMPT,
++    // 자리를 여는 시도는 아직 하지 않았다 (`phase-prompt/05.6` 성공 기준 2).
++    show: NO_SHOW_FILE_ATTEMPT,
+     ...overrides,
+   };
+ }
+@@ -177,7 +190,12 @@ describe('provider가 하나도 없어도 세 동작이 전부 가능하다 (MH-
+   it('아래 줄의 입력에 AI provider를 담을 자리가 없다', () => {
+     // 담을 자리가 없으므로 "provider가 없어서 복사할 수 없다"는 상태를 만들 수단이 없다.
+     // 필드를 통째로 고정한다 — 새 필드가 하나 생기면 여기서 먼저 드러난다.
+-    expect(Object.keys(input()).sort()).toEqual(['aiExport', 'copy', 'mode', 'recording']);
++    //
++    // **필드가 하나 늘었다** — `show`다 (`phase-prompt/05.6` 성공 기준 2 · R-4). 그것은
++    // provider가 아니라 **이미 만들어진 파일 하나가 놓인 자리를 여는 시도**이며, 담고 있는
++    // 것은 파일 경로다. 그 시도가 어떤 상태든 세 자리가 눌리는 사실은 달라지지 않는다
++    // (아래 '자리를 여는 수단'이 그것을 값으로 못박는다).
++    expect(Object.keys(input()).sort()).toEqual(['aiExport', 'copy', 'mode', 'recording', 'show']);
+   });
+ 
+   it('provider를 고르지 않은 그 순간에도 세 자리가 전부 눌린다', () => {
+@@ -436,6 +454,78 @@ describe('Export for AI 자리 (요구 3)', () => {
+     expect(view.aiExport.body.text).toMatch(/never overwrites/);
+   });
+ 
++  it('만들어진 파일이 놓인 자리를 여는 수단이 경로와 함께 있다 (05.6 성공 기준 2 · R-4)', () => {
++    // 만든 파일을 AI 채팅에 첨부하려면 그 파일에 실제로 도달할 수 있어야 한다. 경로만으로는
++    // 도달하지 못한다는 것이 2026-09-05의 실사용에서 드러났다 (macOS의 `~/Library` 숨김).
++    const written = file();
++    const view = manualHandoff(input({ aiExport: exportedAiRequest(written) }));
++
++    if (view.aiExport.body.kind !== 'done') {
++      throw new Error('파일이 만들어진 상태여야 한다');
++    }
++    // 대체가 아니라 추가다 — 경로는 그대로다.
++    expect(view.aiExport.body.path).toBe(written.path);
++    expect(view.aiExport.body.show.action.kind).toBe('show');
++    expect(view.aiExport.body.show.action.label).toBe(SHOW_FILE_LABEL);
++    expect(view.aiExport.body.show.action.path).toBe(written.path);
++    expect(view.aiExport.body.show.trouble).toBeNull();
++    // 이 자리는 여전히 눌린다 — 여는 수단이 생겼다고 다시 내보낼 수 없게 되지 않는다.
++    expect(view.steps[2].usable).toBe(true);
++  });
++
++  it('자리를 열지 못해도 파일 · 경로 · 세 자리는 그대로다 (§13 · INV-3 · MH-7)', () => {
++    const written = file();
++    const view = manualHandoff(
++      input({
++        aiExport: exportedAiRequest(written),
++        show: failedShowFile(written.path, failure('storage')),
++      }),
++    );
++
++    if (view.aiExport.body.kind !== 'done') {
++      throw new Error('여는 데 실패해도 파일은 만들어진 채다');
++    }
++    expect(view.aiExport.body.headline).toBe(AI_EXPORT_DONE_HEADLINE);
++    expect(view.aiExport.body.path).toBe(written.path);
++
++    const trouble = view.aiExport.body.show.trouble;
++    if (trouble === null) {
++      throw new Error('실패가 값으로 있어야 한다');
++    }
++    expect(trouble.failure.kind).toBe('storage');
++    expect(trouble.preservedNotice).toBe(SHOW_FILE_PRESERVED_NOTICE);
++    // 그래도 도달할 길이 남아 있다 — 위에 그대로 있는 경로다.
++    expect(trouble.resolution).toBe(SHOW_FILE_RESOLUTION);
++    expect(view.aiExport.body.show.action.label).toBe(SHOW_FILE_RETRY_LABEL);
++    // 복사 두 자리도, 다시 내보내는 자리도 그대로 쓸 수 있다.
++    expect(view.steps.every((step) => step.usable)).toBe(true);
++  });
++
++  it('여는 중이라는 사실이 문장으로 있고, 다른 파일의 시도는 보이지 않는다', () => {
++    const written = file();
++
++    const showing = manualHandoff(
++      input({ aiExport: exportedAiRequest(written), show: showingFile(written.path) }),
++    );
++    if (showing.aiExport.body.kind !== 'done') {
++      throw new Error('파일이 만들어진 상태여야 한다');
++    }
++    expect(showing.aiExport.body.show.showing).toBe(true);
++    expect(showing.aiExport.body.show.text.trim()).not.toBe('');
++
++    const elsewhere = manualHandoff(
++      input({
++        aiExport: exportedAiRequest(written),
++        show: failedShowFile('/somewhere/else.md', failure('storage')),
++      }),
++    );
++    if (elsewhere.aiExport.body.kind !== 'done') {
++      throw new Error('파일이 만들어진 상태여야 한다');
++    }
++    expect(elsewhere.aiExport.body.show.trouble).toBeNull();
++    expect(elsewhere.aiExport.body.show.showing).toBe(false);
++  });
++
+   it('실패는 §13의 세 질문에 답하고 재시도 수단을 남긴다 (MH-7)', () => {
+     const cases: readonly (readonly [FailureKind, string, string | null])[] = [
+       ['invalidInput', 'nothingToExport', 'Transcribe this recording'],
+diff --git a/src/screens/aiHandoffView.ts b/src/screens/aiHandoffView.ts
+index 8be6c07..e02aaa4 100644
+--- a/src/screens/aiHandoffView.ts
++++ b/src/screens/aiHandoffView.ts
+@@ -41,6 +41,7 @@
+ import { toFailure, type Failure } from '../ipc/failure';
+ import type { ExportedFile, NoteMode, Recording } from '../ipc/types';
+ import type { AiNoteTabView, NoteModeChoice } from './aiNoteView';
++import { showFile, type ShowFileAttempt, type ShowFileView } from './savedFileView';
+ import {
+   COPY_PROMPT_LABEL,
+   COPY_TRANSCRIPT_LABEL,
+@@ -195,6 +196,15 @@ export type AiExportBody =
+       readonly fileName: string;
+       /** 사용자에게 그대로 보여줄 수 있는 전체 경로. 화면이 만들어 내는 값이 아니다 (§4.1). */
+       readonly path: string;
++      /**
++       * 그 자리를 여는 수단 (`phase-prompt/05.6` 성공 기준 2 · R-4 · `savedFileView.ts`).
++       *
++       * **{@link path}의 대체가 아니라 추가다** — 만든 파일을 AI 채팅에 첨부하려면 그 파일에
++       * 실제로 도달할 수 있어야 하는데, 경로만으로는 도달하지 못한다는 것이 실사용에서
++       * 드러났다. 여는 데 실패해도 경로는 그대로 보이며, 그때 무엇을 할 수 있는지도 이 값이
++       * 말한다.
++       */
++      readonly show: ShowFileView;
+       readonly text: string;
+       /** 또 내보낼 수 있다. 있던 파일은 그대로 둔 채 하나가 더 생긴다. */
+       readonly again: AiExportAction;
+@@ -225,11 +235,15 @@ function aiExportItem(
+   recording: Recording | null,
+   mode: NoteMode,
+   attempt: AiExportAttempt,
++  show: ShowFileAttempt,
+ ): AiExportItemView {
+   if (recording === null) {
+     return { label: AI_EXPORT_LABEL, body: { kind: 'loading' } };
+   }
+-  return { label: AI_EXPORT_LABEL, body: aiExportBody(recording, mode, mine(attempt, recording.id)) };
++  return {
++    label: AI_EXPORT_LABEL,
++    body: aiExportBody(recording, mode, mine(attempt, recording.id), show),
++  };
+ }
+ 
+ /** 이 녹음에 대한 시도만 본다. 다른 녹음의 결과가 이 자리에 보이지 않는다. */
+@@ -248,6 +262,7 @@ function aiExportBody(
+   recording: Recording,
+   mode: NoteMode,
+   attempt: AiExportAttempt,
++  show: ShowFileAttempt,
+ ): AiExportBody {
+   if (attempt.kind === 'exporting') {
+     return { kind: 'exporting', text: AI_EXPORT_RUNNING_TEXT };
+@@ -259,6 +274,8 @@ function aiExportBody(
+       headline: AI_EXPORT_DONE_HEADLINE,
+       fileName: attempt.file.fileName,
+       path: attempt.file.path,
++      // 경로를 보여 주는 것에 **더해** 그 자리를 여는 수단이 있다 (성공 기준 2 · R-4).
++      show: showFile(attempt.file.path, show),
+       text: AI_EXPORT_DONE_TEXT,
+       again: againAction(recording.id, mode),
+     };
+@@ -372,6 +389,14 @@ export interface ManualHandoffInput {
+   readonly copy: CopyAttempt;
+   /** 이 화면이 건 Export for AI 한 번. */
+   readonly aiExport: AiExportAttempt;
++  /**
++   * 이 화면이 건 **자리 열기** 한 번 (`phase-prompt/05.6` 성공 기준 2 · R-4).
++   *
++   * **AI provider와 아무 상관이 없다** — 이 값이 가리키는 것은 이미 만들어진 파일 하나이며,
++   * 그것을 여는 데 실패해도 파일과 경로는 그대로다. 다른 파일에 대한 시도는 이 자리에 보이지
++   * 않는다 (`savedFileView.ts`의 `showFile`).
++   */
++  readonly show: ShowFileAttempt;
+ }
+ 
+ /** 읽어 온 값을 아래 줄의 상태로 바꾼다. */
+@@ -379,7 +404,7 @@ export function manualHandoff(input: ManualHandoffInput): ManualHandoffView {
+   const { recording, mode } = input;
+ 
+   const copy = copyPanel({ recording, mode, attempt: input.copy });
+-  const aiExport = aiExportItem(recording, mode, input.aiExport);
++  const aiExport = aiExportItem(recording, mode, input.aiExport, input.show);
+ 
+   const steps: readonly ManualStep[] = [
+     { key: 'prompt', label: COPY_PROMPT_LABEL, usable: copyUsable(copy.prompt.body) },
+diff --git a/src/screens/exportView.test.ts b/src/screens/exportView.test.ts
+index adfe974..39eda03 100644
+--- a/src/screens/exportView.test.ts
++++ b/src/screens/exportView.test.ts
+@@ -32,6 +32,15 @@ import {
+   type ExportPanelInput,
+ } from './exportView';
+ import { loadedRecordingDetail } from './recordingDetailView';
++import {
++  NO_SHOW_FILE_ATTEMPT,
++  SHOW_FILE_LABEL,
++  SHOW_FILE_PRESERVED_NOTICE,
++  SHOW_FILE_RESOLUTION,
++  SHOW_FILE_RETRY_LABEL,
++  failedShowFile,
++  showingFile,
++} from './savedFileView';
+ import { loadedRecordings } from './recordingsView';
+ import { transcriptTab } from './transcriptView';
+ 
+@@ -104,6 +113,8 @@ function input(overrides: Partial<ExportPanelInput> = {}): ExportPanelInput {
+     recording: recording(),
+     notes: [],
+     attempt: NO_EXPORT_ATTEMPT,
++    // 자리를 여는 시도는 아직 하지 않았다 (`phase-prompt/05.6` 성공 기준 2).
++    show: NO_SHOW_FILE_ATTEMPT,
+     ...overrides,
+   };
+ }
+@@ -188,6 +199,120 @@ describe('내보내기 자리가 놓이는 상태', () => {
+   });
+ });
+ 
++// --- 그 자리를 여는 수단 (`phase-prompt/05.6` 성공 기준 2 · R-4) -------------------------
++
++describe('만들어진 파일이 놓인 자리를 여는 수단이 함께 있다', () => {
++  // 2026-09-05의 실사용에서 드러난 사실이 이 자리의 이유다 — 경로를 글자로 보여 주고 있었는데도
++  // 사람이 파일에 도달하지 못했다 (macOS에서 `~/Library`는 Finder 기본 숨김이다). 그래서
++  // **경로를 없애지 않고 여는 수단을 더한다.**
++
++  it('경로는 그대로 있고, 그 옆에 여는 동작이 값으로 있다', () => {
++    const written = file();
++    const view = exportPanel(input({ attempt: exportedFile(written) }));
++
++    if (view.body.kind !== 'done') {
++      throw new Error('만들어진 파일이 있어야 한다');
++    }
++    // 대체가 아니라 추가다 — 경로 줄이 사라지지 않았다.
++    expect(view.body.file.path).toBe(written.path);
++    expect(view.body.file.show.action.kind).toBe('show');
++    expect(view.body.file.show.action.label).toBe(SHOW_FILE_LABEL);
++    // 여는 대상은 backend가 준 경로 그대로다 — 화면이 다른 경로를 지어내지 않는다.
++    expect(view.body.file.show.action.path).toBe(written.path);
++    expect(view.body.file.show.showing).toBe(false);
++    expect(view.body.file.show.trouble).toBeNull();
++  });
++
++  it('여는 중이라는 사실이 문장으로 있다', () => {
++    const written = file();
++    const view = exportPanel(
++      input({ attempt: exportedFile(written), show: showingFile(written.path) }),
++    );
++
++    if (view.body.kind !== 'done') {
++      throw new Error('만들어진 파일이 있어야 한다');
++    }
++    expect(view.body.file.show.showing).toBe(true);
++    expect(view.body.file.show.text.trim()).not.toBe('');
++    // 여는 중에도 경로는 그대로 보인다.
++    expect(view.body.file.path).toBe(written.path);
++  });
++
++  it('열지 못해도 파일과 경로는 그대로이고, 그 사실이 값으로 있다 (§13 · INV-3)', () => {
++    const written = file();
++    const view = exportPanel(
++      input({
++        attempt: exportedFile(written),
++        show: failedShowFile(written.path, failure('storage', { retryable: false })),
++      }),
++    );
++
++    if (view.body.kind !== 'done') {
++      throw new Error('여는 데 실패해도 파일은 만들어진 채다');
++    }
++    // 파일이 만들어졌다는 사실도, 그 경로도 달라지지 않았다.
++    expect(view.body.file.headline).toBe(EXPORT_DONE_HEADLINE);
++    expect(view.body.file.path).toBe(written.path);
++
++    const trouble = view.body.file.show.trouble;
++    if (trouble === null) {
++      throw new Error('실패가 값으로 있어야 한다');
++    }
++    expect(trouble.failure.kind).toBe('storage');
++    expect(trouble.preservedNotice).toBe(SHOW_FILE_PRESERVED_NOTICE);
++    // 그래도 도달할 길이 남아 있다 — 위에 그대로 있는 경로다.
++    expect(trouble.resolution).toBe(SHOW_FILE_RESOLUTION);
++    // 다시 시도할 수 있고, 그것이 처음 누르는 것과 다른 상황이라는 것도 이름이 말한다 (§13).
++    expect(view.body.file.show.action.kind).toBe('retry');
++    expect(view.body.file.show.action.label).toBe(SHOW_FILE_RETRY_LABEL);
++  });
++
++  it('다른 파일을 열다 실패한 사실이 이 자리에 보이지 않는다', () => {
++    const written = file();
++    const view = exportPanel(
++      input({
++        attempt: exportedFile(written),
++        show: failedShowFile('/somewhere/else.md', failure('storage')),
++      }),
++    );
++
++    if (view.body.kind !== 'done') {
++      throw new Error('만들어진 파일이 있어야 한다');
++    }
++    expect(view.body.file.show.trouble).toBeNull();
++    expect(view.body.file.show.action.kind).toBe('show');
++  });
++
++  it('여는 시도가 무엇이든 내보내기 상태는 달라지지 않는다', () => {
++    // 여는 일과 내보내는 일은 다른 사건이다. 열지 못했다고 "내보내지 못했다"가 되면 안 된다.
++    const written = file();
++    const attempts = [
++      NO_SHOW_FILE_ATTEMPT,
++      showingFile(written.path),
++      failedShowFile(written.path, failure('storage')),
++    ];
++
++    for (const show of attempts) {
++      const view = exportPanel(input({ attempt: exportedFile(written), show }));
++
++      expect(view.body.kind, show.kind).toBe('done');
++      if (view.body.kind !== 'done') {
++        throw new Error('만들어진 파일이 있어야 한다');
++      }
++      expect(view.body.file.fileName, show.kind).toBe(written.fileName);
++      expect(view.body.again.kind, show.kind).toBe('again');
++    }
++  });
++
++  it('아직 내보내지 않은 상태에는 열 자리가 없다', () => {
++    // 만들어지지 않은 파일을 여는 수단이 있으면 그것은 없는 것을 가리킨다.
++    const view = exportPanel(input({ show: showingFile('/tmp/whatever.md') }));
++
++    expect(view.body.kind).toBe('ready');
++    expect(JSON.stringify(view.body)).not.toContain('/tmp/whatever.md');
++  });
++});
++
+ // --- 무엇이 파일에 들어가는가 (§11 · INV-6) ---------------------------------------------
+ 
+ describe('무엇이 파일에 들어가는지 말한다', () => {
+@@ -229,7 +354,11 @@ describe('P-3 (1) AI provider 없이 Markdown export가 된다 (INV-8)', () => {
+   it('이 자리의 입력에 AI provider를 담을 자리가 없다', () => {
+     // 자리가 생기는 순간 provider 하나 때문에 내보내기가 막힐 수 있게 된다. 그래서 입력의
+     // 필드를 통째로 고정한다 — 새 필드가 하나 생기면 여기서 먼저 드러난다.
+-    expect(Object.keys(input()).sort()).toEqual(['attempt', 'notes', 'recording']);
++    // **필드가 하나 늘었다** — `show`다 (`phase-prompt/05.6` 성공 기준 2 · R-4). 그것은
++    // provider가 아니라 **이 화면이 건 '자리 열기' 한 번**이며, 담고 있는 것은 파일 경로
++    // 하나다. 여는 데 실패해도 내보내기 상태는 그대로이므로 (아래 '자리를 여는 수단'),
++    // 이 필드가 늘었다고 provider 없이 내보낼 수 있다는 사실이 흔들리지 않는다.
++    expect(Object.keys(input()).sort()).toEqual(['attempt', 'notes', 'recording', 'show']);
+   });
+ 
+   // 값의 모양만 고정하면 "모듈 안에서 몰래 본다"는 경로가 남는다. 그래서 **모듈 원문에
+diff --git a/src/screens/exportView.ts b/src/screens/exportView.ts
+index 460af8f..b4fab55 100644
+--- a/src/screens/exportView.ts
++++ b/src/screens/exportView.ts
+@@ -27,9 +27,17 @@
+  * 사용자는 방금 만든 파일을 찾을 수 없다. 이 모듈은 그 경로를 **backend가 준 값 그대로** 들고
+  * 있으며 문자열을 잘라 이름을 짐작하지 않는다 — 같은 이름이 있었으면 backend가 번호를 붙였고
+  * (§4.3), 실제로 쓰인 이름이 함께 온다.
++ *
++ * ## 경로에 더해 그 자리를 여는 수단이 있다 (`phase-prompt/05.6` 성공 기준 2 · R-4)
++ *
++ * **경로는 그대로 남는다.** 2026-09-05의 실사용에서 경로만으로는 파일에 도달하지 못한다는 것이
++ * 드러났으므로 (macOS에서 `~/Library`는 Finder 기본 숨김이다), `done` 상태에 **그 자리를
++ * 여는 동작**이 값으로 하나 더 있다 ({@link ExportedFileView.show} · `savedFileView.ts`).
++ * 대체가 아니라 추가이며, 열지 못했을 때 무엇이 그대로인지도 그 값 안에 있다.
+  */
+ import { toFailure, type Failure } from '../ipc/failure';
+ import type { AiNote, ExportedFile, Recording } from '../ipc/types';
++import { showFile, type ShowFileAttempt, type ShowFileView } from './savedFileView';
+ 
+ /**
+  * 이 자리에서 사용자가 할 수 있는 동작 하나.
+@@ -74,6 +82,13 @@ export interface ExportedFileView {
+   readonly fileName: string;
+   /** 사용자에게 그대로 보여줄 수 있는 전체 경로. 화면이 만들어 내는 값이 아니다. */
+   readonly path: string;
++  /**
++   * 그 자리를 여는 수단 (`phase-prompt/05.6` 성공 기준 2 · `savedFileView.ts`).
++   *
++   * **{@link path}의 대체가 아니라 추가다** — 여는 수단이 실패해도 경로는 그대로 보이며,
++   * 그때 사용자가 무엇을 할 수 있는지도 이 값이 말한다.
++   */
++  readonly show: ShowFileView;
+ }
+ 
+ /** 파일이 만들어졌다는 사실 한 줄. */
+@@ -273,6 +288,14 @@ export interface ExportPanelInput {
+   readonly notes: readonly AiNote[] | null;
+   /** 이 화면이 건 내보내기 한 번. */
+   readonly attempt: ExportAttempt;
++  /**
++   * 이 화면이 건 **자리 열기** 한 번 (`phase-prompt/05.6` 성공 기준 2).
++   *
++   * 내보내기와 다른 값인 이유는 다른 사건이기 때문이다 — 파일은 이미 만들어졌고, 그것을
++   * 여는 데 실패해도 만들어진 사실은 그대로다. 다른 파일에 대한 시도는 이 자리에 보이지
++   * 않는다 (`savedFileView.ts`의 `showFile`).
++   */
++  readonly show: ShowFileAttempt;
+ }
+ 
+ /**
+@@ -283,14 +306,14 @@ export interface ExportPanelInput {
+  * 다른 녹음에 대한 내보내기는 이 자리와 아무 상관이 없으므로 보지 않는다.
+  */
+ export function exportPanel(input: ExportPanelInput): ExportPanelView {
+-  const { recording, notes, attempt } = input;
++  const { recording, notes, attempt, show } = input;
+   const contents = contentsNotice(notes);
+ 
+   if (recording === null) {
+     return { contents, body: { kind: 'loading' } };
+   }
+ 
+-  const body = panelBody(recording, mine(attempt, recording.id));
++  const body = panelBody(recording, mine(attempt, recording.id), show);
+   return { contents, body };
+ }
+ 
+@@ -306,7 +329,11 @@ function mine(attempt: ExportAttempt, recordingId: string): ExportAttempt {
+   }
+ }
+ 
+-function panelBody(recording: Recording, attempt: ExportAttempt): ExportPanelBody {
++function panelBody(
++  recording: Recording,
++  attempt: ExportAttempt,
++  show: ShowFileAttempt,
++): ExportPanelBody {
+   if (attempt.kind === 'running') {
+     return { kind: 'exporting', text: EXPORTING_TEXT };
+   }
+@@ -318,6 +345,8 @@ function panelBody(recording: Recording, attempt: ExportAttempt): ExportPanelBod
+         headline: EXPORT_DONE_HEADLINE,
+         fileName: attempt.file.fileName,
+         path: attempt.file.path,
++        // 경로를 보여 주는 것에 **더해** 그 자리를 여는 수단이 있다 (성공 기준 2 · R-4).
++        show: showFile(attempt.file.path, show),
+       },
+       text: EXPORT_DONE_TEXT,
+       again: againAction(recording.id),
+diff --git a/tests/ipc-boundary.test.ts b/tests/ipc-boundary.test.ts
+index 2459918..faab64d 100644
+--- a/tests/ipc-boundary.test.ts
++++ b/tests/ipc-boundary.test.ts
+@@ -76,6 +76,22 @@ const payloadSource = readText('../src-tauri/src/commands/payload.rs');
+  * 고를 방법이 wire에 없다는 것이 그 표현이다. **provider나 벤더를 아는 이름도 없다**
+  * (MH-1 · MH-2 · MH-6) — AI를 하나도 설정하지 않아도 셋이 전부 동작한다.
+  *
++ * 마지막 하나가 Phase 5.6의 **자리 열기**다 — `show_saved_file`
++ * (`phase-prompt/05.6` 성공 기준 2 · R-4). 31 → 32이며, **늘어난 이유는 새 기능이 아니라
++ * 2026-09-05의 실사용에서 드러난 사실이다**: 화면은 만들어진 파일의 전체 경로를 이미 글자로
++ * 보여 주고 있었는데도 사람이 그 파일에 도달하지 못했다. macOS에서 `~/Library`가 Finder 기본
++ * 숨김이기 때문이며, "경로를 보여 주면 찾을 수 있다"는 가정이 이 플랫폼에서 틀렸다.
++ *
++ * **이 이름은 파일을 만들지도 고치지도 지우지도 않는다** (INV-3). 이미 있는 파일이 놓인 자리를
++ * 열 뿐이며, 그래서 아래 'export 표면은 파일 하나를 만드는 이름 둘뿐이다'가 세는 집합은 여전히
++ * 둘이다 — 이 이름은 거기 속하지 않는다. 이름에 `export`가 들어 있지 않은 것도 그 사실의
++ * 표현이다: 내보내는 이름이 셋이 된 것이 아니다.
++ *
++ * **webview가 임의 경로를 여는 이름도 아니다.** 무엇을 열어도 되는지 정하는 것은 backend이며,
++ * 열리는 것은 그 앱이 자기 `exports/` 아래에 있다고 확인한 파일뿐이다
++ * (`src-tauri/src/commands/saved_file.rs`). 저장된 녹음의 재생에서 asset protocol의 범위를
++ * backend가 정하는 것과 같은 규약이다 (PRODUCT-SPEC §12 · ADR-0006).
++ *
+  * 이 목록에 없는 이름이 등록되면 그것은 Phase 범위가 넘쳤다는 뜻이다 — 그래서 이 검사는
+  * 부분집합이 아니라 **정확히 같은 집합**을 요구한다.
+  */
+@@ -111,6 +127,8 @@ const REGISTERED_COMMANDS = [
+   'get_ai_prompt',
+   'get_transcript_text',
+   'export_ai_request',
++  // 이미 만들어진 파일이 **놓인 자리를 연다.** 만들지도 고치지도 지우지도 않는다 (INV-3).
++  'show_saved_file',
+ ];
+ 
+ /** lib.rs의 generate_handler![...]에 등록된 command 이름. */
+@@ -171,6 +189,15 @@ describe('command 표면', () => {
+     // (phase-prompt/05의 Out of Scope · §16 DEFERRED), 이름 하나가 더 필요해지면 여기서 먼저
+     // 걸린다.
+     //
++    // **Phase 5.6이 더한 이름은 이 정규식을 느슨하게 만들지 않았다.** `show_saved_file`은
++    // 내보내는 이름이 아니므로 `export`가 들어 있지 않고, 저장된 녹음을 재생하는 이름도
++    // 아니므로 `play`도 없다.
++    //
++    // 대신 **막는 이름이 둘 늘었다** — `finder`와 `explorer`다. 자리를 여는 표면이 실제로
++    // 열렸으므로, 그 표면의 이름이 어느 OS의 파일 관리자인지 말하기 시작하면 플랫폼 지식이
++    // command 이름으로 새어 나온 것이다 (INV-10). 그것을 아는 자리는
++    // `src-tauri/src/platform/file_manager.rs` 하나이며, 벤더 이름을 막는 것과 같은 태도다.
++    //
+     // **`notion`은 이제 여기 없다** — 전송 표면이 실제로 열렸기 때문이다 (§10). 그 대신 아래의
+     // 'Notion 표면은 여섯뿐이다'가 그 선을 지킨다: 이름이 하나 늘면 그쪽에서 먼저 드러난다.
+     //
+@@ -179,7 +206,7 @@ describe('command 표면', () => {
+     // 있다. `ollama_*` 같은 이름이 등록되면 그 경계가 새어 나온 것이다. Notion은 그와 다르다 —
+     // 제품이 보내기로 한 목적지 그 자체이며 (PRODUCT-SPEC §10), 고를 수 있는 provider가 아니다.
+     const outOfScope =
+-      /(start|stop|pause|resume)_recording|play|whisper|ollama|llama|openai|anthropic|claude|gemini|export(?!_(markdown|ai_request)\b)|pdf|docx|queue|batch|schedule/i;
++      /(start|stop|pause|resume)_recording|play|whisper|ollama|llama|openai|anthropic|claude|gemini|finder|explorer|export(?!_(markdown|ai_request)\b)|pdf|docx|queue|batch|schedule/i;
+ 
+     for (const command of registeredCommands()) {
+       expect(command, `${command}는 아직 만들지 않은 기능의 command다`).not.toMatch(outOfScope);
+@@ -249,6 +276,23 @@ describe('command 표면', () => {
+     const exports = registeredCommands().filter((command) => /export/i.test(command));
+ 
+     expect(exports.sort()).toEqual(['export_ai_request', 'export_markdown']);
++
++    // **Phase 5.6에서 이름이 하나 늘었지만 이 집합은 그대로 둘이다** (`phase-prompt/05.6`
++    // 성공 기준 2 · R-4). 늘어난 `show_saved_file`은 **파일을 만들지도 고치지도 지우지도
++    // 않고 이미 있는 것이 놓인 자리를 열 뿐이며**, 그래서 여기 속하지 않는다 — 만드는 이름은
++    // 여전히 둘이고, 그 둘이 만든 파일을 사람이 찾지 못하던 것이 이번에 더해진 사실이다.
++    //
++    // 두 가지를 함께 못박는다. 그 이름이 실제로 등록돼 있다는 것과(등록되지 않았다면 위의
++    // 정확-집합 검사가 먼저 실패한다), **그 이름이 무언가를 만들거나 바꾸는 동사를 쓰지
++    // 않는다**는 것이다 (INV-3). 여는 이름이 언젠가 `save_`나 `write_`로 바뀌면 그것은
++    // 이 표면이 하는 일이 달라졌다는 뜻이며, 그 결정은 조용히 일어나면 안 된다.
++    const opening = registeredCommands().filter((command) => /saved_file/i.test(command));
++
++    expect(opening).toEqual(['show_saved_file']);
++    expect(exports).not.toContain('show_saved_file');
++    for (const command of opening) {
++      expect(command).not.toMatch(/^(create|write|update|set|edit|delete|remove|save|move|rename)_/);
++    }
+   });
+ 
+   it('Notion 표면은 전송 둘 · 저장된 기록 읽기 · 연결 확인 · token 둘뿐이다', () => {
+diff --git a/tests/manual-handoff-invariants.test.ts b/tests/manual-handoff-invariants.test.ts
+index a8825a0..40fd7f4 100644
+--- a/tests/manual-handoff-invariants.test.ts
++++ b/tests/manual-handoff-invariants.test.ts
+@@ -187,8 +187,14 @@ describe('MH-1 · MH-2 — 이 경로는 AI provider를 읽을 수단이 없다'
+   it('아래 줄과 복사 자리의 입력 타입에 provider를 담을 자리가 없다', () => {
+     // 담을 자리가 없으면 실수로도 실릴 수 없다. 필드 목록을 **정확히** 고정하는 이유는
+     // 하나가 늘어나는 순간 그것이 결정이라는 사실을 드러내기 위해서다.
++    //
++    // **필드가 하나 늘었다 — `show`다** (`phase-prompt/05.6` 성공 기준 2 · R-4). 그것이
++    // 결정이라는 사실이 여기서 드러나는 것이 이 검사의 목적이므로, 무엇이 왜 늘었는지 적는다:
++    // 이 값은 **이미 만들어진 파일 하나가 놓인 자리를 여는 시도**이며 담고 있는 것은 파일
++    // 경로다. AI provider도, AI 설정도, 벤더도 아니다 — 그것을 여기에 담을 자리는 여전히 없고,
++    // 그래서 provider 때문에 아래 줄이 막히는 상태를 만들 수단도 여전히 없다 (MH-1 · MH-2).
+     expect(fields(block(aiHandoffViewSource, 'export interface ManualHandoffInput {', '\n}\n')))
+-      .toEqual(['recording', 'mode', 'copy', 'aiExport']);
++      .toEqual(['recording', 'mode', 'copy', 'aiExport', 'show']);
+ 
+     expect(fields(block(copyViewSource, 'export interface CopyPanelInput {', '\n}\n')))
+       .toEqual(['recording', 'mode', 'attempt']);
+diff --git a/tests/screen-boundary.test.ts b/tests/screen-boundary.test.ts
+index b127cc3..f7ce1a3 100644
+--- a/tests/screen-boundary.test.ts
++++ b/tests/screen-boundary.test.ts
+@@ -73,15 +73,31 @@ describe('길이 포맷은 Rust에만 있다', () => {
+ 
+   it('예외인 모듈이 녹음 길이 쪽으로 넘어오지 않는다', () => {
+     // 이 모듈이 만드는 것은 segment의 위치뿐이다. 녹음 하나의 길이(durationLabel ·
+-    // elapsedLabel)를 여기서 만들기 시작하면 규칙이 두 벌이 되고 조용히 갈라진다.
++    // elapsedLabel)나 전사에 걸린 시간(transcriptionMs)을 여기서 만들기 시작하면 규칙이
++    // 두 벌이 되고 조용히 갈라진다.
+     const source = readFileSync(TIMESTAMP_MODULE, 'utf8');
+-    const timestampFacts = [/durationMs/, /durationLabel/, /elapsedMs/, /elapsedLabel/];
++    const timestampFacts = [
++      /durationMs/,
++      /durationLabel/,
++      /elapsedMs/,
++      /elapsedLabel/,
++      // 전사에 걸린 시간의 밀리초. 이 모듈은 Rust가 만든 문장(transcriptionLabel)만 나른다.
++      /transcriptionMs/,
++    ];
+ 
+     for (const shape of timestampFacts) {
+       expect(source, '녹음 길이는 Rust가 만든 값을 쓴다').not.toMatch(shape);
+     }
+   });
+ 
++  it('전사에 걸린 시간이 backend가 준 문장 그대로다', () => {
++    // 사람이 Metal 전후를 비교하는 값이다 (phase-prompt/05.6 성공 기준 3). 여기서 밀리초를
++    // 나눠 문장을 만들기 시작하면 저장된 값과 화면이 서로 다른 규칙으로 읽히게 된다.
++    const source = readFileSync(TIMESTAMP_MODULE, 'utf8');
++
++    expect(source).toMatch(/transcriptionLabel:\s*transcript\.transcriptionLabel/);
++  });
++
+   it('목록 항목의 길이가 저장소에서 온 값 그대로다', () => {
+     expect(recordingsViewSource).toMatch(/durationLabel:\s*recording\.durationLabel/);
+   });
+@@ -189,6 +205,68 @@ describe('token은 화면에 남지 않는다 (INV-7)', () => {
+   });
+ });
+ 
++/**
++ * 파일이 놓인 자리를 여는 일이 **화면 쪽에서 OS를 알지 않는다**는 것을 원문으로 못박는 자리
++ * (`phase-prompt/05.6` 성공 기준 2 · R-4 · INV-10).
++ *
++ * 값의 모양은 `src/screens/savedFileView.test.ts`가 고정한다 — 여는 동작이 값으로 있고, 열지
++ * 못했을 때 무엇이 그대로인지도 값에 있다는 것이 거기 있다. 여기서 보는 것은 **그 규칙을 만드는
++ * 자리가 OS도 command도 알지 않는다**는 것이며, 컴포넌트 하나가 새로 생기는 것만으로 조용히
++ * 깨질 수 있으므로 원문을 읽는 이 파일에 있다.
++ *
++ * OS 이름이 화면 쪽으로 새면 두 가지가 무너진다 — 다른 플랫폼에서 틀린 문장을 말하게 되고
++ * (`savedFileView`의 문장은 사용자에게 그대로 보인다), 갈아 끼울 자리가 backend 하나가 아니게
++ * 된다 (`src-tauri/src/platform/file_manager.rs`).
++ */
++const SAVED_FILE_VIEW_MODULE = path('../src/screens/savedFileView.ts');
++
++describe('자리를 여는 규칙은 순수 모듈에 있고 OS를 알지 않는다 (INV-10)', () => {
++  it('그 모듈이 실제로 그 자리에 있고 React 컴포넌트가 아니다', () => {
++    expect(frontendSources).toContain(SAVED_FILE_VIEW_MODULE);
++    expect(SAVED_FILE_VIEW_MODULE.endsWith('.tsx')).toBe(false);
++  });
++
++  it('순수 모듈이 command도 DOM도 OS도 부르지 않는다', () => {
++    const source = readFileSync(SAVED_FILE_VIEW_MODULE, 'utf8');
++
++    // 판정이 command 없이 끝나야 창 하나 열지 않고 vitest로 전부 판정된다 (§18).
++    expect(source).not.toContain("from '../ipc/commands'");
++    expect(source).not.toMatch(/\binvoke\s*[<(]/);
++    expect(source).not.toContain('showSavedFile(');
++    // **그것을 쓰는 모양**을 찾는다 — 이 모듈의 문장 하나가 "opens a window."로 끝나므로,
++    // 낱말 자체를 막으면 사용자에게 보이는 문장이 규칙 위반으로 보고된다.
++    expect(source).not.toMatch(/\b(?:document|window)\s*(?:\.\s*\w|\[)/);
++  });
++
++  it('src/ 아래 어디에도 어느 OS의 파일 관리자인지 아는 코드가 없다', () => {
++    // 화면은 "자리를 연다"까지만 안다. 무엇으로 여는지는 backend의 platform 경계 하나가 안다.
++    // 주석이 아니라 **코드에 쓰인 이름**을 찾는다 — 규칙을 설명하는 문장은 검사 대상이 아니다.
++    const osNames = [/\bFinder\b/, /\bexplorer\.exe\b/, /'open'/, /"open"/, /\bAppleScript\b/];
++
++    for (const file of frontendSources) {
++      const source = readFileSync(file, 'utf8')
++        .split('\n')
++        .filter((line) => !line.trim().startsWith('*') && !line.trim().startsWith('//'))
++        .join('\n');
++
++      for (const shape of osNames) {
++        expect(source, `${file}이 OS 파일 관리자를 이름으로 안다 (INV-10)`).not.toMatch(shape);
++      }
++    }
++  });
++
++  it('만들어진 파일의 전체 경로가 화면에서 사라지지 않았다 (§4.1 · 성공 기준 2)', () => {
++    // 여는 수단은 경로의 **대체가 아니라 추가다.** 경로 줄이 사라지면 여는 수단이 실패했을 때
++    // 사용자에게 남는 길이 없어진다.
++    const screen = readFileSync(path('../src/screens/RecordingDetailScreen.tsx'), 'utf8');
++
++    expect(screen).toContain('{body.file.path}');
++    expect(screen).toContain('{body.path}');
++    // 그리고 그 옆에 여는 수단이 있다 — 두 export 자리 모두에.
++    expect([...screen.matchAll(/<ShowFileControl/g)]).toHaveLength(2);
++  });
++});
++
+ describe('실패는 사용자에게 보인다', () => {
+   it('src/ 아래에 실패를 console로 흘려보내는 경로가 없다', () => {
+     // console.error로 끝나면 사용자는 아무것도 알지 못한다 (§13).
+diff --git a/tests/ui-foundation.test.ts b/tests/ui-foundation.test.ts
+index 4e43c18..2fb4e6f 100644
+--- a/tests/ui-foundation.test.ts
++++ b/tests/ui-foundation.test.ts
+@@ -72,6 +72,7 @@ import {
+   startedAiExport,
+   type AiExportAttempt,
+ } from '../src/screens/aiHandoffView';
++import { NO_SHOW_FILE_ATTEMPT } from '../src/screens/savedFileView';
+ 
+ const path = (relative: string) => fileURLToPath(new URL(relative, import.meta.url));
+ const read = (relative: string) => readFileSync(path(relative), 'utf8');
+@@ -734,18 +735,23 @@ describe('상태는 언제나 문장으로 온다 — 색은 거들 뿐이다 (
+       failedAiExport(RECORDING.id, FAILURE),
+     ];
+ 
++    // `show`는 **만들어진 파일이 놓인 자리를 여는 시도**다 (`phase-prompt/05.6` 성공 기준 2).
++    // 여기서는 아직 아무것도 열지 않은 값을 준다 — 이 검사가 보는 것은 여섯 갈래 각각에
++    // 문장이 있는가이지, 여는 수단의 상태가 아니다.
+     const bodies = [
+       manualHandoff({
+         recording: null,
+         mode: 'meeting',
+         copy: NO_COPY_ATTEMPT,
+         aiExport: NO_AI_EXPORT_ATTEMPT,
++        show: NO_SHOW_FILE_ATTEMPT,
+       }).aiExport.body,
+       manualHandoff({
+         recording: RECORDING_WITHOUT_TRANSCRIPT,
+         mode: 'meeting',
+         copy: NO_COPY_ATTEMPT,
+         aiExport: NO_AI_EXPORT_ATTEMPT,
++        show: NO_SHOW_FILE_ATTEMPT,
+       }).aiExport.body,
+       ...attempts.map(
+         (aiExport) =>
+@@ -754,6 +760,7 @@ describe('상태는 언제나 문장으로 온다 — 색은 거들 뿐이다 (
+             mode: 'meeting',
+             copy: NO_COPY_ATTEMPT,
+             aiExport,
++            show: NO_SHOW_FILE_ATTEMPT,
+           }).aiExport.body,
+       ),
+     ];

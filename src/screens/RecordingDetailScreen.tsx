@@ -13,6 +13,7 @@ import {
   listMissingAudio,
   notionSyncStatus,
   recordingAudioSource,
+  showSavedFile,
   startAiNote,
   startNotionSync,
   startTranscription,
@@ -88,6 +89,15 @@ import {
   loadedRecordingDetail,
   type RecordingDetailView,
 } from './recordingDetailView';
+// 만들어진 파일이 놓인 자리를 여는 규칙 (R-4). 어느 OS의 파일 관리자인지는 backend가 안다.
+import {
+  NO_SHOW_FILE_ATTEMPT,
+  failedShowFile,
+  showingFile,
+  type ShowFileAction,
+  type ShowFileAttempt,
+  type ShowFileView,
+} from './savedFileView';
 import {
   LOADING_TRANSCRIPT_TAB,
   transcriptTab,
@@ -214,6 +224,13 @@ export function RecordingDetailScreen({ route, goBack }: ScreenProps) {
   const [copyAttempt, setCopyAttempt] = useState<CopyAttempt>(NO_COPY_ATTEMPT);
   /** 이 화면이 건 Export for AI 한 번 (요구 3). Markdown export와 다른 자리, 다른 상태다. */
   const [aiExportAttempt, setAiExportAttempt] = useState<AiExportAttempt>(NO_AI_EXPORT_ATTEMPT);
+  /**
+   * 이 화면이 건 **자리 열기** 한 번 (`phase-prompt/05.6` 성공 기준 2 · R-4).
+   *
+   * 두 export 자리가 이 값 하나를 함께 본다 — 가리키는 것이 녹음이 아니라 **파일 경로**이므로,
+   * 어느 자리의 결과인지는 그 경로가 말한다 (`savedFileView.ts`의 `showFile`).
+   */
+  const [showAttempt, setShowAttempt] = useState<ShowFileAttempt>(NO_SHOW_FILE_ATTEMPT);
   /** 디스크에 남아 있는 Notion 전송 기록. 아직 읽지 못했거나 보낸 적이 없으면 `null`이다. */
   const [notionSync, setNotionSync] = useState<NotionSync | null>(null);
   /** backend가 마지막으로 알려준 Notion 전송 상태. 아직 물어보지 못했으면 `null`이다. */
@@ -469,6 +486,7 @@ export function RecordingDetailScreen({ route, goBack }: ScreenProps) {
       mode: noteMode,
       copy: copyAttempt,
       aiExport: aiExportAttempt,
+      show: showAttempt,
     }),
   );
 
@@ -489,6 +507,7 @@ export function RecordingDetailScreen({ route, goBack }: ScreenProps) {
     // 가리키는 Transcript가 없으면 노트도 없다 (§7.2) — 읽지 못한 것과 다른 사실이다.
     notes: noteTranscriptId === null ? [] : aiNotes,
     attempt: exportAttempt,
+    show: showAttempt,
   });
   const notionView = notionPanel({ recording: record, sync: notionSync, live: notionLive });
   const sendingToNotion = notionView.body.kind === 'sending';
@@ -565,19 +584,23 @@ export function RecordingDetailScreen({ route, goBack }: ScreenProps) {
    * 없다는 이유로 거절당할 수단이 없다 (MH-1 · MH-2 · INV-8).
    */
   const beginCopy = (action: CopyAction) => {
-    const { target, recordingId: id, mode } = action;
-    setCopyAttempt(startedCopy(target, id));
-    // 프롬프트에는 mode가 실려 있고 전사에는 없다 — 그 구분은 값이 들고 있다.
-    const text = mode === null ? getTranscriptText(id) : getAiPrompt(id, mode);
-    text.then(
+    const { target, recordingId: id, mode, portion } = action;
+    setCopyAttempt(startedCopy(target, id, portion));
+    // 프롬프트에는 mode가 실려 있고 전사에는 없다 — 그 구분은 값이 들고 있다. 몇 번째 조각을
+    // 가져올지도 값이 들고 있다 (`phase-prompt/05.6` 성공 기준 4).
+    const taken = mode === null ? getTranscriptText(id, portion) : getAiPrompt(id, mode, portion);
+    taken.then(
       (value) =>
         // `copyText`는 예외를 던지지 않는다. 결과가 값으로 온다 (ADR-0010 §7).
-        copyText(value).then((result) =>
+        copyText(value.text).then((result) =>
           setCopyAttempt(
-            result.ok ? copiedText(target, id) : failedCopy(target, id, result.failure),
+            result.ok
+              ? // 크기와 자리를 그대로 들고 간다 — 화면이 그것을 다시 세지 않는다.
+                copiedText(target, id, value)
+              : failedCopy(target, id, portion, result.failure),
           ),
         ),
-      (error: unknown) => setCopyAttempt(failedCopy(target, id, error)),
+      (error: unknown) => setCopyAttempt(failedCopy(target, id, portion, error)),
     );
   };
 
@@ -587,13 +610,35 @@ export function RecordingDetailScreen({ route, goBack }: ScreenProps) {
    * Markdown export와 같은 규약이다 — 돌아오는 것은 이미 만들어진 파일이며, 기다릴 서버도
    * 모델도 없다. **clipboard를 전혀 쓰지 않으므로 복사가 거절되는 환경에서도 이 길은 남는다**
    * (§7.5). 실패해도 녹음 · 전사 · 노트 · 이미 내보낸 파일은 그대로다 (INV-3 · MH-7).
+   *
+   * **문서가 나뉘면 한 번에 조각 하나다** (`phase-prompt/05.6` 성공 기준 4). 몇 번째를 쓸지는
+   * 누른 동작이 들고 있고, 돌아온 값이 그것이 몇 번째였는지 말한다 — 이 자리가 세지 않는다.
    */
   const beginAiExport = (action: AiExportAction) => {
-    const { recordingId: id, mode } = action;
-    setAiExportAttempt(startedAiExport(id, mode));
-    exportAiRequest(id, mode).then(
-      (file) => setAiExportAttempt(exportedAiRequest(file)),
-      (error: unknown) => setAiExportAttempt(failedAiExport(id, error)),
+    const { recordingId: id, mode, portion } = action;
+    setAiExportAttempt(startedAiExport(id, mode, portion));
+    exportAiRequest(id, mode, portion).then(
+      (written) => setAiExportAttempt(exportedAiRequest(written)),
+      (error: unknown) => setAiExportAttempt(failedAiExport(id, portion, error)),
+    );
+  };
+
+  /**
+   * 방금 만들어진 파일이 **놓인 자리를 연다** (`phase-prompt/05.6` 성공 기준 2 · R-4).
+   *
+   * 경로를 보여 주는 것은 그대로다 — **이것은 그 대체가 아니라 추가다.** 무엇을 열어도 되는지
+   * 정하는 것은 backend이며 (`src-tauri/src/commands/saved_file.rs`), 이 화면은 backend가 준
+   * 경로를 그대로 되돌려 줄 뿐 다른 경로를 지어내지 않는다.
+   *
+   * 열지 못하면 그 사실이 화면 상태가 된다 — console로 흘려보내지 않으며 (§13), 그때에도 파일과
+   * 경로는 그대로다 (INV-3). 열렸으면 상태를 되돌린다: 이 자리에 남길 사실이 없다.
+   */
+  const beginShowFile = (action: ShowFileAction) => {
+    const { path } = action;
+    setShowAttempt(showingFile(path));
+    showSavedFile(path).then(
+      () => setShowAttempt(NO_SHOW_FILE_ATTEMPT),
+      (error: unknown) => setShowAttempt(failedShowFile(path, error)),
     );
   };
 
@@ -703,7 +748,7 @@ export function RecordingDetailScreen({ route, goBack }: ScreenProps) {
       {/* 기록을 이 앱 밖으로 꺼내는 문 둘 (§10 · §11). 탭 위에 있으므로 어느 탭을 보고
           있든 Notion 상태가 보인다 (요구 9). */}
       <section className="share">
-        <ExportPanel panel={exportView} onExport={beginExport} />
+        <ExportPanel panel={exportView} onExport={beginExport} onShowFile={beginShowFile} />
         <NotionPanel panel={notionView} trouble={notionIssue} onSend={beginNotionSend} />
       </section>
 
@@ -754,6 +799,7 @@ export function RecordingDetailScreen({ route, goBack }: ScreenProps) {
             onRecheck={recheckProvider}
             onCopy={beginCopy}
             onExportForAi={beginAiExport}
+            onShowFile={beginShowFile}
           />
         )}
       </div>
@@ -767,15 +813,19 @@ export function RecordingDetailScreen({ route, goBack }: ScreenProps) {
  * 여섯 상태가 서로 다른 모습을 갖는다. 어느 상태인지 정하는 규칙은 여기 없고
  * {@link exportPanel}에 있다 — 이 컴포넌트는 그리기만 한다.
  *
- * **AI에 대한 참조가 하나도 없다** (INV-8). 만들어진 파일의 **전체 경로**는 언제나 보인다 —
- * export 위치가 설정으로 노출되지 않으므로 그것이 사용자가 파일을 찾는 유일한 길이다 (§4.1).
+ * **AI에 대한 참조가 하나도 없다** (INV-8). 만들어진 파일의 **전체 경로는 그대로 보이고**,
+ * 이제 그 자리를 여는 수단이 그 옆에 하나 더 있다 (`phase-prompt/05.6` 성공 기준 2 · R-4) —
+ * 경로만으로는 파일에 도달하지 못한다는 것이 실사용에서 드러났기 때문이다. 대체가 아니라
+ * 추가이며, 그 판정도 이 컴포넌트가 아니라 `savedFileView.ts`에 있다.
  */
 function ExportPanel({
   panel,
   onExport,
+  onShowFile,
 }: {
   panel: ExportPanelView;
   onExport: (recordingId: string) => void;
+  onShowFile: (action: ShowFileAction) => void;
 }) {
   const { body, contents } = panel;
 
@@ -804,8 +854,11 @@ function ExportPanel({
         <div className="share__done" role="status">
           <p className="share__headline">{body.file.headline}</p>
           <p className="share__file">{body.file.fileName}</p>
-          {/* 어디에 만들어졌는가 (§4.1). 이 줄이 없으면 사용자는 파일을 찾지 못한다. */}
+          {/* 어디에 만들어졌는가 (§4.1). **이 줄은 그대로 남는다** — 여는 수단은 그 대체가
+              아니라 추가다 (성공 기준 2). */}
           <p className="share__path">{body.file.path}</p>
+          {/* 그 자리를 연다 (R-4). 경로를 알아도 걸어 들어갈 수 없는 자리가 있다. */}
+          <ShowFileControl show={body.file.show} onShowFile={onShowFile} />
           <p className="hint">{body.text}</p>
           <ExportButton action={body.again} onExport={onExport} />
         </div>
@@ -836,6 +889,50 @@ function ExportPanel({
         <p className="hint">{contents.audioNotice}</p>
       </div>
     </section>
+  );
+}
+
+/**
+ * 만들어진 파일이 **놓인 자리를 여는** 수단 (`phase-prompt/05.6` 성공 기준 2 · R-4).
+ *
+ * Markdown export 자리와 Export for AI 자리가 **같은 컴포넌트를 쓴다** — 두 자리에서 같은 일을
+ * 하므로 그리는 방식이 갈라질 이유가 없다. 어느 상태인지 정하는 규칙은 여기 없고
+ * `savedFileView.ts`의 `showFile`에 있다: 이 컴포넌트는 그리기만 한다.
+ *
+ * **경로 줄을 대체하지 않는다.** 이것은 그 옆에 놓이며, 열지 못했을 때 사용자에게 남는 길이
+ * 바로 그 경로라는 사실도 값으로 온다 ({@link ShowFileView.trouble}).
+ */
+function ShowFileControl({
+  show,
+  onShowFile,
+}: {
+  show: ShowFileView;
+  onShowFile: (action: ShowFileAction) => void;
+}) {
+  return (
+    <div className="share__show">
+      <button
+        type="button"
+        className="btn btn--secondary"
+        disabled={show.showing}
+        onClick={() => onShowFile(show.action)}
+      >
+        {show.action.label}
+      </button>
+      {/* 여는 중이라는 것도, 이 자리가 무엇인지도 문장으로 있다 (요구 12의 규약). */}
+      <p className="hint">{show.text}</p>
+
+      {show.trouble !== null && (
+        <>
+          {/* 무엇이 실패했는지 · 원본은 안전한지 · 다시 시도할 수 있는지 (§13). */}
+          <FailureNotice failure={show.trouble.failure} headline={show.trouble.headline} />
+          {/* 파일도 저장된 것도 그대로다 (INV-3). */}
+          <p className="hint">{show.trouble.preservedNotice}</p>
+          {/* 그래도 도달할 길이 있다 — 위에 그대로 있는 경로다. */}
+          <p className="hint">{show.trouble.resolution}</p>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -1029,7 +1126,26 @@ function TranscriptTab({
         <>
           {/* 상태가 바뀌는 것은 소리로도 알린다. 화면은 이 동안에도 멎지 않으며, 오래
               걸리는 동안 그 사실이 고리와 글자로 함께 보인다 (요구 9). */}
-          <Loading text={tab.text} live />
+          <Loading
+            text={
+              tab.kind === 'running' && tab.progressLabel !== null
+                ? `${tab.text} · ${tab.progressLabel}`
+                : tab.text
+            }
+            live
+          />
+          {/* **나오는 대로 보여 준다** (2026-09-07). 72분짜리 녹음이 도는 동안 사람이 아무것도
+              보지 못한 채 수십 분을 기다리던 자리다. 이것은 저장된 Transcript가 아니라
+              미리보기이므로, 그 사실을 감추지 않고 함께 적는다. */}
+          {tab.kind === 'running' && tab.partial.length > 0 && (
+            <>
+              <p className="hint">
+                Live preview — not saved yet. Some lines may change or be dropped when the
+                transcription finishes.
+              </p>
+              <TranscriptLines lines={tab.partial} />
+            </>
+          )}
           {/* 새 전사가 도는 동안에도 이미 있던 Transcript는 그대로 보인다 (§7.1 · INV-2). */}
           <TranscriptLines lines={tab.kept} />
         </>
@@ -1040,6 +1156,12 @@ function TranscriptTab({
           <p className="hint">
             {[tab.language, tab.engine, tab.model].filter((fact) => fact !== null).join(' · ')}
           </p>
+          {/* 이 전사에 얼마나 걸렸는가 (phase-prompt/05.6 성공 기준 3). 문장은 Rust가 만든
+              것을 그대로 쓴다. **재지 않은 옛 Transcript에서는 이 줄이 아예 없다** —
+              모르는 것을 0초라고 말하지 않는다. */}
+          {tab.transcriptionLabel !== null && (
+            <p className="hint">Transcribed in {tab.transcriptionLabel}</p>
+          )}
           <TranscriptLines lines={tab.lines} />
         </>
       )}
@@ -1053,7 +1175,9 @@ function TranscriptTab({
           {tab.failure === null && <p className="failure__headline">{tab.headline}</p>}
           {/* 앱은 아무것도 지우지 않았다 (INV-1 · INV-2 · INV-3). */}
           <p className="hint">{tab.preservedNotice}</p>
-          {/* 모델이 없어서 실패한 경우는 먼저 할 일이 다르다. */}
+          {/* 모델이 없거나 · 쓸 수 없거나 · 전사가 붕괴한 경우는 먼저 할 일이 다르다.
+              어느 갈래가 어떤 문장을 갖는지 정하는 것은 `transcriptView`이며, 여기서는
+              있으면 그린다. */}
           {tab.resolution !== null && <p className="hint">{tab.resolution}</p>}
           <button
             type="button"
@@ -1090,6 +1214,7 @@ function AiNoteTab({
   onRecheck,
   onCopy,
   onExportForAi,
+  onShowFile,
 }: {
   layout: AiNoteTabLayout;
   trouble: AiNoteTrouble | null;
@@ -1098,6 +1223,7 @@ function AiNoteTab({
   onRecheck: () => void;
   onCopy: (action: CopyAction) => void;
   onExportForAi: (action: AiExportAction) => void;
+  onShowFile: (action: ShowFileAction) => void;
 }) {
   return (
     <section className="note">
@@ -1126,7 +1252,12 @@ function AiNoteTab({
       {/* 위 줄은 조건이 아니다 — 둘 중 하나를 고르는 것이다. */}
       <p className="note__or">{layout.orText}</p>
 
-      <ManualHandoff manual={layout.manual} onCopy={onCopy} onExportForAi={onExportForAi} />
+      <ManualHandoff
+        manual={layout.manual}
+        onCopy={onCopy}
+        onExportForAi={onExportForAi}
+        onShowFile={onShowFile}
+      />
     </section>
   );
 }
@@ -1263,10 +1394,12 @@ function ManualHandoff({
   manual,
   onCopy,
   onExportForAi,
+  onShowFile,
 }: {
   manual: ManualHandoffView;
   onCopy: (action: CopyAction) => void;
   onExportForAi: (action: AiExportAction) => void;
+  onShowFile: (action: ShowFileAction) => void;
 }) {
   return (
     <section className="note__row">
@@ -1279,7 +1412,11 @@ function ManualHandoff({
       <div className="note__handoff">
         <CopyItem item={manual.copy.prompt} onCopy={onCopy} />
         <CopyItem item={manual.copy.transcript} onCopy={onCopy} />
-        <AiExportItem item={manual.aiExport} onExportForAi={onExportForAi} />
+        <AiExportItem
+          item={manual.aiExport}
+          onExportForAi={onExportForAi}
+          onShowFile={onShowFile}
+        />
       </div>
     </section>
   );
@@ -1326,7 +1463,13 @@ function CopyItem({
           {/* 색이 아니라 이 문장이 복사됐다고 말한다 (§7.5 · 요구 12). 다른 완료 표시와
               같은 모양이며, 여기에만 쓰이는 색을 따로 두지 않는다. */}
           <p className="share__headline">{body.headline}</p>
+          {/* 몇 번째 중 몇 번째인가 · 얼마나 큰가 (`phase-prompt/05.6` 성공 기준 4). */}
+          <p className="hint">{body.portion.label}</p>
+          <p className="hint">{body.size.label}</p>
+          {body.size.tooLongNotice !== null && <p className="hint">{body.size.tooLongNotice}</p>}
           <p className="hint">{body.text}</p>
+          {/* 나머지를 마저 가져가는 수단. 남은 조각이 없으면 이 자리도 없다. */}
+          {body.next !== null && <CopyButton action={body.next} onCopy={onCopy} />}
           <CopyButton action={body.again} onCopy={onCopy} />
         </div>
       )}
@@ -1367,15 +1510,18 @@ function CopyButton({
  * Export for AI 자리 (요구 3).
  *
  * **clipboard를 전혀 쓰지 않는다** — 복사가 거절되는 환경에서도 이 길은 그대로 남는다
- * (ADR-0010 §7.5). 만들어진 파일의 **전체 경로**는 언제나 보인다: export 위치가 설정으로
- * 노출되지 않으므로 그것이 사용자가 파일을 찾는 유일한 길이다 (§4.1).
+ * (ADR-0010 §7.5). 만들어진 파일의 **전체 경로는 그대로 보이고**, 이제 그 자리를 여는 수단이
+ * 그 옆에 하나 더 있다 (`phase-prompt/05.6` 성공 기준 2 · R-4) — 파일을 AI 채팅에 첨부하려면
+ * 그 파일에 실제로 도달할 수 있어야 하기 때문이다. 대체가 아니라 추가다.
  */
 function AiExportItem({
   item,
   onExportForAi,
+  onShowFile,
 }: {
   item: AiExportItemView;
   onExportForAi: (action: AiExportAction) => void;
+  onShowFile: (action: ShowFileAction) => void;
 }) {
   const { body } = item;
 
@@ -1399,10 +1545,21 @@ function AiExportItem({
       {body.kind === 'done' && (
         <div className="share__done" role="status">
           <p className="share__headline">{body.headline}</p>
+          {/* 이 파일이 문서의 몇 번째인가 · 문서 전체가 얼마나 큰가 (성공 기준 4). */}
+          <p className="hint">{body.portion.label}</p>
+          <p className="hint">{body.size.label}</p>
+          {body.size.tooLongNotice !== null && <p className="hint">{body.size.tooLongNotice}</p>}
           <p className="share__file">{body.fileName}</p>
-          {/* 어디에 만들어졌는가 (§4.1). 이 줄이 없으면 사용자는 파일을 찾지 못한다. */}
+          {/* 어디에 만들어졌는가 (§4.1). **이 줄은 그대로 남는다** — 여는 수단은 그 대체가
+              아니라 추가다 (성공 기준 2). */}
           <p className="share__path">{body.path}</p>
+          {/* 그 자리를 연다 (R-4). 첨부하려면 파일에 실제로 도달할 수 있어야 한다. */}
+          <ShowFileControl show={body.show} onShowFile={onShowFile} />
           <p className="hint">{body.text}</p>
+          {/* 나머지를 마저 파일로 꺼내는 수단. 있던 파일은 그대로다 (ADR-0009 §4.3). */}
+          {body.next !== null && (
+            <AiExportButton action={body.next} onExportForAi={onExportForAi} />
+          )}
           <AiExportButton action={body.again} onExportForAi={onExportForAi} />
         </div>
       )}

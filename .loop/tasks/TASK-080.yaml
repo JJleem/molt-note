@@ -1,0 +1,54 @@
+# 입력 레벨 순수 모듈
+# Runtime이 PLAN-20260907T032843Z 승인 시점에 생성했다 (proposal P5). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-080
+status: DONE
+
+request: |-
+  P1의 ADR-0003이 정한 대로 입력 레벨을 값으로 만드는 Rust 순수 모듈을 만든다(예: `src-tauri/src/audio/level.rs`). 하는 일: i16 샘플 덩어리를 받아 RMS와 peak를 누적하고, dBFS로 옮기고, 판정 구간(쓸 만함 · 낮음 · 소리 없음)을 정하고, **사람이 읽는 짧은 문장까지 여기서 만든다** — 화면 쪽에 수치 계산을 만들지 않는 것이 이 제품의 규칙이다(`tests/screen-boundary.test.ts`의 '길이 포맷은 Rust에만 있다'와 같은 이유). 장치도 파일도 스레드도 저장소도 알지 않는다. 단위 테스트로 고정할 것: 전부 0인 무음 · 2026-09-07 수준(평균 RMS 약 256 = 약 -42 dBFS) · 2026-09-04 수준(평균 RMS 약 1685 = 약 -26 dBFS) · 풀스케일 각각의 판정과 dBFS 자릿수, 샘플이 하나도 없을 때 0 나눗셈이나 -inf가 사람이 읽는 문장으로 새지 않는 것, 그리고 누적이 덩어리 경계에 따라 달라지지 않는 것. **게인을 조정하거나 샘플을 바꾸는 함수는 만들지 않는다** — 이 모듈은 읽고 판정만 한다.
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-076
+
+stop_condition:
+  gates: [build, lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 3
+
+acceptance_criteria:
+  - id: AC-1
+    description: |-
+      `npm run build`가 통과한다.
+    verification:
+      type: gate
+      ref: build
+  - id: AC-2
+    description: |-
+      `npm run lint`가 통과한다.
+    verification:
+      type: gate
+      ref: lint
+  - id: AC-3
+    description: |-
+      `npm run test`가 통과하고, 무음 · -42 dBFS 수준 · -26 dBFS 수준 · 풀스케일 · 빈 입력 다섯 경우의 판정을 고정하는 새 단위 테스트가 있다.
+    verification:
+      type: gate
+      ref: test
+  - id: AC-4
+    description: |-
+      모듈이 순수하다 — 장치 · 파일 · 스레드 · 저장소를 모르고, 샘플을 바꾸는(게인 · 정규화) 함수가 없다.
+    verification:
+      type: verifier
+  - id: AC-5
+    description: |-
+      판정 구간과 사람이 읽는 문장이 P1의 ADR-0003 기록과 일치한다.
+    verification:
+      type: verifier
+
+evidence: []
+
+failure_memo: []

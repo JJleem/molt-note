@@ -23,9 +23,23 @@
  * (`src-tauri/src/domain/duration.rs` · `RecordingSession::elapsed_label`).
  * 초를 `0:07`로 바꾸는 규칙은 그 한 곳에만 있고 TypeScript에 다시 구현하지 않는다 —
  * 두 벌이 되면 조용히 갈라진다 (`tests/screen-boundary.test.ts`).
+ *
+ * ## 입력 레벨도 여기서 만들지 않는다
+ *
+ * dBFS 환산 · 판정 구간(-36 · -60) · 사람이 읽는 문장은 전부
+ * `src-tauri/src/audio/level.rs` 한 곳에 있다 (ADR-0003 §16.4). 이 모듈이 하는 일은 그 값을
+ * **어디에 어떤 갈래로 놓을지** 정하는 것뿐이다 — 숫자를 다시 재판정하지 않는다.
+ * 여기서 정하는 것은 두 가지다: 값이 없는 것과 낮은 것을 구분하는 것, 그리고 녹음이 끝나기
+ * 전에 경고를 낼지 정하는 것 ({@link inputLevelDisplay} · {@link inputLevelWarning}).
  */
 import { toFailure, type Failure } from '../ipc/failure';
-import type { InputDevice, SessionState, SessionStatus, StoppedRecording } from '../ipc/types';
+import type {
+  InputDevice,
+  InputLevelVerdict,
+  SessionState,
+  SessionStatus,
+  StoppedRecording,
+} from '../ipc/types';
 import { MISSING_DEFAULT_MICROPHONE_LABEL, resolveDefaultMicrophone } from './defaultMicrophone';
 
 /**
@@ -279,6 +293,119 @@ export function sessionDisplay(view: RecordingView): SessionDisplay {
     elapsedLabel: session.elapsedLabel,
     live: session.state === 'recording',
   };
+}
+
+/**
+ * 진행 중인 녹음의 입력 레벨이 아직 없을 때 그 자리에 놓는 문장.
+ *
+ * **이것은 "낮다"가 아니다.** 아직 샘플이 하나도 쓰이지 않은 순간(녹음을 막 시작했을 때)에
+ * 레벨이 낮다고 말하면 화면이 사용자에게 거짓말을 하게 된다 (ADR-0003 §16.3). 모르는 것은
+ * 모른다고 적는다 — `UNKNOWN_ELAPSED`가 시간에 대해 하는 일과 같다.
+ */
+export const UNKNOWN_LEVEL_TEXT = 'Input level not measured yet';
+
+/**
+ * 쓸 수 없을 만큼 낮을 때 **정지 전에** 보이는 경고 (ADR-0003 §16.1의 관측).
+ *
+ * 이 문장이 있는 이유는 하나다 — 2026-09-07에 사람이 51분을 녹음하고 전사를 4.3분 기다린
+ * 뒤에야 소리가 담기지 않았다는 것을 알았다. 그때 알았어야 할 시점은 정지 전이다.
+ *
+ * **무엇이 낮은지는 이 문장이 말하지 않는다.** 수치와 갈래는 backend가 만든 문장이 함께
+ * 보이며 ({@link inputLevelDisplay}), 여기서 하는 말은 *지금 무엇을 해야 하는가* 하나다.
+ *
+ * 녹음을 막지도, 멈추지도 않는다 (§16.5) — 이미 녹음된 것은 그대로 남고, 사람이 정한다.
+ */
+export const WEAK_LEVEL_WARNING =
+  'This recording may not be usable. Check the microphone before you stop — everything recorded so far stays as it is.';
+
+/**
+ * 입력 레벨이 화면에 놓이는 모습.
+ *
+ * **값 없음과 낮음이 서로 다른 갈래다.** 하나로 접으면 방금 시작한 녹음이 곧바로 "낮음"으로
+ * 보이고, 그 뒤로는 이 표시를 믿을 수 없게 된다.
+ */
+export interface InputLevelDisplay {
+  /**
+   * 이 자리를 화면에 두는가.
+   *
+   * 진행 중인 녹음이 없으면 둘 것이 없다 — 끝난 녹음의 레벨을 계속 붙들고 있지 않는다.
+   */
+  readonly shown: boolean;
+  /** 어느 갈래인가. 아직 값이 없으면 `unknown`이며, 그것은 판정이 아니다. */
+  readonly kind: 'unknown' | InputLevelVerdict;
+  /** 사람이 읽는 문장. 값이 있으면 **backend가 만든 문장 그대로다.** */
+  readonly text: string;
+  /** 쓸 수 없을 만큼 낮은가. **값이 없는 것은 낮은 것이 아니다** — 그때는 거짓이다. */
+  readonly weak: boolean;
+}
+
+/** 진행 중인 녹음인가. 정지한 뒤에는 backend가 레벨을 보내지 않는다. */
+function inProgress(state: SessionState): boolean {
+  return state === 'recording' || state === 'paused';
+}
+
+/**
+ * 판정 하나가 "쓸 수 없을 만큼 낮은가".
+ *
+ * **여기에 임계값은 없다.** 어느 dBFS부터 낮은지는 `level.rs`가 정했고, 이 함수가 하는 일은
+ * 그 판정 셋을 화면이 다루는 둘로 묶는 것뿐이다. 갈래가 하나 늘면 tsc가 여기서 먼저 멈춘다.
+ */
+function isWeak(verdict: InputLevelVerdict): boolean {
+  switch (verdict) {
+    case 'usable':
+      return false;
+    case 'low':
+    case 'silent':
+      return true;
+  }
+}
+
+/**
+ * backend가 마지막으로 말해 준 입력 레벨을 화면에 놓는다.
+ *
+ * 세 갈래가 서로 다른 결과가 된다.
+ *
+ * ```text
+ * 값이 아직 없다 (null)   → unknown. 모른다고 적는다. 낮다고 말하지 않는다
+ * 낮음 · 소리 없음        → 그 갈래 그대로. backend의 문장이 수치와 함께 보인다
+ * 쓸 만함                 → 그 갈래 그대로. 경고는 없다
+ * ```
+ */
+export function inputLevelDisplay(view: RecordingView): InputLevelDisplay {
+  const session = view.session;
+  if (session === null || !inProgress(session.state)) {
+    return { shown: false, kind: 'unknown', text: UNKNOWN_LEVEL_TEXT, weak: false };
+  }
+
+  const level = session.level;
+  if (level === null) {
+    return { shown: true, kind: 'unknown', text: UNKNOWN_LEVEL_TEXT, weak: false };
+  }
+
+  return {
+    shown: true,
+    kind: level.verdict,
+    // 수치도 갈래도 문장도 backend가 만든 것 그대로다 — 여기서 다시 만들지 않는다.
+    text: level.message,
+    weak: isWeak(level.verdict),
+  };
+}
+
+/**
+ * 지금 사용자에게 낼 경고. 할 말이 없으면 `null`이다.
+ *
+ * **녹음 중이 아니면 아무 말도 하지 않는다.** 끝난 녹음이나 아직 시작하지 않은 녹음에 대고
+ * "정지 전에 확인하라"고 말하는 것은 사용자가 할 수 있는 일이 없는 경고이며, 그런 경고가
+ * 화면에 남아 있으면 정작 녹음 중에 뜬 경고도 배경이 된다.
+ *
+ * 값을 모르는 동안에도 경고하지 않는다 — 모르는 것은 낮은 것이 아니다.
+ */
+export function inputLevelWarning(view: RecordingView): string | null {
+  if (view.session?.state !== 'recording') {
+    return null;
+  }
+
+  return inputLevelDisplay(view).weak ? WEAK_LEVEL_WARNING : null;
 }
 
 /**

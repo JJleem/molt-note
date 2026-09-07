@@ -1,0 +1,65 @@
+TASK-073이 더한 테스트와 그 실행 결과
+(원문: .loop-local/self-check/gates/test/stdout.log — 이후 실행이 덮어쓰므로 여기에 옮겨 적는다)
+
+── Rust 단위 테스트 · src-tauri/src/export/handoff.rs ────────────────────────────────
+test export::handoff::tests::a_text_that_fits_comes_back_whole_and_says_so ... ok
+test export::handoff::tests::a_text_over_the_budget_comes_in_order_and_rejoins_into_the_original ... ok
+test export::handoff::tests::asking_for_a_portion_that_is_not_there_is_a_failure_and_not_an_empty_result ... ok
+test export::handoff::tests::an_empty_output_is_one_empty_portion_and_never_zero_portions ... ok
+
+  판정하는 것
+    - 예산 안의 산출물은 조각 하나이고 `total == size`다 (다 가져갔다는 것의 값 수준 표현).
+    - 예산을 넘으면 순서대로 나뉘고, 1..count를 다 가져와 이어 붙이면 **원본과 바이트가 같다**.
+      모든 조각이 같은 `total`과 같은 `count`를 말한다.
+    - `0` · `count+1` · `count+100`은 빈 결과가 아니라 `InvalidInput` 실패이며 non-retryable ·
+      `source_data_safe`이고 detail이 `portion=<요청>/<전체>`를 싣는다.
+    - 빈 산출물도 "1번째 / 전체 1개"다 — `count = 0`인 읽을 수 없는 자리를 만들지 않는다.
+
+── Rust 단위 테스트 · src-tauri/src/export/filename.rs ───────────────────────────────
+test export::filename::tests::one_whole_document_keeps_the_name_it_already_had ... ok
+test export::filename::tests::a_split_document_says_which_portion_each_file_holds ... ok
+test export::filename::tests::a_portion_name_is_still_a_safe_file_name_and_still_marks_the_ai_request ... ok
+test export::filename::tests::the_same_portion_always_gets_the_same_name ... ok
+
+  판정하는 것
+    - 나뉘지 않은 문서의 이름은 이 Phase 이전과 **글자 하나 다르지 않다**.
+    - 네 조각은 `…-ai-request-part-1-of-4.md` … `-4-of-4.md`로 **전부 다른 이름**이다.
+    - 적대적인 제목 · 예약 이름 · 200자 한글 제목에서도 안전한 이름이고, `-ai-request` 표식과
+      조각의 자리가 함께 남는다. 시계도 난수도 보지 않는다.
+
+── Rust 통합 테스트 · src-tauri/tests/manual_ai_handoff.rs (제품 경로 그대로) ────────
+test a_long_recording_says_how_big_it_is_and_hands_over_in_ordered_portions ... ok
+test asking_for_a_portion_that_is_not_there_is_refused_instead_of_coming_back_empty ... ok
+test every_portion_of_a_long_document_becomes_its_own_file_and_none_overwrites_another ... ok
+
+  판정하는 것 (segment 1,711개 = R-5의 실측 규모를 저장소에 넣고 `Storage` · `Exporter`를 지난다)
+    - 세 mode 전부에서 전체 크기(bytes · chars · lines)가 값으로 오고, 예산의 2배를 넘으며,
+      조각이 셋 이상이고, 조각 하나가 전체보다 작다고 말한다.
+    - 1..count를 다 가져와 이어 붙인 것이 `AiRequest::manual_prompt()` 원본과 **같다**.
+    - 전사 텍스트도 같은 규칙을 지난다 (줄 수 > 1,000 — segment 하나가 한 줄이다).
+    - 없는 조각 요청은 실패이고, 그때 export 디렉터리에 파일이 하나도 생기지 않는다.
+    - 조각마다 파일이 하나씩 생기고 이름이 전부 다르며, 파일 내용을 순서대로 이어 붙이면
+      `ai_ready_document()` 전체다.
+    - 이미 쓴 파일을 사람이 손댄 뒤 **같은 조각을 다시 내보내도** 그 파일은 그대로다
+      (ADR-0009 §4.3).
+
+── 프론트엔드 순수 view 테스트 (vitest 582 passed / 28 files) ────────────────────────
+src/screens/copyView.test.ts
+  describe('크기 때문에 조용히 실패하지 않는다')
+    it 크기가 값으로 있고, 한 번에 들어가는지도 값으로 있다
+    it 몇 번째 중 몇 번째인가가 값으로 있다
+    it 조각 하나만 복사됐으면 "복사됐다"고만 말하지 않는다
+    it 나머지를 마저 가져가는 수단이 그 자리에 있고, 다음 조각을 가리킨다
+    it 마지막 조각에서는 다음이 없고, 거기서만 전부 가져갔다고 말한다
+    it 처음 누르는 것은 언제나 첫 조각이고, 실패하면 그 조각으로 돌아간다
+
+src/screens/aiHandoffView.test.ts
+  describe('나뉜 문서를 완전한 것처럼 말하지 않는다')
+    it 조각 하나만 파일이 됐으면 문서가 준비됐다고 말하지 않는다
+    it 나머지를 마저 파일로 꺼내는 수단이 그 자리에 있다
+    it 마지막 조각에서만 문서 전체가 나왔다고 말한다
+    it 쓰려던 조각으로 다시 시도한다 — 건너뛰지 않는다
+    it provider가 하나도 없어도 크기와 조각을 그대로 말한다 (MH-1 · MH-2)
+
+  (기존 갈래 테스트도 함께 갱신됐다 — 나뉘지 않은 산출물에서 `next === null`이고
+   머리글이 예전 그대로라는 것을 같은 자리에서 확인한다.)

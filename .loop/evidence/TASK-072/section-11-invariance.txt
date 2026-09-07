@@ -1,0 +1,45 @@
+TASK-072 — PRODUCT-SPEC §11 Markdown export 파일 형식이 바뀌지 않았다는 증거
+
+1. §11의 기대 문자열을 담은 파일을 이 Run은 하나도 건드리지 않았다
+────────────────────────────────────────────────────────────────────────────────
+     src-tauri/tests/markdown_export.rs        §11 문서 전체를 문자열로 고정한 통합 테스트
+     src-tauri/tests/notion_adapter.rs         "## Transcript\n### 00:00:03\n…" 를 그대로 담는다
+     src-tauri/tests/notion_chunking.rs
+     src-tauri/tests/notion_and_export_invariants.rs
+
+   ⚠️ 이 저장소의 working tree에는 앞선 Task들의 커밋되지 않은 변경이 함께 있으므로
+   `git status`에는 이 중 셋이 M으로 보인다. 그 diff는 전부 **TASK-070이 더한
+   `transcription_ms: None` 한 줄**이며(`git diff`로 확인), 기대 문자열을 건드린 자리는
+   하나도 없다. 이 Run이 만든 변경 목록은 `changed-files.txt`에 있다.
+
+   `src-tauri/src/export/markdown.rs` 안의 §11 golden 테스트 두 개도 한 글자도 바뀌지 않았다
+   (`a_recording_with_an_ai_note_renders_exactly_the_document_of_section_11`,
+    `a_recording_without_an_ai_note_is_still_a_valid_document` — 기대 문자열에 `### 00:00:03`이
+    그대로 있다).
+
+2. 그 테스트들이 이번 실행에서 실제로 통과했다 (cargo test 원문)
+────────────────────────────────────────────────────────────────────────────────
+   test export::markdown::tests::a_recording_with_an_ai_note_renders_exactly_the_document_of_section_11 ... ok
+   test a_recording_becomes_a_markdown_file_whose_name_and_body_follow_the_spec ... ok
+   test a_recording_with_no_ai_note_at_all_is_exported_as_a_valid_document ... ok
+
+   Running tests/markdown_export.rs (…/deps/markdown_export-c6b0a8cc7adea1f4)  →  0 failed
+
+3. 새로 더한 테스트가 그 사실을 앞으로도 못박는다
+────────────────────────────────────────────────────────────────────────────────
+   test export::markdown::tests::the_section_11_document_is_never_written_in_the_compact_shape ... ok
+       render()의 산출물에 "### 00:00:03\n안녕하세요…"가 있고 "00:00:03 안녕하세요"는 없다
+
+   test export::ai_request::tests::the_three_outputs_use_the_compact_shape_and_the_section_11_document_does_not ... ok
+       같은 전사 하나로 두 자리를 함께 본다 — AI 경로에는 "### "가 없고, §11 문서에는 있다
+
+4. 바뀐 기대 문자열은 AI Handoff 경로의 것 하나뿐이다
+────────────────────────────────────────────────────────────────────────────────
+   src-tauri/tests/manual_ai_handoff.rs
+     - "## Transcript\n\n### 00:00:03\n안녕하세요. 오늘은 3DGS를 봅니다.\n"
+     + "## Transcript\n00:00:03 안녕하세요. 오늘은 3DGS를 봅니다.\n"
+
+   이것은 §11 export 파일이 아니라 Copy Transcript(ADR-0010 §5.4)의 산출물이며,
+   같은 파일의 §11 관련 단언
+   (`…starts_with("# 3DGS Study #04\n"), "Markdown export의 산출물은 이 Phase가 바꾸지 않는다"`)
+   은 그대로 통과한다.

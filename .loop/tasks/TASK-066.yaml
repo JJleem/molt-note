@@ -1,0 +1,48 @@
+# ADR-0007 갱신 — 언어 처리 결정과 Metal 결정
+# Runtime이 PLAN-20260905T201413Z 승인 시점에 생성했다 (proposal P1). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-066
+status: DONE
+
+request: |-
+  `docs/ADR-0007-transcription-engine.md`를 갱신한다. **문서만 바꾸는 Task다 — 소스 · 설정 · 의존성 · 테스트는 건드리지 않는다.** 넷을 적는다. (1) **언어 처리 결정**: 지금 `src-tauri/src/transcription/whisper.rs`가 `set_language`도 `set_detect_language`도 부르지 않아 whisper.cpp의 기본값(`language = "en"` · `detect_language = false`)이 그대로 쓰이고, 그래서 DB의 `language = en`은 감지 결과가 아니라 아무도 바꾸지 않은 기본값을 `full_lang_id_from_state()`로 되읽은 값이라는 사실. 이 앱이 앞으로 무엇을 부를 것인가 — 사용자가 고르지 않았으면 자동 감지, 골랐으면 그 언어 지정 — 와 그것이 PRODUCT-SPEC §D의 `language` 설정과 어떻게 이어지는가. 2026-09-05 실사용에서 관측된 반복 붕괴(1,711 segment · 고유 문장 59 · 상위 2문장이 86.7%)가 디코더 설정(`no_context` · `temperature_inc` · `entropy_thold` · `logprob_thold`는 whisper.cpp 기본값으로 이미 켜져 있다)의 문제가 아니라 틀린 언어를 강제한 결과라는 것도 관측 사실로 남긴다. (2) **Metal 결정**: PRODUCT-SPEC:836이 적은 Metal feature가 실제 `src-tauri/Cargo.toml`에는 없어 `whisper-rs-sys` build.rs가 `GGML_METAL = OFF`를 정의한다는 사실과, `whisper-rs` 0.16에서 Metal을 켜는 **정확한 feature 이름**. 그 이름을 지어내지 말고 실제 crate 소스나 그 crate의 공식 문서에서 확인해 확인 경로와 버전을 함께 적는다. 확인하지 못했으면 UNVERIFIED로 표시한다. 켰을 때의 속도 변화는 이 프로젝트에서 측정된 적이 없으므로 **어떤 배수도 어떤 수치도 적지 않는다.** cold build가 whisper.cpp 재컴파일을 포함한다는 대가(§4.3)를 그 결정 옆에 다시 적는다. (3) 이 두 결정이 2026-09-05의 첫 실사용에서 나왔다는 것과, §16.3.1의 ASSUMPTION A-TRANS-001이 그 실행으로 무엇이 드러났고 무엇이 아직 열려 있는지. **과거 기록을 지우지 않는다** — 언제 왜 바뀌었는지를 덧붙이는 형태로 쓴다. (4) 모델 크기 판정(`large-v3` 필요 여부)은 이 Phase가 하지 않으며 사람의 Human Review 항목으로 남는다는 것.
+
+execution:
+  role: impl
+
+stop_condition:
+  gates: []
+  requires_verifier: true
+  max_consecutive_failures: 2
+
+acceptance_criteria:
+  - id: AC1
+    description: |-
+      ADR-0007에 언어 처리 결정이 있고, whisper.cpp 기본값이 `en`이며 감지가 꺼져 있다는 사실과 그 근거 위치, 그리고 앞으로 무엇을 부를 것인가(고르지 않음 = 자동 감지)가 적혀 있다.
+    verification:
+      type: verifier
+      instruction: |-
+        문서에서 언어 결정 부분을 읽고, 관측 사실 · 원인 · 앞으로의 규칙이 구분되어 적혀 있는지 본다.
+  - id: AC2
+    description: |-
+      Metal 결정이 있고, feature 이름이 실제 crate 소스나 공식 문서에서 확인된 값으로 확인 경로와 함께 적혀 있다. 확인하지 못했으면 UNVERIFIED로 표시돼 있다. 측정되지 않은 속도 수치나 배수가 문서에 없다.
+    verification:
+      type: verifier
+      instruction: |-
+        VERIFIED / UNVERIFIED 구분이 명시적인지, 속도 배수·소요 시간 추정치가 새로 들어가지 않았는지 확인한다.
+  - id: AC3
+    description: |-
+      기존 절(특히 §4.3 · §16.3.1)이 삭제·축소되지 않았고, 이번 변경이 언제 왜 일어났는지가 이력으로 덧붙어 있다.
+    verification:
+      type: verifier
+      instruction: |-
+        변경 전후를 비교해 삭제된 문단이 없는지 본다.
+  - id: AC4
+    description: |-
+      `docs/` 밖의 파일이 하나도 바뀌지 않았다 — 소스 · 설정 · 의존성 · 테스트 · Cargo.toml 모두 그대로다.
+    verification:
+      type: verifier
+
+evidence: []
+
+failure_memo: []

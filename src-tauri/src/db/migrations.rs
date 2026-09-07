@@ -263,6 +263,52 @@ pub const MIGRATIONS: &[Migration] = &[
               ALTER TABLE notion_syncs ADD COLUMN total_chunks        INTEGER;
               ALTER TABLE notion_syncs ADD COLUMN content_fingerprint TEXT;",
     },
+    // PRODUCT-SPEC §5 D가 처음부터 요구하던 **전사 언어**다 (`docs/ADR-0007-transcription-engine.md`
+    // §17.1.5). 새 제품 방향이 아니라 Phase 3이 빠뜨린 항목을 메우는 것이며, 앞의 migration을
+    // 고치지 않고 **열을 더한다** — version 8까지 적용된 사용자 DB가 이미 있을 수 있고, 그 행의
+    // 값은 그대로 남아야 한다. 이미 있는 행의 새 열은 NULL로 시작한다.
+    //
+    // `transcription_model`과 나란히 있는 값이다. **어떤 모델로 듣는가**와 **무슨 언어로
+    // 듣는가**는 서로 다른 질문이며, 하나를 고른다고 나머지가 정해지지 않는다.
+    //
+    // **NOT NULL도 DEFAULT도 두지 않는다.** 기본값 정책은 스키마가 아니라
+    // `domain::settings::Settings::DEFAULT`가 갖는다는 것이 이 테이블의 규약이다 (version 3의
+    // 주석). 그리고 여기서 NULL은 **'아직 고르지 않았다' = 언어를 자동으로 감지한다**는
+    // 정상 상태다 — 고르지 않은 것은 오류가 아니고, 특정 언어를 뜻하지도 않는다
+    // (ADR-0007 §17.1.4-1). 스키마에 `'en'` 같은 기본값을 적어 두는 것이야말로 §17.1이 기록한
+    // 그 실패이므로, 이 열은 어떤 언어도 기본으로 굳혀 두지 않는다.
+    //
+    // 저장된 값이 whisper가 아는 언어 코드인지 저장소는 묻지 않는다 — `transcription_model` ·
+    // `ai_model`과 같은 이유이며, 아니라고 해서 저장된 선택을 조용히 지우거나 바꾸지 않는다.
+    //
+    // INV-7: 여기서도 secret 열은 만들지 않는다. 언어는 secret이 아니다.
+    Migration {
+        version: 9,
+        name: "add_transcription_language",
+        sql: "ALTER TABLE settings ADD COLUMN transcription_language TEXT;",
+    },
+    // `phase-prompt/05.6` 성공 기준 3의 나머지 절반 — **전사 한 건에 걸린 시간이 기록으로
+    // 남는다.** 그것이 남아야 사람이 Metal 전후를 비교할 수 있다.
+    //
+    // version 2의 `transcripts`를 고치지 않고 **열을 더한다** — 그 스키마로 저장된 사용자 DB가
+    // 이미 있을 수 있고, 그 행의 값은 그대로 남아야 한다. Transcript는 immutable이므로
+    // (§7.1 · INV-2) 이미 저장된 행에 이 값을 나중에 채워 넣는 경로도 없다.
+    //
+    // **NOT NULL도 DEFAULT도 두지 않는다.** 여기서 NULL은 **'그때는 재지 않았다'는 정상
+    // 상태**이며, 이 열이 생기기 전에 저장된 Transcript가 전부 그렇다. 특히 `DEFAULT 0`은
+    // 두지 않는다 — 재지 않은 전사가 "0초 만에 끝났다"로 읽히면 그 비교는 거짓을 말하고,
+    // 그것은 이 열을 만든 이유 자체를 무너뜨린다.
+    //
+    // 담는 값은 **녹음 길이가 아니라 전사에 걸린 시간**이다 (`recordings.duration_ms`와 다른
+    // 축의 값이다). 재는 자리는 `crate::transcription::run` 하나이며, 저장소는 그 값을 나르기만
+    // 한다 — 어떤 값이 그럴듯한지 묻지 않는다.
+    //
+    // INV-7: 여기서도 secret 열은 만들지 않는다. 얼마나 걸렸는지는 secret이 아니다.
+    Migration {
+        version: 10,
+        name: "add_transcription_duration",
+        sql: "ALTER TABLE transcripts ADD COLUMN transcription_ms INTEGER;",
+    },
 ];
 
 /// 코드가 알고 있는 최신 스키마 버전. migration이 없으면 0이다.
@@ -386,6 +432,8 @@ mod tests {
                 (6, "add_ai_provider_settings"),
                 (7, "add_notion_settings"),
                 (8, "add_notion_sync_progress"),
+                (9, "add_transcription_language"),
+                (10, "add_transcription_duration"),
             ]
         );
     }
@@ -426,12 +474,120 @@ mod tests {
             "ai_model",
             // Phase 5가 더한 Notion destination 설정 (ADR-0009 §8.4).
             "notion_parent_page_id",
+            // Phase 5.6이 더한 전사 언어 (ADR-0007 §17.1.5).
+            "transcription_language",
         ] {
             assert!(
                 !create_settings.sql.contains(column),
                 "나중에 생긴 열 {column}이 이미 적용된 migration 안에 들어가 있다"
             );
         }
+    }
+
+    #[test]
+    fn the_transcription_language_column_lives_only_in_the_migration_that_added_it() {
+        // 이미 적용된 적이 있는 migration 안에 열을 끼워 넣으면, 그 version까지 적용된 DB에는
+        // 그 열이 영영 생기지 않는다 — migration은 다시 실행되지 않기 때문이다. 그래서 이 열은
+        // **목록 끝에 붙은 migration 하나에만** 있어야 한다 (ADR-0007 §17.1.5).
+        let carriers: Vec<&str> = MIGRATIONS
+            .iter()
+            .filter(|migration| migration.sql.contains("transcription_language"))
+            .map(|migration| migration.name)
+            .collect();
+
+        assert_eq!(
+            carriers,
+            vec!["add_transcription_language"],
+            "전사 언어 열은 그것을 더한 migration 하나에만 있어야 한다"
+        );
+        let position = MIGRATIONS
+            .iter()
+            .position(|migration| migration.name == "add_transcription_language")
+            .expect("전사 언어를 더하는 migration이 있어야 한다");
+        assert!(
+            MIGRATIONS[position + 1..]
+                .iter()
+                .all(|migration| migration.version > 9),
+            "이미 적용된 migration의 자리는 바뀌지 않는다 — 새 것은 언제나 그 뒤에 붙는다"
+        );
+    }
+
+    #[test]
+    fn the_transcription_language_column_carries_no_default_language() {
+        // 기본값 정책은 스키마가 아니라 `Settings::DEFAULT`가 갖는다 (version 3의 주석).
+        // 특히 이 열에 언어를 기본값으로 적어 두는 것은 ADR-0007 §17.1이 기록한 그 실패다 —
+        // 아무도 고르지 않은 'en'이 감지 결과인 것처럼 남았던 자리다.
+        let migration = MIGRATIONS
+            .iter()
+            .find(|migration| migration.name == "add_transcription_language")
+            .expect("전사 언어를 더하는 migration이 있어야 한다");
+        let sql = migration.sql.to_uppercase();
+
+        assert!(
+            !sql.contains("DEFAULT"),
+            "언어 열에 DEFAULT 절을 두면 기본값 정책이 두 곳에 생긴다: {}",
+            migration.sql
+        );
+        assert!(
+            !sql.contains("NOT NULL"),
+            "NULL이 '아직 고르지 않음' = 자동 감지라는 정상 상태다: {}",
+            migration.sql
+        );
+    }
+
+    #[test]
+    fn the_transcription_duration_column_lives_only_in_the_migration_that_added_it() {
+        // `create_domain_tables`를 고쳐 열을 넣으면 version 2까지 적용된 DB에는 그 열이 영영
+        // 생기지 않는다 — migration은 다시 실행되지 않기 때문이다 (설정 테이블과 같은 규칙).
+        let create_domain_tables = MIGRATIONS
+            .iter()
+            .find(|migration| migration.name == "create_domain_tables")
+            .expect("domain 테이블을 만드는 migration이 있어야 한다");
+        assert!(
+            !create_domain_tables.sql.contains("transcription_ms"),
+            "나중에 생긴 열 transcription_ms가 이미 적용된 migration 안에 들어가 있다"
+        );
+
+        let carriers: Vec<&str> = MIGRATIONS
+            .iter()
+            .filter(|migration| migration.sql.contains("transcription_ms"))
+            .map(|migration| migration.name)
+            .collect();
+        assert_eq!(
+            carriers,
+            vec!["add_transcription_duration"],
+            "전사 소요 시간 열은 그것을 더한 migration 하나에만 있어야 한다"
+        );
+        assert_eq!(
+            MIGRATIONS
+                .last()
+                .expect("migration이 최소 하나 있어야 한다")
+                .name,
+            "add_transcription_duration",
+            "새 migration은 언제나 목록 끝에 붙는다"
+        );
+    }
+
+    #[test]
+    fn the_transcription_duration_column_is_nullable_and_defaults_to_nothing() {
+        // NULL이 '그때는 재지 않았다'는 정상 상태다. `DEFAULT 0`을 두면 재지 않은 전사가
+        // "0초 만에 끝났다"로 읽히고, 그 순간 Metal 전후 비교가 거짓을 말한다.
+        let migration = MIGRATIONS
+            .iter()
+            .find(|migration| migration.name == "add_transcription_duration")
+            .expect("전사 소요 시간을 더하는 migration이 있어야 한다");
+        let sql = migration.sql.to_uppercase();
+
+        assert!(
+            !sql.contains("DEFAULT"),
+            "재지 않은 값에 기본값을 채워 넣지 않는다: {}",
+            migration.sql
+        );
+        assert!(
+            !sql.contains("NOT NULL"),
+            "NULL이 '그때는 재지 않았다'는 정상 상태다: {}",
+            migration.sql
+        );
     }
 
     #[test]

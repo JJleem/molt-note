@@ -37,17 +37,30 @@
  * 아래 줄의 세 동작은 전부 이 기기 안에서 끝난다 — clipboard에 쓰거나 파일 하나를 쓴다.
  * 나가는 행위의 주체는 사람이며, 그 사실이 {@link ManualHandoffView.localNotice}로 언제나
  * 함께 있다.
+ *
+ * ## 크기 때문에 조용히 실패하지 않는다 (`phase-prompt/05.6` 성공 기준 4 · R-5)
+ *
+ * 세 자리가 **같은 값으로** 크기와 자리를 말한다 — 복사 둘은 `copyView`가, Export for AI는
+ * 이 모듈이 같은 두 함수(`handoffSize` · `portionTaken`)를 지난다. 나뉜 문서를 내보내면
+ * 조각마다 파일이 하나씩 생기고 **있던 파일은 그대로다** (ADR-0009 §4.3) — 어느 자리에도
+ * 잘린 것을 온전한 것이라고 말하는 상태가 없다.
  */
 import { toFailure, type Failure } from '../ipc/failure';
-import type { ExportedFile, NoteMode, Recording } from '../ipc/types';
+import type { ExportedAiRequest, NoteMode, Recording } from '../ipc/types';
 import type { AiNoteTabView, NoteModeChoice } from './aiNoteView';
+import { showFile, type ShowFileAttempt, type ShowFileView } from './savedFileView';
 import {
   COPY_PROMPT_LABEL,
   COPY_TRANSCRIPT_LABEL,
+  FIRST_PORTION,
   copyPanel,
+  handoffSize,
+  portionTaken,
   type CopyAttempt,
   type CopyBody,
   type CopyPanelView,
+  type HandoffSizeView,
+  type PortionView,
 } from './copyView';
 
 // --- Export for AI 자리 ---------------------------------------------------------------
@@ -63,26 +76,50 @@ import {
  * 어떤 mode로 만들지를 컴포넌트가 따로 고르지 않는다.
  */
 export interface AiExportAction {
-  readonly kind: 'export' | 'again' | 'retry';
+  readonly kind: 'export' | 'again' | 'retry' | 'next';
   readonly label: string;
   readonly recordingId: string;
   readonly mode: NoteMode;
+  /**
+   * 내보낼 조각 (`phase-prompt/05.6` 성공 기준 4). **1부터 센다.**
+   *
+   * 한 번 내보내면 파일 하나이며, 이 값이 동작에 실려 있기 때문에 "나머지를 마저 파일로
+   * 꺼내는 수단"이 화면 값으로 존재한다. **어느 조각을 써도 있던 파일은 그대로다**
+   * (ADR-0009 §4.3).
+   */
+  readonly portion: number;
 }
 
 /** 화면에 처음 보이는 이름. Phase Goal이 부르는 이름 그대로다. */
 export const AI_EXPORT_LABEL = 'Export for AI';
 
 function exportAction(recordingId: string, mode: NoteMode): AiExportAction {
-  return { kind: 'export', label: AI_EXPORT_LABEL, recordingId, mode };
+  return { kind: 'export', label: AI_EXPORT_LABEL, recordingId, mode, portion: FIRST_PORTION };
 }
 
-function againAction(recordingId: string, mode: NoteMode): AiExportAction {
+function againAction(recordingId: string, mode: NoteMode, portion: number): AiExportAction {
   // 다시 내보내면 파일이 하나 더 생긴다 — 있던 파일을 덮어쓰지 않는다 (ADR-0009 §4.3).
-  return { kind: 'again', label: 'Export another file for AI', recordingId, mode };
+  return { kind: 'again', label: 'Export another file for AI', recordingId, mode, portion };
 }
 
-function retryAction(recordingId: string, mode: NoteMode): AiExportAction {
-  return { kind: 'retry', label: 'Try the export again', recordingId, mode };
+function retryAction(recordingId: string, mode: NoteMode, portion: number): AiExportAction {
+  return { kind: 'retry', label: 'Try the export again', recordingId, mode, portion };
+}
+
+/** 나머지를 마저 꺼내는 수단. **버튼의 이름이 몇 번째를 쓰는지 말한다.** */
+function nextAction(
+  recordingId: string,
+  mode: NoteMode,
+  portion: number,
+  count: number,
+): AiExportAction {
+  return {
+    kind: 'next',
+    label: `Export part ${portion} of ${count}`,
+    recordingId,
+    mode,
+    portion,
+  };
 }
 
 /**
@@ -95,26 +132,53 @@ function retryAction(recordingId: string, mode: NoteMode): AiExportAction {
  */
 export type AiExportAttempt =
   | { readonly kind: 'none' }
-  | { readonly kind: 'exporting'; readonly recordingId: string; readonly mode: NoteMode }
-  | { readonly kind: 'done'; readonly file: ExportedFile }
-  | { readonly kind: 'failed'; readonly recordingId: string; readonly failure: Failure };
+  | {
+      readonly kind: 'exporting';
+      readonly recordingId: string;
+      readonly mode: NoteMode;
+      readonly portion: number;
+    }
+  | {
+      readonly kind: 'done';
+      /**
+       * 쓰인 파일과 **그것이 문서의 어디인가** (`phase-prompt/05.6` 성공 기준 4).
+       *
+       * 파일 하나만 들고 있으면 화면은 나뉜 문서의 한 조각을 문서 전체라고 말하게 된다.
+       */
+      readonly written: ExportedAiRequest;
+    }
+  | {
+      readonly kind: 'failed';
+      readonly recordingId: string;
+      /** 쓰려던 조각. 재시도가 **그 조각으로** 돌아가게 하는 값이다. */
+      readonly portion: number;
+      readonly failure: Failure;
+    };
 
 /** 아무것도 하지 않은 상태. 화면이 열렸을 때의 값이다. */
 export const NO_AI_EXPORT_ATTEMPT: AiExportAttempt = { kind: 'none' };
 
-/** 내보내기를 시작했을 때 만드는 값. */
-export function startedAiExport(recordingId: string, mode: NoteMode): AiExportAttempt {
-  return { kind: 'exporting', recordingId, mode };
+/** 내보내기를 시작했을 때 만드는 값. 어느 조각을 쓰러 갔는지 함께 들고 있다. */
+export function startedAiExport(
+  recordingId: string,
+  mode: NoteMode,
+  portion: number,
+): AiExportAttempt {
+  return { kind: 'exporting', recordingId, mode, portion };
 }
 
-/** 파일이 만들어졌을 때 만드는 값. 경로는 backend가 준 값 그대로다 (§4.1). */
-export function exportedAiRequest(file: ExportedFile): AiExportAttempt {
-  return { kind: 'done', file };
+/** 파일이 만들어졌을 때 만드는 값. 경로도 조각의 자리도 backend가 준 값 그대로다 (§4.1). */
+export function exportedAiRequest(written: ExportedAiRequest): AiExportAttempt {
+  return { kind: 'done', written };
 }
 
 /** 내보내기가 거절됐을 때 만드는 값 (§13). **console로 흘려보내지 않는다.** */
-export function failedAiExport(recordingId: string, error: unknown): AiExportAttempt {
-  return { kind: 'failed', recordingId, failure: toFailure(error) };
+export function failedAiExport(
+  recordingId: string,
+  portion: number,
+  error: unknown,
+): AiExportAttempt {
+  return { kind: 'failed', recordingId, portion, failure: toFailure(error) };
 }
 
 /** 내보낼 재료가 아직 없다. **실패가 아니다** (§7.2 · MH-5). */
@@ -134,9 +198,25 @@ export const AI_EXPORT_RUNNING_TEXT = 'Writing the file for your AI…';
 /** 파일이 만들어졌다는 사실 한 줄. **색이 아니라 이 문장이 그것을 말한다** (요구 12). */
 export const AI_EXPORT_DONE_HEADLINE = 'The file for your AI is ready.';
 
+/**
+ * **조각 하나만 파일이 됐을 때의 사실 한 줄** (`phase-prompt/05.6` 성공 기준 4).
+ *
+ * 이때 "파일이 준비됐다"고만 말하면 그것은 **잘린 문서를 완전한 것이라고 말하는 것이다.**
+ */
+export const AI_EXPORT_DONE_PORTION_HEADLINE =
+  'One part is written as a file — not the whole document yet.';
+
 /** 그 파일이 어떤 성질인가 — 여기서부터는 사용자의 문서다 (ADR-0009 §4.3). */
 export const AI_EXPORT_DONE_TEXT =
   'This file is yours now. Exporting again writes another file next to it and never overwrites this one.';
+
+/** 나뉜 문서의 조각 하나가 파일이 됐다. 나머지도 같은 자리에 **파일이 더 생긴다.** */
+export const AI_EXPORT_DONE_PORTION_TEXT =
+  'Each part is written as its own file, and the file name says which part it holds. Exporting the next one writes another file next to this and never overwrites it.';
+
+/** 마지막 조각까지 왔다. **여기서만 문서 전체가 나왔다고 말한다.** */
+export const AI_EXPORT_DONE_LAST_TEXT =
+  'That was the last part. Together, the files hold the whole document — attach them in order, or open them and copy from there.';
 
 /** 무엇을 하다 실패했는가 (§13). 원인은 {@link Failure}가 말한다. */
 export const AI_EXPORT_FAILED_HEADLINE = 'The file for your AI could not be written.';
@@ -190,14 +270,33 @@ export type AiExportBody =
   | { readonly kind: 'exporting'; readonly text: string }
   | {
       readonly kind: 'done';
-      /** 파일이 만들어졌다는 사실. 색이 아니라 이 문장이 그것을 말한다. */
+      /**
+       * 파일이 만들어졌다는 사실. 색이 아니라 이 문장이 그것을 말한다.
+       *
+       * **조각 하나만 파일이 됐으면 다른 문장이다** — 잘린 문서를 완전한 것이라고 말하지 않는다.
+       */
       readonly headline: string;
       readonly fileName: string;
       /** 사용자에게 그대로 보여줄 수 있는 전체 경로. 화면이 만들어 내는 값이 아니다 (§4.1). */
       readonly path: string;
+      /**
+       * 그 자리를 여는 수단 (`phase-prompt/05.6` 성공 기준 2 · R-4 · `savedFileView.ts`).
+       *
+       * **{@link path}의 대체가 아니라 추가다** — 만든 파일을 AI 채팅에 첨부하려면 그 파일에
+       * 실제로 도달할 수 있어야 하는데, 경로만으로는 도달하지 못한다는 것이 실사용에서
+       * 드러났다. 여는 데 실패해도 경로는 그대로 보이며, 그때 무엇을 할 수 있는지도 이 값이
+       * 말한다.
+       */
+      readonly show: ShowFileView;
       readonly text: string;
-      /** 또 내보낼 수 있다. 있던 파일은 그대로 둔 채 하나가 더 생긴다. */
+      /** 문서 전체가 얼마나 큰가 (`phase-prompt/05.6` 성공 기준 4). */
+      readonly size: HandoffSizeView;
+      /** 이 파일이 문서의 몇 번째 중 몇 번째인가. */
+      readonly portion: PortionView;
+      /** 또 내보낼 수 있다. **같은 조각이** 파일로 하나 더 생긴다. */
       readonly again: AiExportAction;
+      /** 나머지를 마저 파일로 꺼내는 수단. 남은 조각이 없으면 `null`이다. */
+      readonly next: AiExportAction | null;
     }
   | {
       readonly kind: 'failed';
@@ -225,11 +324,15 @@ function aiExportItem(
   recording: Recording | null,
   mode: NoteMode,
   attempt: AiExportAttempt,
+  show: ShowFileAttempt,
 ): AiExportItemView {
   if (recording === null) {
     return { label: AI_EXPORT_LABEL, body: { kind: 'loading' } };
   }
-  return { label: AI_EXPORT_LABEL, body: aiExportBody(recording, mode, mine(attempt, recording.id)) };
+  return {
+    label: AI_EXPORT_LABEL,
+    body: aiExportBody(recording, mode, mine(attempt, recording.id), show),
+  };
 }
 
 /** 이 녹음에 대한 시도만 본다. 다른 녹음의 결과가 이 자리에 보이지 않는다. */
@@ -238,7 +341,7 @@ function mine(attempt: AiExportAttempt, recordingId: string): AiExportAttempt {
     case 'none':
       return attempt;
     case 'done':
-      return attempt.file.recordingId === recordingId ? attempt : NO_AI_EXPORT_ATTEMPT;
+      return attempt.written.file.recordingId === recordingId ? attempt : NO_AI_EXPORT_ATTEMPT;
     default:
       return attempt.recordingId === recordingId ? attempt : NO_AI_EXPORT_ATTEMPT;
   }
@@ -248,19 +351,37 @@ function aiExportBody(
   recording: Recording,
   mode: NoteMode,
   attempt: AiExportAttempt,
+  show: ShowFileAttempt,
 ): AiExportBody {
   if (attempt.kind === 'exporting') {
     return { kind: 'exporting', text: AI_EXPORT_RUNNING_TEXT };
   }
 
   if (attempt.kind === 'done') {
+    const { file } = attempt.written;
+    const portion = portionTaken(attempt.written);
+
     return {
       kind: 'done',
-      headline: AI_EXPORT_DONE_HEADLINE,
-      fileName: attempt.file.fileName,
-      path: attempt.file.path,
-      text: AI_EXPORT_DONE_TEXT,
-      again: againAction(recording.id, mode),
+      // 잘린 문서를 완전한 것이라고 말하지 않는다 (`phase-prompt/05.6` 성공 기준 4).
+      headline: portion.whole ? AI_EXPORT_DONE_HEADLINE : AI_EXPORT_DONE_PORTION_HEADLINE,
+      fileName: file.fileName,
+      path: file.path,
+      // 경로를 보여 주는 것에 **더해** 그 자리를 여는 수단이 있다 (성공 기준 2 · R-4).
+      show: showFile(file.path, show),
+      text: portion.whole
+        ? AI_EXPORT_DONE_TEXT
+        : portion.remaining === 0
+          ? AI_EXPORT_DONE_LAST_TEXT
+          : AI_EXPORT_DONE_PORTION_TEXT,
+      size: handoffSize(attempt.written),
+      portion,
+      again: againAction(recording.id, mode, portion.index),
+      // 남은 것이 있을 때만 다음 조각을 가리킨다. 없는 조각을 쓰라는 버튼을 만들지 않는다.
+      next:
+        portion.remaining === 0
+          ? null
+          : nextAction(recording.id, mode, portion.index + 1, portion.count),
     };
   }
 
@@ -273,7 +394,8 @@ function aiExportBody(
       cause,
       preservedNotice: AI_EXPORT_PRESERVED_NOTICE,
       resolution: FAILURE_RESOLUTION[cause],
-      retry: retryAction(recording.id, mode),
+      // 쓰려던 **그 조각을** 다시 쓴다 — 건너뛴 조각은 사용자가 알아채지 못한 채 빠진다.
+      retry: retryAction(recording.id, mode, attempt.portion),
     };
   }
 
@@ -372,6 +494,14 @@ export interface ManualHandoffInput {
   readonly copy: CopyAttempt;
   /** 이 화면이 건 Export for AI 한 번. */
   readonly aiExport: AiExportAttempt;
+  /**
+   * 이 화면이 건 **자리 열기** 한 번 (`phase-prompt/05.6` 성공 기준 2 · R-4).
+   *
+   * **AI provider와 아무 상관이 없다** — 이 값이 가리키는 것은 이미 만들어진 파일 하나이며,
+   * 그것을 여는 데 실패해도 파일과 경로는 그대로다. 다른 파일에 대한 시도는 이 자리에 보이지
+   * 않는다 (`savedFileView.ts`의 `showFile`).
+   */
+  readonly show: ShowFileAttempt;
 }
 
 /** 읽어 온 값을 아래 줄의 상태로 바꾼다. */
@@ -379,7 +509,7 @@ export function manualHandoff(input: ManualHandoffInput): ManualHandoffView {
   const { recording, mode } = input;
 
   const copy = copyPanel({ recording, mode, attempt: input.copy });
-  const aiExport = aiExportItem(recording, mode, input.aiExport);
+  const aiExport = aiExportItem(recording, mode, input.aiExport, input.show);
 
   const steps: readonly ManualStep[] = [
     { key: 'prompt', label: COPY_PROMPT_LABEL, usable: copyUsable(copy.prompt.body) },

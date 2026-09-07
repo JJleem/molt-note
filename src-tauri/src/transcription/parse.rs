@@ -69,6 +69,16 @@ use crate::domain::{Failure, FailureKind};
 /// 함께** 갱신한다 (TASK-031). 추측으로 다른 값을 넣지 않는다 — 근거는 위 두 줄이 전부다.
 const MILLISECONDS_PER_CENTISECOND: i64 = 10;
 
+/// 원시 센티초를 밀리초로 바꾼다. **이 crate에서 그 변환이 일어나는 유일한 자리다** (§10).
+///
+/// 저장 경로(`normalize`)와 진행 중 미리보기가 **같은 계수를 쓴다** — 미리보기가 자기
+/// 계수를 따로 갖게 두면 §10이 한 자리로 묶은 것이 두 자리가 된다.
+///
+/// 넘치면 `None`이다. 표현할 수 없는 값을 saturate해서 그럴듯하게 만들지 않는다.
+pub fn milliseconds_from_centiseconds(centiseconds: i64) -> Option<i64> {
+    centiseconds.checked_mul(MILLISECONDS_PER_CENTISECOND)
+}
+
 /// 엔진이 낸 segment 하나를 **단위 변환 전 값 그대로** 담은 것.
 ///
 /// 이 타입을 채우는 것은 실행 경계(TASK-026)이고, 그 경계는 값을 옮기기만 한다 —
@@ -238,8 +248,8 @@ pub fn normalize(raw: RawTranscription) -> Result<Transcription, Failure> {
 ///
 /// 넘치면 값을 접지 않고 실패로 나간다 — saturate한 시각은 조용히 틀린 채로 영구히 저장된다.
 fn to_milliseconds(centiseconds: i64, raw_index: usize, field: &str) -> Result<i64, Failure> {
-    centiseconds
-        .checked_mul(MILLISECONDS_PER_CENTISECOND)
+    // **곱하는 자리는 하나다** — 저장 경로도 미리보기도 같은 함수를 지난다 (§10).
+    milliseconds_from_centiseconds(centiseconds)
         .ok_or_else(|| {
             Failure::permanent(
                 FailureKind::InvalidInput,

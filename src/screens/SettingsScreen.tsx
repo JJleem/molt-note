@@ -68,6 +68,7 @@ import {
 } from './notionSettings';
 import {
   LOADING_SETTINGS,
+  TRANSCRIPTION_LANGUAGE_PLACEHOLDER,
   editedSettings,
   failedSave,
   failedSettings,
@@ -76,6 +77,7 @@ import {
   savingSettings,
   toForm,
   toSettings,
+  transcriptionLanguageNotices,
   transcriptionNotices,
   type SettingsForm,
   type SettingsView,
@@ -93,9 +95,13 @@ import {
  * 없을 수 있고, 그때 **다른 장치로 바꿔 놓지 않는다** — 저장된 선택은 그대로 두고 지금
  * 쓸 수 없다는 사실을 보여 준다 (`defaultMicrophone.ts`).
  *
- * Transcription 그룹은 **자동 전사 토글**과 **모델 선택** 둘이다 (Phase 3). 모델이 없어서
- * 지금 전사할 수 없다는 것은 여기서 보이는 **제품 상태**이며, 그 사실 때문에 자동 전사 토글이
- * 뒤집히지 않는다 — 사용자가 켠 값은 켜진 채로 남는다 (ADR-0007 §8.2.3).
+ * Transcription 그룹은 **자동 전사 토글**과 **모델 선택**과 **언어**다 (Phase 3 · Phase 5.6).
+ * 모델이 없어서 지금 전사할 수 없다는 것은 여기서 보이는 **제품 상태**이며, 그 사실 때문에
+ * 자동 전사 토글이 뒤집히지 않는다 — 사용자가 켠 값은 켜진 채로 남는다 (ADR-0007 §8.2.3).
+ *
+ * 언어는 §5 D가 처음부터 요구하던 항목이며 여기가 그 자리다 (ADR-0007 §17.1.5). **비어 있는
+ * 것이 결핍이 아니라 자동 감지**이므로 그 사실이 화면의 말로 나온다 — 무엇을 쓸지는 화면이
+ * 아니라 순수 모듈이 정하고, 여기서는 그리기만 한다 (§18).
  *
  * AI 그룹은 **두 부분**이다 (Phase 5.5 요구 7 · `docs/ADR-0010` §4.3). 앞은 `Connected
  * provider` — **고르기 · 연결 확인 · 모델 선택 · 전송 경계 표시** 넷이며 Phase 4가 만든 그대로다.
@@ -430,6 +436,30 @@ export function SettingsScreen() {
             onChange={(event) => edit({ transcriptionModel: event.currentTarget.value })}
           />
         </label>
+
+        <label className="field" htmlFor="transcription-language">
+          <span className="field__label">Language</span>
+          {/* 모델과 **다른 값이다** — 어떤 모델로 듣는가와 무슨 언어로 듣는가는 서로 다른
+              질문이다 (ADR-0007 §17.1). 비어 있는 것이 자동 감지라는 사실은 placeholder와
+              아래 문장이 말하며, 그 문구를 정하는 것은 순수 모듈이다. */}
+          <input
+            id="transcription-language"
+            type="text"
+            className="input"
+            placeholder={TRANSCRIPTION_LANGUAGE_PLACEHOLDER}
+            value={form.transcriptionLanguage}
+            onChange={(event) => edit({ transcriptionLanguage: event.currentTarget.value })}
+          />
+        </label>
+
+        {/* 고르지 않은 상태가 **오류가 아니라 자동 감지**라는 것이 여기서 말해진다. 빈칸을
+            말없이 두면 "아직 안 한 일"로 읽히고, 그렇게 읽히는 순간 사용자는 무엇이든
+            적어 넣게 된다 (ADR-0007 §17.1.4-1). */}
+        {transcriptionLanguageNotices(form).map((notice) => (
+          <p className="hint" key={notice}>
+            {notice}
+          </p>
+        ))}
 
         <label className="field field--inline" htmlFor="automatic-transcription">
           <input

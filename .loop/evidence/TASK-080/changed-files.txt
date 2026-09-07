@@ -1,0 +1,7 @@
+TASK-080이 바꾼 파일 (Evidence 파일 자신은 제외)
+
+A  src-tauri/src/audio/level.rs      새 순수 모듈 + 그 옆의 단위 테스트
+M  src-tauri/src/audio/mod.rs        `pub mod level;` · 재수출 · 파일 목록 주석 한 줄
+
+그 밖의 제품 소스 · 테스트 · 설정 · 의존성은 건드리지 않았다.
+Cargo.toml에 새 의존성을 더하지 않았다 — 이 모듈이 쓰는 것은 std뿐이다.

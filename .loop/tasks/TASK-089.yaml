@@ -1,0 +1,59 @@
+# 이 Phase의 불변을 전용 테스트에 못박는다
+# Runtime이 PLAN-20260907T074302Z 승인 시점에 생성했다 (proposal P4). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-089
+status: DONE
+
+request: |-
+  **새 제품 기능을 추가하지 않고**, 이미 만들어진 경로로 이 Phase의 불변을 전용 테스트에 못박는다 (TASK-074 · TASK-084의 선례를 따른다). 둘을 만든다. (1) `tests/` 아래의 경계 테스트(예: `tests/transcription-chunking-boundary.test.ts`) — `tests/level-and-collapse-boundary.test.ts`가 이미 쓰는 방식대로 Rust 소스를 읽어 소스 수준 불변을 고정한다: 청크 분할 · 겹침 · 오프셋 · 반복 차단 규칙이 순수 모듈 **한 파일에만** 있고 `whisper.rs` · `run.rs` · `src/screens/`에 복제되어 있지 않다 · 그 순수 모듈이 fs · db · 네트워크 · `whisper_rs`를 알지 않는다 · 청크 길이와 반복 차단 임계값이 각각 한 자리에만 정의되어 있다 · 센티초 → 밀리초 계수가 여전히 `parse.rs` 한 자리뿐이다 · `run.rs`의 저장 직전 붕괴 판정 호출이 그대로 있다 · `Cargo.toml`에 새 의존성이 늘지 않았다 · 벤더 고유 청킹 개념이 `domain` · `commands/payload.rs` · `src/ipc/types.ts`에 새로 생기지 않았다(INV-9). (2) `src-tauri/tests/` 아래의 통합 테스트(예: `src-tauri/tests/transcription_chunking.rs`) — 실제 모델도 실제 오디오도 없이 `StubEngine`과 값으로 행동 불변을 고정한다: 청크가 여럿인 결과가 하나의 `RawTranscription`으로 합쳐져 `parse::normalize`를 통과하면 timestamp가 전체 시간축에서 **뒤로 가지 않는다**(청크 경계에서 되감기지 않는다) · 청킹이 들어와도 붕괴한 결과는 여전히 저장 직전에 막히고 `TranscriptionOutputUnusable`로 실패하며 Transcript가 늘지 않는다 · 실패해도 원본 오디오 경로와 기존 current Transcript가 그대로다(INV-1 · INV-2 · INV-3) · 반복 차단이 정상적인(비연속) 반복을 지우지 않는다. **자동 테스트는 실제 whisper도 모델 파일도 72분 오디오도 요구하지 않는다** — 그 판정은 사람의 몫이다. 제품 소스는 이 Task에서 바꾸지 않는다; 테스트가 실패하면 그것은 앞 Task로 돌아갈 신호이지 테스트를 느슨하게 할 이유가 아니다.
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-088
+
+stop_condition:
+  gates: [build, lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 3
+
+acceptance_criteria:
+  - id: P4-AC1
+    description: |-
+      `npm run test`가 통과하고 새 테스트 두 벌이 그 안에서 실제로 돈다.
+    verification:
+      type: gate
+      ref: test
+  - id: P4-AC2
+    description: |-
+      `npm run lint`가 통과한다.
+    verification:
+      type: gate
+      ref: lint
+  - id: P4-AC3
+    description: |-
+      `npm run build`가 통과한다.
+    verification:
+      type: gate
+      ref: build
+  - id: P4-AC4
+    description: |-
+      새 테스트가 실제 모델 파일 · 실제 오디오 파일 · 네트워크를 요구하지 않으며, 조건이 없으면 skip하는 경로도 없다.
+    verification:
+      type: verifier
+  - id: P4-AC5
+    description: |-
+      테스트가 request가 열거한 불변을 실제로 판정한다 — 특히 (a) 청크 경계에서 timestamp가 되감기지 않는다, (b) 청킹이 붕괴 판정을 우회하지 않는다, (c) 규칙과 임계값이 한 자리에만 있다, (d) 새 의존성과 새 벤더 개념이 없다.
+    verification:
+      type: verifier
+  - id: P4-AC6
+    description: |-
+      이 Task가 제품 소스를 바꾸지 않았다 — 바뀐 것은 `tests/`와 `src-tauri/tests/` 아래뿐이다.
+    verification:
+      type: verifier
+
+evidence: []
+
+failure_memo: []

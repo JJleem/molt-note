@@ -37,6 +37,19 @@ export interface SettingsForm {
    */
   readonly transcriptionModel: string;
   /**
+   * 전사할 때 무슨 언어로 들을지. **고르지 않았으면 빈 문자열이며, 그것은 자동 감지다**
+   * (docs/ADR-0007-transcription-engine.md §17.1.4-1).
+   *
+   * `transcriptionModel`과 같은 이유로 `null`이 아니라 빈 문자열이다 — 텍스트 입력은 `null`을
+   * 표현할 수 없고, 두 표현 사이의 변환은 이 모듈에만 있다.
+   *
+   * **폼이 이 값을 들고 있어야 하는 이유는 `notionParentPageId`와 같다** — {@link toSettings}가
+   * 폼 전체를 저장할 값으로 옮기므로, 폼에 없는 설정은 저장할 때마다 `null`이 되어 사용자가
+   * 고른 언어가 조용히 지워진다. 그리고 이 값에서 그것은 특히 조용하다: 지워진 뒤에도 화면은
+   * 여전히 정상으로 보이고, 다음 전사가 자동 감지로 돌아간 것을 사용자는 결과를 보고서야 안다.
+   */
+  readonly transcriptionLanguage: string;
+  /**
    * 고른 입력 장치의 선택 키. 고르지 않았으면 `NO_DEFAULT_MICROPHONE`(빈 문자열)이다 —
    * `<select>`의 값도 `null`을 담을 수 없다.
    *
@@ -174,6 +187,10 @@ export function toSettings(form: SettingsForm): Settings {
     // 입력한 값 그대로 보낸다(앞뒤 공백만 뺀다). 그 파일이 지금 있는지 여기서 찾아보지 않고,
     // 없다고 해서 다른 모델로 바꾸지도 않는다 — `defaultMicrophone`과 같은 이유다.
     transcriptionModel: model === '' ? null : model,
+    // 빈 입력은 "고르지 않음"(`null`)이고 **그것은 자동 감지다** — 여기서 로캘을 짐작해
+    // 언어를 채우지 않는다. 앞뒤 공백만 뺀다: 그 코드를 엔진이 아는지 화면은 알 수 없고,
+    // 모른다고 짐작해 다른 언어로 바꾸지도 않는다 (`transcriptionModel`과 같은 규칙).
+    transcriptionLanguage: chosen(form.transcriptionLanguage),
     // 고른 키는 그대로 보낸다. 지금 없는 장치라도 **사용자가 고른 값이므로 바꾸지 않는다.**
     defaultMicrophone: chosenMicrophone(form.defaultMicrophone),
     // AI 설정 세 값도 같은 규칙이다 — 빈 입력은 "고르지 않음"(`null`)이며 **그것뿐이다.**
@@ -201,6 +218,9 @@ export function toForm(settings: Settings): SettingsForm {
     automaticProcessing: settings.automaticProcessing,
     automaticTranscription: settings.automaticTranscription,
     transcriptionModel: settings.transcriptionModel ?? '',
+    // 고르지 않은 언어(`null`)도 빈 입력이다. 그 빈칸이 뜻하는 것은 자동 감지이며,
+    // 그 사실을 말하는 것은 {@link transcriptionLanguageNotice}다.
+    transcriptionLanguage: settings.transcriptionLanguage ?? '',
     defaultMicrophone: settings.defaultMicrophone ?? NO_DEFAULT_MICROPHONE,
     // 고르지 않은 상태(`null`)는 빈 입력이다 — `recordingsDirectory`와 같은 이유다.
     aiProvider: settings.aiProvider ?? '',
@@ -264,6 +284,70 @@ export function transcriptionNotices(form: SettingsForm): string[] {
     notices.push(AUTOMATIC_TRANSCRIPTION_STAYS_ON_NOTICE);
   }
   return notices;
+}
+
+/**
+ * 전사를 무슨 언어로 들을 것인가 — **설정 값만으로 말할 수 있는 데까지다.**
+ *
+ * ```text
+ * autoDetect  언어를 고르지 않았다  → 엔진이 녹음마다 감지한다 (오류가 아니라 정상 상태다)
+ * chosen      언어를 골랐다        → 그 언어로 듣는다
+ * ```
+ *
+ * **`autoDetect`는 "비어 있다"가 아니라 하나의 선택이다** (ADR-0007 §17.1.4-1). 고르지 않은
+ * 자리에 앱이 언어를 대신 채워 넣지 않으며, 특히 **사용자의 로캘을 짐작하지 않는다** — 화면
+ * 언어는 말하는 언어가 아니다. 짐작한 값이 틀렸을 때 무엇이 되는지는 이미 봤다: 아무도 고른
+ * 적 없는 `en` 하나가 72분짜리 한국어 회의를 통째로 못 쓰게 만들었다 (§17.1.1).
+ *
+ * `chosen`이 "그 언어로 전사된다"는 보장은 아니다. 그 코드를 엔진이 아는지 화면은 알 수 없고,
+ * 실제로 무엇으로 들었는지는 만들어진 Transcript의 `language`에 남는다 — 알 수 없는 것을 아는
+ * 것처럼 적지 않는다 ({@link transcriptionModel}과 같은 태도).
+ */
+export type TranscriptionLanguage =
+  | { readonly kind: 'autoDetect' }
+  | { readonly kind: 'chosen'; readonly value: string };
+
+/** 고른 언어가 있는가. 공백뿐인 입력은 고르지 않은 것과 같다. */
+export function transcriptionLanguage(form: SettingsForm): TranscriptionLanguage {
+  const value = form.transcriptionLanguage.trim();
+  return value === '' ? { kind: 'autoDetect' } : { kind: 'chosen', value };
+}
+
+/**
+ * 언어 입력란이 비어 있을 때 그 칸에 보이는 말.
+ *
+ * `Not set`이 아니다 — 다른 설정에서는 그것이 맞지만, 여기서 비어 있음은 **아직 안 한 일이
+ * 아니라 자동 감지**다 (ADR-0007 §17.1.4-1).
+ */
+export const TRANSCRIPTION_LANGUAGE_PLACEHOLDER = 'Detected automatically';
+
+/** 고르지 않은 상태가 무엇을 뜻하는지 (ADR-0007 §17.1.4-1). **결핍이 아니라 동작이다.** */
+export const TRANSCRIPTION_LANGUAGE_IS_DETECTED_NOTICE =
+  'No language is set, so the language of each recording is detected automatically. This is a normal setting, not something left undone.';
+
+/** 그 자리에서 무엇을 할 수 있는지. 고르는 것도, 고르지 않은 채 두는 것도 유효한 선택이다. */
+export const HOW_TO_SET_A_TRANSCRIPTION_LANGUAGE =
+  'Leave this empty to keep detecting the language, or enter a language code (for example ko or en) to transcribe every recording in that language.';
+
+/**
+ * 전사 언어에 대해 사용자에게 할 말. **언제나 한 줄 이상 있다.**
+ *
+ * 고르지 않은 상태에서 아무 말도 하지 않으면, 그 빈칸은 "아직 안 한 일"로 읽힌다 — 그런데
+ * 그것은 사실이 아니라 **자동 감지라는 동작**이다. 그래서 이 함수는 빈 목록을 돌려주지 않는다
+ * ({@link transcriptionNotices}는 할 말이 없으면 비지만, 그쪽은 결핍에 대한 말이고 이쪽은
+ * 지금 무엇이 일어나는지에 대한 말이다).
+ */
+export function transcriptionLanguageNotices(form: SettingsForm): string[] {
+  const language = transcriptionLanguage(form);
+  if (language.kind === 'chosen') {
+    // 고른 값을 그대로 되읽어 준다. 앱이 그 코드를 해석하거나 이름으로 바꾸지 않는다 —
+    // 무엇을 아는 엔진인지 화면은 알지 못한다.
+    return [
+      `Recordings are transcribed as "${language.value}", so the language is not detected.`,
+      HOW_TO_SET_A_TRANSCRIPTION_LANGUAGE,
+    ];
+  }
+  return [TRANSCRIPTION_LANGUAGE_IS_DETECTED_NOTICE, HOW_TO_SET_A_TRANSCRIPTION_LANGUAGE];
 }
 
 function ready(form: SettingsForm): SettingsView {

@@ -17,10 +17,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::ai::note::{decode_content, MeetingNote, StructuredNote, StudyNote, SummaryNote};
 use crate::ai::provider::{Availability, ProviderDescriptor};
-use crate::audio::{CaptureReport, InputDevice, SessionState, SessionSummary};
+use crate::audio::{
+    CaptureReport, InputDevice, LevelReading, LevelVerdict, SessionState, SessionSummary,
+};
+
 use crate::domain::{
-    AiNote, Failure, NoteType, NotionSync, ProcessingStatus, Recording, RecordingId, RecordingView,
-    Settings, Transcript, TranscriptSegment,
+    format_duration_ms, AiNote, Failure, NoteType, NotionSync, ProcessingStatus, Recording,
+    RecordingId, RecordingView, Settings, Transcript, TranscriptSegment,
 };
 
 use super::notion::NotionSendStatus;
@@ -250,7 +253,10 @@ impl From<&RecordingPayload> for MissingAudioPayload {
 /// **길이는 Rust가 세고 Rust가 문장까지 만든다.** `elapsed_ms`와 `elapsed_label`을 함께
 /// 보내는 이유가 그것이다 — TypeScript에 길이 계산을 만들지 않는다
 /// (`tests/screen-boundary.test.ts` · [`RecordingPayload::duration_label`]).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+///
+/// 입력 레벨도 같은 규약을 따른다 ([`InputLevelPayload`]) — 수치와 문장이 함께 오고,
+/// **오디오 샘플은 오지 않는다** (INV-6 · ADR-0003 §16.3).
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionStatusPayload {
     /// `idle · recording · paused · stopped` 중 하나.
@@ -259,16 +265,72 @@ pub struct SessionStatusPayload {
     pub elapsed_ms: i64,
     /// 같은 길이를 사람이 읽는 문장으로 (예: `0:07`).
     pub elapsed_label: String,
+    /// 지금까지 **파일에 쓰인** 샘플의 입력 레벨.
+    ///
+    /// **진행 중인 녹음이 없거나 아직 샘플이 하나도 없으면 없음이다 — 0이 아니다**
+    /// (ADR-0003 §16.3). 재지 않은 것을 "소리 없음"이라고 말하지 않는다.
+    pub level: Option<InputLevelPayload>,
 }
 
 impl SessionStatusPayload {
-    /// 상태와 경과 시간 하나를 값으로 만든다.
-    pub(super) fn new(state: SessionState, elapsed_ms: i64, elapsed_label: String) -> Self {
+    /// 상태 · 경과 시간 · 입력 레벨 하나를 값으로 만든다.
+    pub(super) fn new(
+        state: SessionState,
+        elapsed_ms: i64,
+        elapsed_label: String,
+        level: Option<LevelReading>,
+    ) -> Self {
         Self {
             state: state.as_str().to_string(),
             elapsed_ms,
             elapsed_label,
+            level: level.map(InputLevelPayload::from),
         }
+    }
+}
+
+/// 진행 중인 녹음의 입력 레벨 (ADR-0003 §16.3).
+///
+/// **나가는 것은 네 값뿐이다** — 평균 RMS의 dBFS · 전체 피크의 dBFS · 판정 하나 · 사람이 읽는
+/// 짧은 문장. **오디오 샘플은 이 경계를 지나지 않는다**: 파형도 스펙트럼도 샘플 배열도 없다.
+/// INV-6이 오디오가 기기 밖으로 나가는 길을 막고, 이 값은 **앱 안의 IPC 경계에서도 같은 선**을
+/// 지킨다 — 화면이 오디오를 받을 이유가 없다 (§12 Privacy Boundary).
+///
+/// 수치도 판정도 문장도 [`crate::audio::level`] 한 자리에서 만들어진 것을 그대로 옮긴다.
+/// **여기서 dBFS를 다시 계산하지 않고 임계값을 다시 두지도 않는다** — 화면도 마찬가지다.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InputLevelPayload {
+    /// 평균 RMS의 dBFS. 소수 한 자리이며 판정은 이 값으로 한다.
+    pub average_dbfs: f64,
+    /// 전체 피크의 dBFS. 소수 한 자리. **판정에 쓰이지 않는다** — 함께 보는 값이다.
+    pub peak_dbfs: f64,
+    /// `usable · low · silent` 중 하나. 사람이 읽는 이름은 `message` 안에 있다.
+    pub verdict: String,
+    /// 사람이 읽는 짧은 문장. **화면이 이 문장을 다시 만들지 않는다.**
+    pub message: String,
+}
+
+impl From<LevelReading> for InputLevelPayload {
+    fn from(reading: LevelReading) -> Self {
+        Self {
+            average_dbfs: reading.average_dbfs,
+            peak_dbfs: reading.peak_dbfs,
+            verdict: verdict_name(reading.verdict).to_string(),
+            message: reading.message,
+        }
+    }
+}
+
+/// 판정 하나의 wire 이름 — `SessionState::as_str`과 같은 성질의 값이다.
+///
+/// 사람이 읽는 이름([`LevelVerdict::label`])을 그대로 보내지 않는다. 화면이 갈래를 나누는 데
+/// 쓰는 값과 사람에게 보이는 문장은 서로 다른 이유로 바뀌기 때문이다.
+fn verdict_name(verdict: LevelVerdict) -> &'static str {
+    match verdict {
+        LevelVerdict::Usable => "usable",
+        LevelVerdict::Low => "low",
+        LevelVerdict::Silent => "silent",
     }
 }
 
@@ -291,7 +353,8 @@ impl SessionStatusPayload {
 /// **실패는 [`Failure`] 그대로 실려 온다.** §13의 세 질문에 대한 답이 이미 그 값 안에 있으므로
 /// 여기서 문장을 새로 만들거나 종류를 뭉개지 않는다 — 모델이 없는 것과 엔진이 죽은 것은
 /// 사용자가 할 일이 다르고, 그 구분이 화면까지 그대로 도달해야 한다.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+// `progress`가 `f64`이므로 `Eq`는 성립하지 않는다. 비교는 `PartialEq`로 충분하다.
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TranscriptionStatusPayload {
     /// `idle · running · done · failed` 중 하나.
@@ -305,6 +368,30 @@ pub struct TranscriptionStatusPayload {
     pub transcript_id: Option<String>,
     /// 실패했을 때 그 실패 그대로.
     pub failure: Option<Failure>,
+    /// **도는 동안** 지금까지 나온 문장들 (2026-09-07 추가). 그 밖의 상태에서는 비어 있다.
+    ///
+    /// **저장된 Transcript가 아니다.** `parse`도 `collapse`도 반복 차단도 지나지 않은
+    /// 미리보기이므로, 여기 보이던 문장이 최종 Transcript에 없을 수 있다 —
+    /// 붕괴 판정이 저장을 막았거나(§18.5) 반복 차단이 지웠을 때다(§20.6).
+    pub partial_lines: Vec<PartialLinePayload>,
+    /// 오디오를 얼마나 지났는가. `0.0 ~ 1.0`이며, **아직 모르면 없다** (0%가 아니다).
+    ///
+    /// **조각 개념을 담지 않는다** (ADR-0007 §20.8 · INV-9) — 청크 길이가 바뀌어도,
+    /// 청킹이 사라져도 이 값의 뜻은 그대로다.
+    pub progress: Option<f64>,
+}
+
+/// 전사 도중에 나온 문장 하나. [`TranscriptionStatusPayload::partial_lines`]의 원소다.
+///
+/// **경계 밖으로 엔진 고유 단위를 내보내지 않는다** (INV-9). 저장된 segment와 같은
+/// 밀리초이며, 그 변환은 `parse`의 계수 한 자리에서만 일어난다 (ADR-0007 §10).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PartialLinePayload {
+    /// 전체 시간축에서의 시작 시각. 저장된 segment의 `startMs`와 같은 단위다.
+    pub start_ms: i64,
+    /// 엔진이 낸 문장.
+    pub text: String,
 }
 
 impl TranscriptionStatusPayload {
@@ -315,14 +402,22 @@ impl TranscriptionStatusPayload {
             recording_id: None,
             transcript_id: None,
             failure: None,
+            partial_lines: Vec::new(),
+            progress: None,
         }
     }
 
-    /// 지금 이 녹음을 전사하고 있다.
-    pub(super) fn running(recording_id: &str) -> Self {
+    /// 지금 이 녹음을 전사하고 있다. 지금까지 나온 문장을 함께 낸다.
+    pub(super) fn running(
+        recording_id: &str,
+        partial_lines: Vec<PartialLinePayload>,
+        progress: Option<f64>,
+    ) -> Self {
         Self {
             state: "running".to_string(),
             recording_id: Some(recording_id.to_string()),
+            partial_lines,
+            progress,
             ..Self::idle()
         }
     }
@@ -332,7 +427,7 @@ impl TranscriptionStatusPayload {
         Self {
             state: "done".to_string(),
             transcript_id: Some(transcript_id.to_string()),
-            ..Self::running(recording_id)
+            ..Self::running(recording_id, Vec::new(), None)
         }
     }
 
@@ -341,7 +436,7 @@ impl TranscriptionStatusPayload {
         Self {
             state: "failed".to_string(),
             failure: Some(failure.clone()),
-            ..Self::running(recording_id)
+            ..Self::running(recording_id, Vec::new(), None)
         }
     }
 }
@@ -398,6 +493,21 @@ pub struct TranscriptPayload {
     pub engine: String,
     /// 전사에 실제로 쓴 모델 식별자.
     pub model: String,
+    /// 이 전사 한 건에 **걸린 시간**(밀리초). 재지 않은 옛 Transcript면 없다
+    /// (`phase-prompt/05.6` 성공 기준 3).
+    ///
+    /// **[`RecordingPayload::duration_ms`]와 다른 축의 값이다** — 저쪽은 오디오가 얼마나
+    /// 긴가이고 이쪽은 그것을 옮기는 데 얼마나 걸렸는가다.
+    pub transcription_ms: Option<i64>,
+    /// 같은 시간을 **Rust가 만든 문장으로** (예: `1:47`).
+    ///
+    /// 밀리초와 함께 보내는 이유는 [`RecordingPayload::duration_label`]과 같다 — 초를
+    /// `1:47`로 바꾸는 규칙이 TypeScript에 다시 구현되지 않게 하는 것이다
+    /// (`tests/screen-boundary.test.ts` · [`format_duration_ms`]).
+    ///
+    /// **없으면 없는 채로 간다.** 재지 않은 전사를 `0:00`이라고 말하지 않는다 — 그 문장은
+    /// "0초 만에 끝났다"로 읽히고, 그 순간 이 값으로 하려던 비교가 거짓이 된다.
+    pub transcription_label: Option<String>,
 }
 
 impl From<Transcript> for TranscriptPayload {
@@ -415,6 +525,9 @@ impl From<Transcript> for TranscriptPayload {
             created_at: transcript.created_at,
             engine: transcript.engine,
             model: transcript.model,
+            transcription_ms: transcript.transcription_ms,
+            // 잰 적이 없으면 문장도 만들지 않는다. `map`이 그 사실을 그대로 나른다.
+            transcription_label: transcript.transcription_ms.map(format_duration_ms),
         }
     }
 }
@@ -442,6 +555,17 @@ pub struct SettingsPayload {
     /// `crate::transcription::model` 하나이고, 없으면 §13의 정의된 실패로 드러난다.
     #[serde(default)]
     pub transcription_model: Option<String>,
+    /// 전사할 때 **무슨 언어로 들을지** (§5 D · ADR-0007 §17.1).
+    ///
+    /// **고르지 않은 상태(`null`)가 기본이고, 그것은 '자동 감지'를 뜻한다** — 오류도 아니고
+    /// 특정 언어도 아니다 (§17.1.4-1). 화면은 그 상태를 빈칸이 아니라 자동 감지로 말한다
+    /// (`src/screens/settingsView.ts`).
+    ///
+    /// **secret이 아니다** — 무슨 언어로 듣는지일 뿐이며, 그래서 INV-7과 충돌하지 않는다.
+    /// 이 값이 엔진이 아는 언어 코드인지는 여기서 말하지 않는다. 그것을 실제 호출로 옮기는
+    /// 자리는 `crate::transcription::whisper` 하나다 (ADR-0007 §17.1.4-4).
+    #[serde(default)]
+    pub transcription_language: Option<String>,
     /// 기본으로 고를 입력 장치의 **선택 키** ([`InputDevicePayload::key`]).
     ///
     /// 고르지 않은 상태(`null`)도 정상이다. 이 값이 가리키는 장치가 지금 목록에 있는지는
@@ -487,6 +611,7 @@ impl From<Settings> for SettingsPayload {
             automatic_processing: settings.automatic_processing,
             automatic_transcription: settings.automatic_transcription,
             transcription_model: settings.transcription_model,
+            transcription_language: settings.transcription_language,
             default_microphone: settings.default_microphone,
             ai_provider: settings.ai_provider,
             ai_base_url: settings.ai_base_url,
@@ -515,6 +640,13 @@ impl From<SettingsPayload> for Settings {
                 .transcription_model
                 .map(|model| model.trim().to_string())
                 .filter(|model| !model.is_empty()),
+            // 언어도 같은 규칙이다 — 공백뿐인 입력은 '고르지 않음'(= 자동 감지)이며, **그것뿐이다.**
+            // 이 자리에서 언어 코드의 모양을 검사하지도, 모르는 코드를 다른 언어로 바꾸지도,
+            // 비어 있다고 해서 로캘을 짐작해 채우지도 않는다 (INV-10 · ADR-0007 §17.1.4).
+            transcription_language: payload
+                .transcription_language
+                .map(|language| language.trim().to_string())
+                .filter(|language| !language.is_empty()),
             // 같은 이유로 빈 선택은 '고르지 않음'이다. **다만 그것뿐이다** — 알아볼 수 없는
             // 키가 와도 여기서 다른 장치로 바꾸지 않는다. 저장된 값과 지금 있는 장치를
             // 맞춰 보는 일은 목록을 아는 쪽의 일이고, 그 결과는 값으로 구분된다.
@@ -830,6 +962,114 @@ impl ExportedFilePayload {
             recording_id: recording_id.to_string(),
             path: written.path.display().to_string(),
             file_name: written.name,
+        }
+    }
+}
+
+/// 문자열 하나가 **얼마나 큰가** (`phase-prompt/05.6` 성공 기준 4 · `crate::export::portion`).
+///
+/// **이 값이 없으면 화면은 사용자에게 크기를 말할 수 없다.** 72분 녹음의 산출물은 99 KB였고,
+/// 사람은 그것을 채팅 창에 붙여 넣으려다 실패했으며 앱은 그 사실을 말해 주지 않았다 (R-5).
+///
+/// 셋을 함께 싣는 이유는 사람이 크기를 재는 방법이 하나가 아니기 때문이다 — 바이트는 예산과
+/// 견주는 값이고, 글자 수는 채팅 창에서 감각하는 값이며, 줄 수는 전사에서 segment 수에 가깝다.
+/// **벤더의 한도는 여기 없다** (INV-9) — 어떤 AI 채팅이 한 번에 받는 크기는 이 저장소가 확인한
+/// 적이 없으며, 나눔의 예산은 이 앱이 고른 값이다 (`export::portion::PORTION_MAX_BYTES`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TextSizePayload {
+    pub bytes: usize,
+    pub chars: usize,
+    pub lines: usize,
+}
+
+impl From<crate::export::TextSize> for TextSizePayload {
+    fn from(size: crate::export::TextSize) -> Self {
+        Self {
+            bytes: size.bytes,
+            chars: size.chars,
+            lines: size.lines,
+        }
+    }
+}
+
+/// 산출물 전체의 크기와, 지금 가져가는 조각의 자리 (`phase-prompt/05.6` 성공 기준 4).
+///
+/// **세 산출물이 같은 모양으로 말한다.** 그래서 화면은 "얼마나 큰가"와 "몇 번째 중 몇 번째인가"를
+/// 자리마다 다른 규칙으로 읽지 않는다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PortionPayload {
+    /// 산출물 **전체**의 크기. 조각 하나만 왔을 때에도 이 값은 전체를 말한다.
+    pub total_size: TextSizePayload,
+    /// 지금 온 조각의 순번. **1부터 센다.**
+    pub portion: usize,
+    /// 조각이 전부 몇 개인가. `1`이면 나뉘지 않았다.
+    pub portion_count: usize,
+    /// 지금 온 조각 하나의 크기.
+    pub portion_size: TextSizePayload,
+}
+
+impl From<crate::export::Measure> for PortionPayload {
+    fn from(measure: crate::export::Measure) -> Self {
+        Self {
+            total_size: measure.total.into(),
+            portion: measure.index,
+            portion_count: measure.count,
+            portion_size: measure.size.into(),
+        }
+    }
+}
+
+/// 사람이 자기 AI 채팅으로 가져가는 **텍스트 한 조각** (ADR-0010 §5.4 · §6 · §8.1).
+///
+/// 문자열 하나가 아니라 이 값인 이유는 **잘린 것을 온전한 것이라고 말할 수 없게 하기
+/// 위해서다** — 조각과 전체 조각 수가 같은 값에 실려 오므로, 화면이 그것을 모른 채 "다
+/// 가져갔다"고 말할 수단이 없다 (`phase-prompt/05.6` 성공 기준 4).
+///
+/// **오디오도 provider도 벤더도 실리지 않는다** (MH-4 · MH-6 · INV-9). 담을 자리가 없다.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HandoffTextPayload {
+    /// 어느 녹음의 것인가. 화면이 자기가 건 요청의 결과인지 확인할 수 있게 함께 싣는다.
+    pub recording_id: String,
+    /// 지금 가져가는 텍스트. 조각이 하나뿐이면 산출물 전체다.
+    pub text: String,
+    #[serde(flatten)]
+    pub portion: PortionPayload,
+}
+
+impl HandoffTextPayload {
+    pub(super) fn new(recording_id: &str, taken: crate::export::TakenText) -> Self {
+        Self {
+            recording_id: recording_id.to_string(),
+            text: taken.text,
+            portion: taken.measure.into(),
+        }
+    }
+}
+
+/// 방금 만들어진 **AI-ready 문서 파일 하나**와 그것이 문서의 어디인가 (ADR-0010 §5.6).
+///
+/// [`ExportedFilePayload`]를 **감싼다** — 두 번째 파일 타입을 만들지 않는다. 화면이 파일에
+/// 대해 알아야 하는 것(어디에 무엇이 만들어졌는가)은 Markdown export와 똑같고, 여기서 더하는
+/// 것은 그 파일이 나뉜 문서의 몇 번째인가 하나뿐이다.
+///
+/// **나뉜 문서를 내보내도 이미 있는 파일은 그대로다** (ADR-0009 §4.3) — 조각마다 파일이 하나씩
+/// 새로 생기며, 어느 것도 앞서 쓴 것을 덮어쓰지 않는다.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportedAiRequestPayload {
+    pub file: ExportedFilePayload,
+    #[serde(flatten)]
+    pub portion: PortionPayload,
+}
+
+impl ExportedAiRequestPayload {
+    pub(super) fn new(recording_id: &str, written: crate::export::WrittenPortion) -> Self {
+        Self {
+            file: ExportedFilePayload::new(recording_id, written.file),
+            portion: written.measure.into(),
         }
     }
 }

@@ -82,6 +82,8 @@ function transcript(overrides: Partial<Transcript> = {}): Transcript {
     createdAt: '2026-09-03T04:50:26.000Z',
     engine: 'whisper.cpp',
     model: 'ggml-base.bin',
+    transcriptionMs: null,
+    transcriptionLabel: null,
     ...overrides,
   };
 }
@@ -200,9 +202,9 @@ function stopped(): StoppedRecording {
   };
 }
 
-/** 녹음 중인 session 하나. */
+/** 녹음 중인 session 하나. 입력 레벨은 이 파일의 관심사가 아니므로 재지 않은 상태로 둔다. */
 function liveSession(): SessionStatus {
-  return { state: 'recording', elapsedMs: 7_000, elapsedLabel: '0:07' };
+  return { state: 'recording', elapsedMs: 7_000, elapsedLabel: '0:07', level: null };
 }
 
 /**
@@ -256,7 +258,7 @@ describe('녹음은 AI를 알지 않는다 (INV-8)', () => {
         ...INITIAL_RECORDING,
         microphone: { kind: 'selected', deviceKey: '0:mic', label: 'MacBook Microphone', fromSystemDefault: false },
       },
-      { state: 'idle', elapsedMs: 0, elapsedLabel: '0:00' },
+      { state: 'idle', elapsedMs: 0, elapsedLabel: '0:00', level: null },
     );
     expect(recordingControls(ready).record).toBe(true);
 

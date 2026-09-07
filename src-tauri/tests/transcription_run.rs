@@ -18,7 +18,7 @@ use molt_note_lib::domain::{
     Failure, FailureKind, ProcessingStatus, Recording, RecordingId, Transcript, TranscriptId,
     TranscriptSegment,
 };
-use molt_note_lib::transcription::engine::engine_failed;
+use molt_note_lib::transcription::engine::{engine_failed, LanguageChoice};
 use molt_note_lib::transcription::run::{self, ModelChoice};
 use molt_note_lib::transcription::testing::StubEngine;
 use molt_note_lib::transcription::{RawSegment, RawTranscription};
@@ -118,12 +118,27 @@ impl Fixture {
         }
     }
 
+    /// 언어를 고르지 않은 상태로 전사한다. **그것이 앱의 기본 상태다** (ADR-0007 §17.1.4-1).
     fn transcribe(&mut self, engine: &StubEngine) -> Result<run::Completed, Failure> {
+        self.transcribe_in(engine, &LanguageChoice::Detect)
+    }
+
+    fn transcribe_in(
+        &mut self,
+        engine: &StubEngine,
+        language: &LanguageChoice,
+    ) -> Result<run::Completed, Failure> {
         let choice = ModelChoice {
             models_dir: &self.models_dir,
             configured: Some("ggml-base.bin"),
         };
-        run::transcribe(&mut self.connection, &self.recording_id, engine, choice)
+        run::transcribe(
+            &mut self.connection,
+            &self.recording_id,
+            engine,
+            choice,
+            language,
+        )
     }
 
     fn recording(&self) -> Recording {
@@ -220,6 +235,33 @@ fn second_run() -> RawTranscription {
     raw_output("다시 전사한 첫 문장", "다시 전사한 두 번째 문장")
 }
 
+/// 2026-09-07에 실제로 나온 **붕괴한** 출력 (ADR-0007 §18.1).
+///
+/// 51분 회의의 전사가 segment 103개였고 그중 102개가 같은 문장이었다 — 고유 1.9% ·
+/// 최다 반복 99.0%. 그 결과가 `done`으로 저장된 것이 붕괴 판정을 만든 관측이며, 여기서는
+/// 같은 모양의 출력을 값으로 만들어 낸다. **실제 whisper도 모델도 필요하지 않다** (§18).
+fn collapsed_run() -> RawTranscription {
+    let mut segments: Vec<RawSegment> = (0..102)
+        .map(|index| thirty_second_segment(index, "한글자막 by 한효정"))
+        .collect();
+    segments.push(thirty_second_segment(102, "감사합니다."));
+
+    RawTranscription {
+        language: Some("ko".to_owned()),
+        segments,
+    }
+}
+
+/// 관측된 붕괴처럼 경계가 정확히 30초인 segment 하나. **센티초다** (ADR-0007 §10).
+fn thirty_second_segment(index: i64, text: &str) -> RawSegment {
+    let start_centiseconds = index * 3_000;
+    RawSegment {
+        start_centiseconds,
+        end_centiseconds: start_centiseconds + 2_998,
+        text: Some(format!(" {text}")),
+    }
+}
+
 // --- 성공 경로 -----------------------------------------------------------------------
 
 #[test]
@@ -281,6 +323,58 @@ fn the_stored_transcript_carries_every_field_section_7_requires() {
         transcript.created_at
     );
     assert!(completed.anomalies.is_empty(), "정상 출력에는 이상이 없다");
+}
+
+#[test]
+fn a_successful_run_stores_how_long_the_transcription_actually_took() {
+    // `phase-prompt/05.6` 성공 기준 3: 걸린 시간이 **기록으로 남아야** 사람이 Metal 전후를
+    // 비교할 수 있다. 값이 그럴듯한지는 여기서 판정하지 않는다(그것은 실행마다 다르다) —
+    // 판정하는 것은 **잰 값이 Transcript와 함께 실제로 저장되고 다시 읽힌다**는 것이다.
+    let mut fixture = Fixture::new("elapsed");
+    let engine = StubEngine::returning(first_run());
+
+    let completed = fixture.transcribe(&engine).expect("전사가 성공해야 한다");
+    let stored = fixture.transcript(&completed.transcript.id);
+
+    let measured = stored
+        .transcription_ms
+        .expect("전사 한 건에 걸린 시간이 저장돼야 한다 — 재지 않으면 비교할 것이 남지 않는다");
+    assert!(
+        measured >= 0,
+        "단조 시계로 재므로 음수가 될 수 없다: {measured}"
+    );
+    assert_eq!(
+        completed.transcript.transcription_ms,
+        Some(measured),
+        "돌려준 값과 저장된 값이 같아야 한다"
+    );
+
+    // 재는 자리가 한 곳이라는 것은 소스에서도 확인한다 — 두 곳에서 재기 시작하면 어느 값이
+    // 저장된 것인지 말할 수 없게 된다.
+    assert_eq!(
+        RUN_SOURCE.matches("Instant::now()").count(),
+        1,
+        "경과 시간을 재기 시작하는 자리는 하나여야 한다"
+    );
+    assert!(
+        !RUN_SOURCE.contains("SystemTime::now"),
+        "벽시계로 재면 시스템 시각 조정이 음수 소요 시간을 만들 수 있다"
+    );
+}
+
+#[test]
+fn a_failed_run_leaves_no_transcript_and_therefore_no_measured_time() {
+    // 걸린 시간은 Transcript와 함께만 존재한다. 실패한 시도의 시간이 어딘가에 남아 다음
+    // 비교를 흐리지 않는다 (INV-2).
+    let mut fixture = Fixture::without_model("elapsed-failed");
+    let engine = StubEngine::returning(first_run());
+
+    fixture.transcribe(&engine).expect_err("모델이 없으면 실패해야 한다");
+
+    assert!(
+        fixture.transcripts().is_empty(),
+        "실패는 Transcript를 만들지 않는다"
+    );
 }
 
 #[test]
@@ -377,6 +471,214 @@ fn a_failed_re_transcription_leaves_the_previous_transcript_as_current() {
     );
 }
 
+// --- 붕괴한 전사는 저장되지 않는다 (ADR-0007 §18.5) --------------------------------------
+
+#[test]
+fn a_collapsed_transcription_is_not_stored_and_leaves_the_previous_one_current() {
+    // 2026-09-07: 붕괴한 전사가 `done`으로 저장됐다 (ADR-0007 §18.1). 저장 직전 검사가 물었던
+    // 것이 개수 하나뿐이었기 때문이다. 여기서 고정하는 것은 그 자리의 다섯 가지 결과다.
+    let mut fixture = Fixture::new("collapsed-retranscribe");
+    let engine = StubEngine::responding_with(vec![Ok(first_run()), Ok(collapsed_run())]);
+
+    let transcript_a = fixture
+        .transcribe(&engine)
+        .expect("첫 전사가 성공해야 한다")
+        .transcript;
+    let a_before = fixture.transcript(&transcript_a.id);
+    let recording_before = fixture.recording();
+    let audio_before = fs::read(&fixture.audio_path).expect("사전 조건: 원본을 읽는다");
+
+    let failure = fixture
+        .transcribe(&engine)
+        .expect_err("붕괴한 출력은 전사 결과로 저장되지 않는다");
+
+    // (1) 실패 종류는 §13의 넷째다 — 새 종류를 만들지 않는다 (ADR-0007 §18.4).
+    assert_eq!(failure.kind, FailureKind::TranscriptionOutputUnusable);
+    assert!(
+        !failure.retryable,
+        "같은 오디오를 같은 조건으로 다시 돌리면 같은 결과다"
+    );
+    assert!(failure.source_data_safe, "원본은 그대로다 (INV-1 · INV-3)");
+
+    // (2) Transcript가 늘지 않았다 — 저장소에서 직접 센다.
+    let stored = fixture.transcripts();
+    assert_eq!(
+        stored.len(),
+        1,
+        "붕괴한 전사는 Transcript를 추가하지 않는다 (§18.5)"
+    );
+    assert_eq!(stored[0].id, transcript_a.id, "남은 것은 이전 것 하나다");
+
+    // (3) current가 그대로다 — 저장소에서 직접 읽는다.
+    let recording = fixture.recording();
+    assert_eq!(
+        recording.current_transcript_id.as_ref(),
+        Some(&transcript_a.id),
+        "붕괴한 시도 때문에 이미 유효한 Transcript를 잃지 않는다 (§7.2)"
+    );
+
+    // (4) 상태는 `failed`다 — 붕괴가 사용자에게 보인다 (§13).
+    assert_eq!(recording.transcription_status, ProcessingStatus::Failed);
+
+    // (5) 원본 오디오 · Recording 레코드 · 이미 있던 Transcript는 그대로다 (INV-1 · INV-2 · INV-3).
+    assert_eq!(
+        fixture.transcript(&transcript_a.id),
+        a_before,
+        "이미 저장된 Transcript를 고치지도 지우지도 않는다 (INV-2)"
+    );
+    assert_eq!(
+        a_before.segments.len(),
+        2,
+        "사전 조건: 비교 대상에 segment가 실제로 들어 있어야 한다"
+    );
+    assert_eq!(
+        fs::read(&fixture.audio_path).expect("원본을 다시 읽는다"),
+        audio_before,
+        "붕괴는 원본 오디오를 건드리지 않는다 (INV-1)"
+    );
+    assert_eq!(recording.audio_path, recording_before.audio_path);
+    assert_eq!(recording.title, recording_before.title);
+    assert_eq!(recording.duration_ms, recording_before.duration_ms);
+    assert_eq!(
+        recording.ai_status, recording_before.ai_status,
+        "남의 파이프라인 상태를 옮기지 않는다"
+    );
+    assert_eq!(recording.notion_status, recording_before.notion_status);
+}
+
+#[test]
+fn a_collapsed_transcription_reaches_the_user_saying_what_went_wrong_and_by_how_much() {
+    // 첫 전사가 붕괴한 경우다 — 지킬 이전 Transcript조차 없다.
+    let mut fixture = Fixture::new("collapsed-first-run");
+    fixture.record_status_writes();
+    let engine = StubEngine::returning(collapsed_run());
+
+    let failure = fixture
+        .transcribe(&engine)
+        .expect_err("붕괴한 출력은 전사 결과로 저장되지 않는다");
+
+    assert!(
+        fixture.transcripts().is_empty(),
+        "붕괴한 첫 전사는 Transcript를 남기지 않는다"
+    );
+    assert!(
+        fixture.recording().current_transcript_id.is_none(),
+        "붕괴가 current를 만들지 않는다"
+    );
+    assert_eq!(fixture.stored_statuses(), ["pending", "running", "failed"]);
+
+    // 사용자가 읽는 문장이 **무엇이 잘못됐는지** 말한다.
+    assert!(
+        failure.message.contains("붕괴"),
+        "그대로 화면에 띄울 수 있는 문장이어야 한다: {}",
+        failure.message
+    );
+    // 그리고 판정을 만든 수치를 담는다 (ADR-0007 §18.3) — 사람이 §18.1의 표를 손으로 다시
+    // 세지 않아도 되게.
+    for number in ["103개", "2개", "102번"] {
+        assert!(
+            failure.message.contains(number),
+            "판정을 만든 수치 {number}이(가) 문장에 없다: {}",
+            failure.message
+        );
+    }
+    assert!(
+        failure.message.contains("한글자막 by 한효정"),
+        "무엇이 되풀이됐는지가 남아야 한다: {}",
+        failure.message
+    );
+
+    // 기술적 표현에는 판정을 재현할 수 있는 값 전부가 남는다. 비율은 판정 모듈이 낸 값이다.
+    let detail = failure.detail.expect("붕괴 실패는 수치를 detail에도 남긴다");
+    for value in [
+        "segments=103",
+        "n=103",
+        "u=2",
+        "uniqueRatio=0.019",
+        "r=102",
+        "topRepeatShare=0.990",
+        "Collapsed",
+    ] {
+        assert!(detail.contains(value), "{value}이(가) 없다: {detail}");
+    }
+}
+
+#[test]
+fn a_transcription_that_merely_repeats_a_little_is_still_stored() {
+    // 붕괴 판정이 정상 전사를 버리기 시작하면 그 대가는 사람이 실제로 녹음한 회의다
+    // (ADR-0007 §18.3). 고유 94% · 최다 7%는 2026-09-05에 사람이 쓸 수 있다고 판정한 값이다.
+    let mut fixture = Fixture::new("usable-with-repeats");
+    let mut segments: Vec<RawSegment> = (0..94)
+        .map(|index| thirty_second_segment(index, &format!("문장 {index}")))
+        .collect();
+    segments.extend((94..100).map(|index| thirty_second_segment(index, "문장 0")));
+    let engine = StubEngine::returning(RawTranscription {
+        language: Some("ko".to_owned()),
+        segments,
+    });
+
+    let completed = fixture
+        .transcribe(&engine)
+        .expect("반복이 조금 있다고 전사를 버리지 않는다");
+
+    // **저장된다** — 그것이 이 테스트가 지키는 것이다. 다만 끝의 여섯 개는 같은 문장이
+    // 연속이므로 §20.6.1의 차단이 네 번째부터 셋을 버린다 (2026-09-07에 실행 경로에 연결됐다).
+    // 판정(`assess`)이 본 수치는 여전히 **차단 전**의 100개이며, 그래서 붕괴로 읽히지 않았다.
+    assert_eq!(completed.transcript.segments.len(), 97);
+    assert_eq!(completed.removed_segments, 3, "연속 반복 넷째부터 버린다");
+    assert_eq!(
+        completed.shortened_segments, 0,
+        "segment 안쪽에는 되풀이가 없다"
+    );
+    assert_eq!(fixture.transcripts().len(), 1, "그대로 저장된다");
+    assert_eq!(
+        fixture.recording().current_transcript_id.as_ref(),
+        Some(&completed.transcript.id)
+    );
+    assert_eq!(
+        fixture.recording().transcription_status,
+        ProcessingStatus::Done
+    );
+}
+
+#[test]
+fn the_orchestration_neither_copies_the_collapse_rule_nor_drops_the_empty_check() {
+    // 붕괴 판정은 빈 결과 판정을 **대체하지 않고 더해진다** (ADR-0007 §18.5).
+    assert!(
+        RUN_SOURCE.contains("전사 결과에 남은 문장이 없다"),
+        "빈 결과 판정이 사라지면 안 된다"
+    );
+    assert!(
+        RUN_SOURCE.contains("collapse::assess"),
+        "붕괴 여부는 판정 모듈에 물어본다 — 여기서 다시 판정하지 않는다"
+    );
+
+    // 임계값도 비율도 이 모듈이 만들지 않는다 (ADR-0007 §18.3). 규칙이 두 자리에 있으면
+    // 한쪽만 고쳐지는 날이 온다.
+    for forbidden in [
+        "0.20",
+        "0.50",
+        "as f64",
+        "MINIMUM_SENTENCES_TO_JUDGE",
+        "COLLAPSED_UNIQUE_RATIO_AT_OR_BELOW",
+        "COLLAPSED_TOP_REPEAT_SHARE_AT_OR_ABOVE",
+    ] {
+        assert!(
+            !RUN_SOURCE.contains(forbidden),
+            "판정 규칙이 orchestration으로 복제됐다: {forbidden}"
+        );
+    }
+
+    // 그리고 저장된 Transcript를 고치거나 지우는 경로가 새로 생기지 않았다 (INV-2).
+    // 이 모듈이 Transcript에 대해 부르는 저장소 함수는 여전히 둘뿐이다.
+    for forbidden in ["update_transcript", "delete_transcript", "remove_transcript"] {
+        assert!(
+            !RUN_SOURCE.contains(forbidden),
+            "저장된 Transcript를 고치거나 지우는 경로가 생겼다: {forbidden}"
+        );
+    }
+}
+
 // --- 실패가 원본을 건드리지 않는다 (INV-1 · INV-3) --------------------------------------
 
 #[test]
@@ -454,6 +756,74 @@ fn a_failed_run_can_be_retried_and_then_succeed() {
     assert_eq!(fixture.recording().transcription_status, ProcessingStatus::Done);
 }
 
+// --- 언어 선택 (ADR-0007 §17.1.4) ----------------------------------------------------
+
+#[test]
+fn the_language_choice_reaches_the_engine_exactly_as_it_was_given() {
+    // orchestration은 언어를 해석하지 않는다 — 모델 값이 model::resolve로 지나가는 것처럼
+    // 그대로 엔진 경계에 도달한다. 실제 whisper 없이 판정된다.
+    let mut fixture = Fixture::new("language-passthrough");
+    let engine = StubEngine::returning(first_run());
+
+    fixture
+        .transcribe_in(&engine, &LanguageChoice::Detect)
+        .expect("고르지 않아도 전사는 돈다");
+    fixture
+        .transcribe_in(&engine, &LanguageChoice::Chosen("ko".to_owned()))
+        .expect("고른 언어로도 전사는 돈다");
+
+    let calls = engine.calls();
+    assert_eq!(calls.len(), 2);
+    assert_eq!(
+        calls[0].language,
+        LanguageChoice::Detect,
+        "고르지 않음은 영어가 아니라 감지다 (§17.1.4-1)"
+    );
+    assert_eq!(calls[1].language.chosen(), Some("ko"), "고른 값이 그대로 온다");
+}
+
+#[test]
+fn the_stored_language_is_what_the_engine_reported_not_what_the_user_chose() {
+    // §17.1.4-3 · §16.2: 감지를 켰다는 것이 "언제나 값이 있다"는 뜻이 아니고, 사용자가 골랐다는
+    // 것이 "그 값이 결과다"라는 뜻도 아니다. Transcript에 남는 것은 엔진이 말한 것뿐이다.
+    let mut fixture = Fixture::new("language-provenance");
+    let engine = StubEngine::responding_with(vec![
+        Ok(RawTranscription {
+            // 엔진은 자기가 들은 것을 말한다. 아래에서 고른 값은 "ja"다.
+            language: Some("ko".to_owned()),
+            segments: first_run().segments,
+        }),
+        Ok(RawTranscription {
+            // 엔진이 언어를 말하지 못한 경우.
+            language: None,
+            segments: second_run().segments,
+        }),
+    ]);
+
+    let chosen = LanguageChoice::Chosen("ja".to_owned());
+    let first = fixture
+        .transcribe_in(&engine, &chosen)
+        .expect("첫 전사가 성공해야 한다");
+    let second = fixture
+        .transcribe_in(&engine, &chosen)
+        .expect("재전사가 성공해야 한다");
+
+    assert_eq!(
+        first.transcript.language.as_deref(),
+        Some("ko"),
+        "설정 값(ja)이 아니라 엔진이 보고한 값(ko)이 남는다"
+    );
+    assert_eq!(
+        second.transcript.language, None,
+        "엔진이 말하지 못하면 지어내지 않는다 — 고른 값을 대신 적지도 않는다"
+    );
+    assert_eq!(
+        fixture.transcript(&second.transcript.id).language,
+        None,
+        "저장된 것도 같다"
+    );
+}
+
 // --- 상태 전이 (§7 · `phase-prompt/03` 요구 3) -------------------------------------------
 
 #[test]
@@ -521,6 +891,7 @@ fn an_unknown_recording_changes_nothing_at_all() {
             models_dir: fixture.dir.path(),
             configured: Some("ggml-base.bin"),
         },
+        &LanguageChoice::Detect,
     )
     .expect_err("없는 Recording은 전사할 수 없다");
 

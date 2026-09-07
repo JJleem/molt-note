@@ -14,6 +14,7 @@ import type { Recording, Transcript, TranscriptionStatus } from '../ipc/types';
 import {
   LOADING_TRANSCRIPT_TAB,
   NO_TRANSCRIPT_TEXT,
+  TRANSCRIPTION_COLLAPSED_NOTICE,
   TRANSCRIPTION_FAILED_HEADLINE,
   TRANSCRIPTION_PRESERVED_NOTICE,
   TRANSCRIPTION_START_REJECTED_HEADLINE,
@@ -59,12 +60,23 @@ function transcript(overrides: Partial<Transcript> = {}): Transcript {
     createdAt: '2026-09-03T04:50:26.000Z',
     engine: 'whisper.cpp',
     model: 'ggml-base.bin',
+    // 107초 걸렸다. 문자열은 Rust가 만든 것이며 화면이 다시 만들지 않는다.
+    transcriptionMs: 107_000,
+    transcriptionLabel: '1:47',
     ...overrides,
   };
 }
 
 function status(overrides: Partial<TranscriptionStatus> = {}): TranscriptionStatus {
-  return { state: 'idle', recordingId: null, transcriptId: null, failure: null, ...overrides };
+  return {
+    state: 'idle',
+    recordingId: null,
+    transcriptId: null,
+    failure: null,
+    partialLines: [],
+    progress: null,
+    ...overrides,
+  };
 }
 
 function failure(kind: FailureKind, overrides: Partial<Failure> = {}): Failure {
@@ -271,6 +283,34 @@ describe('완료', () => {
 
     expect(view.kind === 'done' && view.language).toBeNull();
   });
+
+  it('전사에 걸린 시간이 Rust가 만든 문장 그대로 함께 보인다', () => {
+    // `phase-prompt/05.6` 성공 기준 3: 걸린 시간이 남아야 사람이 Metal 전후를 비교한다.
+    // **화면은 밀리초를 나누지 않는다** — 받은 문장을 그대로 나른다.
+    const view = transcriptTab(
+      recording({ transcriptionStatus: 'done', currentTranscriptId: 't-1' }),
+      transcript(),
+      status({ state: 'done', recordingId: 'r-1', transcriptId: 't-1' }),
+    );
+
+    expect(view.kind === 'done' && view.transcriptionLabel).toBe('1:47');
+  });
+
+  it('걸린 시간을 재지 않은 옛 Transcript를 0초라고 말하지 않는다', () => {
+    // 이 값을 갖기 전에 저장된 Transcript가 그렇다. 값이 없다는 사실이 그대로 남아야
+    // 화면이 그 줄을 보이지 않을 수 있다 — `0:00`을 그리면 비교가 거짓을 말한다.
+    const view = transcriptTab(
+      recording({ transcriptionStatus: 'done', currentTranscriptId: 't-1' }),
+      transcript({ transcriptionMs: null, transcriptionLabel: null }),
+      status(),
+    );
+
+    expect(view.kind).toBe('done');
+    if (view.kind !== 'done') return;
+    expect(view.transcriptionLabel).toBeNull();
+    // 없는 값이 다른 문장으로 둔갑하지 않는다.
+    expect(view.transcriptionLabel).not.toBe('0:00');
+  });
 });
 
 describe('실패', () => {
@@ -335,6 +375,111 @@ describe('실패', () => {
     );
 
     expect(view.kind === 'failed' && view.cause).toBe('modelUnusable');
+  });
+
+  it('붕괴한 전사가 일반 실패로 뭉개지지 않고 할 일이 문장으로 보인다', () => {
+    // 저장 직전 붕괴 판정에 걸린 전사가 여기로 온다 (ADR-0007 §18.4 ·
+    // `src-tauri/src/transcription/run.rs`의 `collapsed_output`). Rust는 이것을
+    // `transcriptionOutputUnusable`로 나눠 보내고, 화면이 그것을 다시 뭉개면 사용자는
+    // "다시 시도" 말고 할 일을 알 수 없다 — 그대로 다시 눌러도 같은 결과이기 때문이다.
+    const view = transcriptTab(
+      recording({ transcriptionStatus: 'failed' }),
+      null,
+      status({
+        state: 'failed',
+        recordingId: 'r-1',
+        failure: failure('transcriptionOutputUnusable', {
+          message: '전사가 붕괴해 회의 내용이 남지 않았다 — 문장 103개 중 서로 다른 문장이 2개뿐이다',
+        }),
+      }),
+    );
+
+    expect(view.kind).toBe('failed');
+    if (view.kind !== 'failed') return;
+    // 갈래가 갈린다 — `other`가 아니다.
+    expect(view.cause).toBe('outputUnusable');
+    expect(view.cause).not.toBe('other');
+
+    // 무엇이 일어났는가 · 무엇을 하면 되는가가 한 문장 안에 있다.
+    expect(view.resolution).toBe(TRANSCRIPTION_COLLAPSED_NOTICE);
+    expect(view.resolution).toContain('collapsed');
+    expect(view.resolution).toContain('input level');
+    expect(view.resolution).toContain('record again');
+    expect(view.resolution).toContain('different model');
+    expect(view.resolution).toContain('start the transcription again');
+
+    // 수치는 Rust가 만든 문장에 그대로 남고, 화면은 그것을 다시 세지 않는다.
+    expect(view.failure?.message).toContain('103개');
+    expect(view.resolution).not.toContain('103');
+
+    // 재시도 수단과 "아무것도 지워지지 않았다"가 함께 남는다 (요구 7 · INV-1 · INV-2 · INV-3).
+    expect(view.retry).toEqual({
+      kind: 'retry',
+      label: 'Try transcription again',
+      recordingId: 'r-1',
+    });
+    expect(view.preservedNotice).toBe(TRANSCRIPTION_PRESERVED_NOTICE);
+    expect(view.preservedNotice).toContain('Nothing was deleted');
+  });
+
+  it('붕괴 실패에서도 이미 있던 Transcript가 그대로 남는다', () => {
+    // 붕괴 판정은 **저장을 막는 자리**에 있지 저장된 것을 지우는 자리가 아니다
+    // (ADR-0007 §18.5 · INV-2). 화면도 같아야 한다.
+    const view = transcriptTab(
+      recording({ transcriptionStatus: 'failed', currentTranscriptId: 't-1' }),
+      transcript(),
+      status({
+        state: 'failed',
+        recordingId: 'r-1',
+        failure: failure('transcriptionOutputUnusable'),
+      }),
+    );
+
+    expect(view.kind).toBe('failed');
+    if (view.kind !== 'failed') return;
+    expect(view.cause).toBe('outputUnusable');
+    expect(view.kept.map((line) => line.text)).toEqual([
+      '그러면 이번에는 PLY 먼저 변환하고',
+      '그다음 SOG 변환 확인하면 될 것 같아요.',
+    ]);
+  });
+
+  it('네 갈래가 서로 다른 원인과 서로 다른 안내로 갈린다', () => {
+    // 하나가 다른 하나로 흐려지면 사용자는 하지 않아도 될 일을 하거나, 해야 할 일을 모른다.
+    const causeOf = (kind: FailureKind | null) => {
+      const view = transcriptTab(
+        recording({ transcriptionStatus: 'failed' }),
+        null,
+        kind === null
+          ? status()
+          : status({ state: 'failed', recordingId: 'r-1', failure: failure(kind) }),
+      );
+      if (view.kind !== 'failed') throw new Error('실패 상태가 아니다');
+      return { cause: view.cause, resolution: view.resolution };
+    };
+
+    const missing = causeOf('transcriptionModelMissing');
+    const unusableModel = causeOf('transcriptionModelUnusable');
+    const collapsed = causeOf('transcriptionOutputUnusable');
+    const engine = causeOf('transcriptionEngineFailed');
+    const unknown = causeOf(null);
+
+    expect([
+      missing.cause,
+      unusableModel.cause,
+      collapsed.cause,
+      engine.cause,
+      unknown.cause,
+    ]).toEqual(['modelMissing', 'modelUnusable', 'outputUnusable', 'other', 'unknown']);
+
+    // 모델 갈래 둘의 문장은 붕괴 갈래의 문장과 다르다 — 붕괴는 모델을 두는 문제가 아니다.
+    expect(collapsed.resolution).not.toBe(missing.resolution);
+    expect(collapsed.resolution).not.toBe(unusableModel.resolution);
+    expect(collapsed.resolution).not.toBe(unknown.resolution);
+    // 이유를 모르는 갈래는 여전히 이유를 지어내지 않는다.
+    expect(unknown.resolution).toBe(UNKNOWN_FAILURE_NOTICE);
+    // 그 밖의 실패는 여전히 없는 절차를 지어내지 않는다.
+    expect(engine.resolution).toBeNull();
   });
 
   it('일반 실패에는 없는 해결 절차를 지어내지 않는다', () => {
@@ -438,7 +583,14 @@ describe('이 모듈이 하지 않는 일', () => {
       status({ state: 'done', recordingId: 'r-1', transcriptId: 't-1' }),
     );
 
-    expect(Object.keys(view).sort()).toEqual(['engine', 'kind', 'language', 'lines', 'model']);
+    expect(Object.keys(view).sort()).toEqual([
+      'engine',
+      'kind',
+      'language',
+      'lines',
+      'model',
+      'transcriptionLabel',
+    ]);
   });
 
   it('완료 상태가 저장된 값을 그대로 옮긴다', () => {

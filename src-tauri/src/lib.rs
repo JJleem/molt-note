@@ -12,7 +12,7 @@ pub mod transcription;
 use tauri::Manager;
 
 use commands::{
-    AudioDevices, Exporter, NoteGenerator, NotionSender, Recorder, Storage, Transcriber,
+    AudioDevices, Exporter, NoteGenerator, NotionSender, Recorder, SavedFiles, Storage, Transcriber,
 };
 use platform::app_data_dir::AppDataDirectory;
 
@@ -69,6 +69,22 @@ pub fn run() {
             // 일이라 배경 스레드와 상태 조회 규약을 쓰지 않는다 (crate::commands::export).
             // 경로를 얻지 못한 실패는 값으로 남아 내보내려 할 때 사용자에게 전달된다 (§13).
             app.manage(Exporter::open_for(app));
+
+            // 내보낸 파일이 **놓인 자리를 여는** 수단도 같은 루트 하나에서 나온다
+            // (`phase-prompt/05.6` 성공 기준 2 · R-4). 경로를 글자로 보여 주는 것만으로는
+            // 사람이 파일에 도달하지 못한다는 것이 2026-09-05의 실사용에서 드러났다 —
+            // macOS에서 `~/Library`는 Finder 기본 숨김이기 때문이다.
+            //
+            // **여기서도 디렉터리를 만들지 않는다.** 이 자리가 하는 일은 이미 있는 것을 여는
+            // 것뿐이며, 한 번도 내보낸 적이 없으면 열 것도 없다 (crate::commands::saved_file).
+            //
+            // **webview가 임의 경로를 열 수 없다** — 열리는 것은 이 앱의 `exports/` 아래에
+            // 실제로 있는 파일뿐이고, 그 판정은 backend에 있다. 저장된 녹음의 재생에서 asset
+            // protocol의 범위를 아래에서 backend가 정하는 것과 같은 규약이다 (§12).
+            //
+            // OS를 부르는 코드는 이 자리에도 없다. 그것을 아는 것은 platform 경계 하나다
+            // (crate::platform::file_manager · INV-10).
+            app.manage(SavedFiles::open_for(app));
 
             // 진행 중인 **Notion 전송**의 소유자도 여기다 — 전사 · 노트 생성과 같은 이유이며
             // (R-001), 하나가 더 있다: 긴 transcript는 여러 요청으로 나뉘어 나가고 속도 제한을
@@ -161,6 +177,20 @@ pub fn run() {
             commands::get_ai_prompt,
             commands::get_transcript_text,
             commands::export_ai_request,
+            // Phase 5.6이 더하는 이름 하나 — **이미 만들어진 파일이 놓인 자리를 연다**
+            // (`phase-prompt/05.6` 성공 기준 2 · R-4).
+            //
+            // **파일을 만들지도 고치지도 지우지도 않는다.** 그래서 export 표면은 여전히 파일
+            // 하나를 만드는 이름 둘이며 (INV-3 · tests/ipc-boundary.test.ts), 이 이름이 여는
+            // 것은 그 둘이 이미 만들어 둔 파일이다.
+            //
+            // **화면이 임의 경로를 열 수 없다** — 무엇을 열어도 되는지 정하는 것은 backend이며
+            // (`src/commands/saved_file.rs`), 그 범위는 이 앱의 `exports/` 하나다. 위의 asset
+            // protocol이 녹음 디렉터리 하나만 여는 것과 같은 규약이다 (§12).
+            //
+            // (이 주석에 그 모듈을 `commands::…` 경로로 적지 않는다 —
+            //  `tests/ipc-boundary.test.ts`가 등록 목록을 그 모양으로 읽는다.)
+            commands::show_saved_file,
             // Notion 전송의 표면은 이 여섯이다 — 전송 시작 · 진행 상태 조회 · 저장된 전송 기록
             // 읽기 · 연결 확인 · token 저장 · token 삭제. **저장된 것을 고치거나 지우는 이름은
             // 여기에도 없다**: 지우는 하나는 이 앱이 넣은 자격증명 항목이며, 녹음 · 전사 · 노트 ·

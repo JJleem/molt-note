@@ -133,6 +133,7 @@ fn every_command_returns_the_initialization_failure_rather_than_pretending_to_wo
             automatic_processing: true,
             automatic_transcription: false,
             transcription_model: None,
+            transcription_language: None,
             default_microphone: None,
             ai_provider: None,
             ai_base_url: None,
@@ -342,6 +343,7 @@ fn a_stored_transcript_comes_back_through_the_command_surface_with_its_segments(
         created_at: "2026-09-03T04:50:26.000Z".to_string(),
         engine: "stub".to_string(),
         model: "ggml-base.bin".to_string(),
+        transcription_ms: Some(107_000),
     };
     store::append_transcript(&mut connection, &transcript).expect("사전 조건: Transcript를 남긴다");
 
@@ -355,6 +357,14 @@ fn a_stored_transcript_comes_back_through_the_command_surface_with_its_segments(
     assert_eq!(found.language.as_deref(), Some("ko"));
     assert_eq!(found.engine, "stub", "무엇으로 만들어졌는지가 함께 온다 (§7)");
     assert_eq!(found.model, "ggml-base.bin");
+    // 얼마나 걸렸는지도 함께 온다 — 값과 **Rust가 만든 문장**이 같이 나간다
+    // (`phase-prompt/05.6` 성공 기준 3 · tests/screen-boundary.test.ts).
+    assert_eq!(found.transcription_ms, Some(107_000));
+    assert_eq!(
+        found.transcription_label.as_deref(),
+        Some("1:47"),
+        "107초는 1:47이다 — 화면이 밀리초를 나눠 문장을 만들지 않는다"
+    );
 
     // 순서도 밀리초 값도 저장된 그대로다.
     assert_eq!(
@@ -366,6 +376,49 @@ fn a_stored_transcript_comes_back_through_the_command_surface_with_its_segments(
         vec![(134_000, 141_000), (141_000, 148_500)]
     );
     assert_eq!(found.segments[0].text, "그러면 이번에는 PLY 먼저 변환하고");
+}
+
+#[test]
+fn a_transcript_that_was_never_timed_carries_no_duration_sentence_at_all() {
+    // 재지 않은 옛 Transcript는 이 경계에서도 값이 없는 채로 나간다. `0:00`을 만들어 보내면
+    // 화면은 "0초 만에 끝났다"를 그리게 되고, 그 순간 성공 기준 3의 비교가 거짓이 된다.
+    let temp = TempRoot::new("transcript-untimed");
+    let app_data_dir = AppDataDirectory::new(temp.path().join("app-data"));
+    let storage = Storage::open(&app_data_dir);
+    assert!(storage.failure().is_none(), "사전 조건: 저장소가 열려야 한다");
+
+    let recording = storage
+        .create_recording(a_recording("재지 않은 녹음"))
+        .expect("녹음을 저장할 수 있어야 한다");
+
+    let mut connection = db::open_in(&app_data_dir).expect("사전 조건: 같은 DB를 연다");
+    let transcript = Transcript {
+        id: TranscriptId::new("t-untimed"),
+        recording_id: RecordingId::new(&recording.id),
+        language: None,
+        segments: vec![TranscriptSegment {
+            start_ms: 0,
+            end_ms: 1_000,
+            text: "그때는 재지 않았다".to_string(),
+        }],
+        raw_text: "그때는 재지 않았다".to_string(),
+        created_at: "2026-09-03T04:50:26.000Z".to_string(),
+        engine: "stub".to_string(),
+        model: "ggml-base.bin".to_string(),
+        transcription_ms: None,
+    };
+    store::append_transcript(&mut connection, &transcript).expect("사전 조건: Transcript를 남긴다");
+
+    let found = storage
+        .transcript("t-untimed")
+        .expect("조회가 성공해야 한다")
+        .expect("저장한 Transcript가 있어야 한다");
+
+    assert_eq!(found.transcription_ms, None);
+    assert_eq!(
+        found.transcription_label, None,
+        "모르는 것을 문장으로 지어내지 않는다"
+    );
 }
 
 #[test]
@@ -394,6 +447,7 @@ fn an_empty_store_answers_with_an_empty_list_and_the_default_settings() {
             // 자동 전사도 기본값은 OFF다. 두 토글은 서로 다른 값이다.
             automatic_transcription: false,
             transcription_model: None,
+            transcription_language: None,
             default_microphone: None,
             // AI provider를 고르지 않은 것도 기본값이자 정상 상태다 (ADR-0008 §11.1 · INV-8).
             ai_provider: None,
@@ -418,6 +472,7 @@ fn updated_settings_are_stored_and_read_back() {
             automatic_processing: true,
             automatic_transcription: true,
             transcription_model: Some("ggml-base.bin".to_string()),
+            transcription_language: Some("ko".to_string()),
             default_microphone: Some("0:Studio Mic".to_string()),
             ai_provider: Some("some-provider".to_string()),
             ai_base_url: Some("http://127.0.0.1:9999".to_string()),
@@ -444,6 +499,12 @@ fn updated_settings_are_stored_and_read_back() {
         saved.transcription_model.as_deref(),
         Some("ggml-base.bin"),
         "고른 모델도 그대로 저장되고 그대로 돌아와야 한다"
+    );
+    assert_eq!(
+        saved.transcription_language.as_deref(),
+        Some("ko"),
+        "고른 전사 언어도 그대로 저장되고 그대로 돌아와야 한다 (ADR-0007 §17.1.5) — \
+         모델을 고른 것이 이 값을 정하지 않고, 이 값이 모델을 정하지도 않는다"
     );
     assert_eq!(
         saved.default_microphone.as_deref(),
@@ -478,6 +539,7 @@ fn the_two_automatic_toggles_do_not_share_one_value() {
             automatic_processing: true,
             automatic_transcription: false,
             transcription_model: None,
+            transcription_language: None,
             default_microphone: None,
             ai_provider: None,
             ai_base_url: None,
@@ -497,6 +559,7 @@ fn the_two_automatic_toggles_do_not_share_one_value() {
             automatic_processing: false,
             automatic_transcription: true,
             transcription_model: None,
+            transcription_language: None,
             default_microphone: None,
             ai_provider: None,
             ai_base_url: None,
@@ -526,6 +589,8 @@ fn a_blank_directory_is_stored_as_not_chosen_rather_than_as_an_empty_path() {
             automatic_processing: false,
             automatic_transcription: false,
             transcription_model: Some("  \n ".to_string()),
+            // 공백뿐인 언어도 같은 규칙으로 '고르지 않음'(= 자동 감지)이 된다.
+            transcription_language: Some(" \t ".to_string()),
             default_microphone: Some("  ".to_string()),
             // 공백뿐인 AI 설정도 같은 규칙으로 '고르지 않음'이 된다.
             ai_provider: Some(" ".to_string()),
@@ -547,6 +612,11 @@ fn a_blank_directory_is_stored_as_not_chosen_rather_than_as_an_empty_path() {
     assert_eq!(
         saved.transcription_model, None,
         "공백뿐인 모델 값도 '아직 고르지 않음'이다 — 어떤 파일도 가리키지 않는 값을 저장하지 않는다"
+    );
+    assert_eq!(
+        saved.transcription_language, None,
+        "공백뿐인 언어 값도 '아직 고르지 않음'이며, 그것은 자동 감지를 뜻한다 — \
+         비어 있다고 해서 이 자리에서 언어를 하나 골라 채우지 않는다 (ADR-0007 §17.1.4-1)"
     );
     assert_eq!(
         (saved.ai_provider, saved.ai_base_url, saved.ai_model),
@@ -572,6 +642,8 @@ fn a_model_that_is_not_there_is_stored_as_chosen_not_replaced() {
             automatic_processing: false,
             automatic_transcription: true,
             transcription_model: Some("  없는-모델.bin  ".to_string()),
+            // 이 앱이 모르는 코드라도 같은 규칙이다 — 앞뒤 공백만 다듬고 그대로 저장한다.
+            transcription_language: Some("  알-수-없는-코드  ".to_string()),
             default_microphone: None,
             ai_provider: None,
             ai_base_url: None,
@@ -588,6 +660,12 @@ fn a_model_that_is_not_there_is_stored_as_chosen_not_replaced() {
     assert!(
         saved.automatic_transcription,
         "모델을 찾지 못했다고 해서 토글이 뒤집히지 않는다"
+    );
+    assert_eq!(
+        saved.transcription_language.as_deref(),
+        Some("알-수-없는-코드"),
+        "이 경계는 언어 코드를 알려진 목록과 대조하지 않는다 — 모르는 코드를 지우거나 \
+         다른 언어로 바꾸지 않는다 (`transcription_model`과 같은 규칙)"
     );
 }
 
@@ -865,6 +943,7 @@ fn a_second_send_while_one_is_running_is_refused_instead_of_disappearing() {
             automatic_processing: false,
             automatic_transcription: false,
             transcription_model: None,
+            transcription_language: None,
             default_microphone: None,
             ai_provider: None,
             ai_base_url: None,
@@ -1023,6 +1102,7 @@ fn a_default_microphone_that_no_longer_exists_is_stored_as_chosen_not_replaced()
             automatic_processing: false,
             automatic_transcription: false,
             transcription_model: None,
+            transcription_language: None,
             default_microphone: Some("7:장치가 빠진 마이크".to_string()),
             ai_provider: None,
             ai_base_url: None,

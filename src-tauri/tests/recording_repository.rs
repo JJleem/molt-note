@@ -282,6 +282,7 @@ fn a_recording_that_has_a_transcript_is_not_deleted_silently() {
         created_at: "2026-09-01T10:05:00Z".to_string(),
         engine: "whisper.cpp".to_string(),
         model: "base".to_string(),
+        transcription_ms: None,
     };
     store::append_transcript(&mut connection, &transcript).expect("Transcript를 추가할 수 있어야 한다");
 
@@ -305,6 +306,70 @@ fn a_recording_that_has_a_transcript_is_not_deleted_silently() {
             .expect("읽을 수 있어야 한다")
             .expect("Transcript가 남아 있어야 한다"),
         transcript
+    );
+}
+
+#[test]
+fn the_time_a_transcription_took_survives_a_round_trip_and_stays_empty_when_it_was_never_measured() {
+    // `phase-prompt/05.6` 성공 기준 3: 걸린 시간이 **기록으로 남아야** 사람이 Metal 전후를
+    // 비교할 수 있다. 쓰는 경로와 읽는 경로가 모두 그 값을 나르는지 보고, 재지 않은 옛
+    // Transcript가 `0`이 아니라 **값이 없는 채로** 남는지 함께 본다 (migration 10).
+    let dir = TempDir::new("transcription-took");
+    let mut connection = open(&dir);
+    let saved = recording("rec-took", "2026-09-01T10:00:00Z", 3_151_000);
+    store::insert_recording(&connection, &saved).expect("만들 수 있어야 한다");
+
+    let measured = Transcript {
+        id: TranscriptId::new("tr-measured"),
+        recording_id: RecordingId::new("rec-took"),
+        language: Some("ko".to_string()),
+        segments: vec![TranscriptSegment {
+            start_ms: 0,
+            end_ms: 3_000,
+            text: "걸린 시간을 잰 전사".to_string(),
+        }],
+        raw_text: "걸린 시간을 잰 전사".to_string(),
+        created_at: "2026-09-01T10:05:00Z".to_string(),
+        engine: "whisper.cpp".to_string(),
+        model: "base".to_string(),
+        transcription_ms: Some(107_000),
+    };
+    // 이 값을 갖기 전에 저장된 Transcript와 같은 모양이다 — 열이 NULL인 행이다.
+    let unmeasured = Transcript {
+        id: TranscriptId::new("tr-unmeasured"),
+        created_at: "2026-09-01T10:06:00Z".to_string(),
+        transcription_ms: None,
+        ..measured.clone()
+    };
+    store::append_transcript(&mut connection, &measured).expect("잰 전사를 남길 수 있어야 한다");
+    store::append_transcript(&mut connection, &unmeasured)
+        .expect("재지 않은 전사도 남길 수 있어야 한다");
+
+    let load = |id: &TranscriptId| {
+        store::load_transcript(&connection, id)
+            .expect("읽을 수 있어야 한다")
+            .expect("저장한 Transcript가 있어야 한다")
+    };
+
+    assert_eq!(
+        load(&measured.id),
+        measured,
+        "잰 시간이 저장된 그대로 다시 읽혀야 한다"
+    );
+    assert_eq!(
+        load(&unmeasured.id).transcription_ms,
+        None,
+        "재지 않은 전사는 0이 아니라 값이 없는 채로 남는다"
+    );
+
+    // 목록 조회도 같은 값을 나른다 — 어느 경로로 읽었는지에 따라 달라지지 않는다.
+    let listed = store::list_transcripts(&connection, &saved.id).expect("목록을 읽을 수 있어야 한다");
+    assert_eq!(
+        listed
+            .iter()
+            .map(|transcript| transcript.transcription_ms)
+            .collect::<Vec<_>>(),
+        vec![Some(107_000), None]
     );
 }
 

@@ -14,15 +14,20 @@
 //! 이 파일의 핵심 주장 하나: **일시정지 구간에 들어온 샘플은 파일에 없다.** 크기가 아니라
 //! 확정된 WAV를 다시 읽어 샘플 값을 직접 본다.
 //!
+//! 같은 주장이 **입력 레벨**에도 그대로 적용된다 (ADR-0003 §16.2). 레벨은 파일에 쓰이는 그
+//! 통로에서 재므로, 멈춰 있는 동안 들어온 소리는 파일에 없는 것과 똑같이 레벨에도 없다.
+//!
 //! 실제 장치에서만 알 수 있는 것(권한 프롬프트 · 녹음된 소리가 들리는가 · 실제 컨테이너와
 //! 코덱)은 사람이 확인하며, 이 테스트가 그것을 대신 판정하지 않는다 (ADR-0003 §12).
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use molt_note_lib::audio::{CaptureFormat, OpenCapture, SampleSink, SampleSource};
-use molt_note_lib::commands::Recorder;
+use molt_note_lib::commands::{InputLevelPayload, Recorder};
 use molt_note_lib::domain::{format_duration_ms, Failure, FailureKind};
 use molt_note_lib::platform::app_data_dir::AppDataDirectory;
 use molt_note_lib::platform::clock::Clock;
@@ -170,6 +175,35 @@ fn wav_files(directory: &Path) -> Vec<PathBuf> {
     files
 }
 
+/// 파일에 쓰는 쪽은 자기 스레드에서 돈다. 조건에 맞는 레벨이 상태에 나타날 때까지 기다린다.
+///
+/// **기다리는 길이를 짐작하지 않는다** — 값이 언제 도착하든 도착한 값만 본다. 여기서 하는
+/// 판정은 하나도 없다: 무엇이 맞는 값인지는 부르는 쪽이 정한다.
+fn level_matching(
+    recorder: &Recorder,
+    accepted: impl Fn(&InputLevelPayload) -> bool,
+) -> InputLevelPayload {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let status = recorder.status().expect("상태를 물어볼 수 있어야 한다");
+        if let Some(level) = status.level {
+            if accepted(&level) {
+                return level;
+            }
+        }
+        assert!(
+            Instant::now() < deadline,
+            "기다리던 입력 레벨이 도착하지 않았다"
+        );
+        thread::sleep(Duration::from_millis(5));
+    }
+}
+
+/// 레벨이 나타날 때까지 기다린다.
+fn level_of(recorder: &Recorder) -> InputLevelPayload {
+    level_matching(recorder, |_| true)
+}
+
 /// 확정된 WAV 파일에 실제로 들어 있는 샘플 전부.
 fn samples_in(path: &Path) -> Vec<i16> {
     hound::WavReader::open(path)
@@ -273,6 +307,167 @@ fn the_status_answer_carries_the_state_the_elapsed_ms_and_a_label_made_by_rust()
     assert_eq!(after.state, "idle");
     assert_eq!(after.elapsed_ms, 0);
     assert_eq!(after.elapsed_label, "0:00");
+}
+
+#[test]
+fn the_status_answer_tells_a_low_input_level_apart_from_a_usable_one() {
+    // 두 값은 지어낸 것이 아니다 — 2026-09-07에 전사가 붕괴한 녹음의 평균 RMS가 약 256이고,
+    // 9/4에 성공한 녹음이 약 1685였다 (ADR-0003 §16.1). **마이크 없이 그 둘을 흘려보낸다.**
+    let quiet_temp = TempRoot::new("level-low");
+    let (recorder, microphone, _clock, _) = recorder_with(&quiet_temp);
+
+    recorder.start(DEVICE_KEY).expect("시작");
+    microphone.speak(256);
+    let low = level_of(&recorder);
+    recorder.stop().expect("정지");
+
+    assert_eq!(low.verdict, "low");
+    assert_eq!(low.average_dbfs, -42.1, "9/7 수준이다");
+    assert_eq!(low.peak_dbfs, -42.1);
+    assert!(
+        low.message.contains("낮다") && low.message.contains("-42.1 dBFS"),
+        "판정과 수치가 함께 온다: {}",
+        low.message
+    );
+
+    let loud_temp = TempRoot::new("level-usable");
+    let (recorder, microphone, _clock, _) = recorder_with(&loud_temp);
+
+    recorder.start(DEVICE_KEY).expect("시작");
+    microphone.speak(1_685);
+    let usable = level_of(&recorder);
+    recorder.stop().expect("정지");
+
+    assert_eq!(usable.verdict, "usable");
+    assert_eq!(usable.average_dbfs, -25.8, "9/4 수준이다");
+    assert!(
+        usable.message.contains("쓸 만하다"),
+        "{}",
+        usable.message
+    );
+
+    // 같은 경로로 흘려보낸 두 녹음이 **서로 다른 답**을 받는다. 그것이 이 표시의 전부다.
+    assert_ne!(low.verdict, usable.verdict);
+    assert_ne!(low.message, usable.message);
+    assert!(usable.average_dbfs > low.average_dbfs);
+}
+
+#[test]
+fn the_input_level_does_not_move_while_the_recording_is_paused() {
+    // 레벨을 실시간 콜백이 아니라 **파일에 쓰이는 통로**에서 재는 이유 그 자체다
+    // (ADR-0003 §16.2) — 파일에 없는 소리를 사람에게 보여 주지 않는다.
+    let temp = TempRoot::new("level-paused");
+    let (recorder, microphone, clock, app_data_dir) = recorder_with(&temp);
+
+    recorder.start(DEVICE_KEY).expect("시작");
+    microphone.speak(1_685);
+    let recording = level_of(&recorder);
+    assert_eq!(recording.average_dbfs, -25.8);
+    assert_eq!(recording.peak_dbfs, -25.8);
+
+    // 멈춰 있는 동안 아주 큰 소리가 들어온다. 파일에 도달하지 않으므로 레벨도 이것을 보지 않는다.
+    recorder.pause().expect("일시정지");
+    clock.advance(60_000);
+    microphone.speak(31_000);
+
+    // 다시 녹음하고 **디지털 무음**을 흘려보낸다. 표시와 샘플은 같은 통로를 지나므로, 이 무음이
+    // 반영된 것을 본 시점에는 멈춰 있는 동안의 큰 소리도 이미 그 통로를 지나갔다 — 그래서
+    // 이 검사는 얼마나 기다렸는가에 의존하지 않는다.
+    recorder.resume().expect("재개");
+    microphone.speak(0);
+    let after = level_matching(&recorder, |level| level.average_dbfs != recording.average_dbfs);
+
+    assert_eq!(
+        after.average_dbfs, -28.8,
+        "1685짜리 512개와 무음 512개의 평균이다 — 31000은 섞이지 않았다"
+    );
+    assert_eq!(
+        after.peak_dbfs, -25.8,
+        "멈춰 있는 동안의 큰 소리는 피크에도 남지 않는다"
+    );
+    assert_eq!(after.verdict, "usable");
+
+    // 확정된 파일도 같은 말을 한다 — 레벨이 본 것과 파일에 남은 것이 같다.
+    recorder.stop().expect("정지");
+    let written = wav_files(&app_data_dir.recordings_dir());
+    assert_eq!(written.len(), 1);
+    assert_eq!(
+        samples_in(&written[0]),
+        [vec![1_685; CHUNK], vec![0; CHUNK]].concat()
+    );
+}
+
+#[test]
+fn there_is_no_input_level_before_a_recording_and_none_again_after_it() {
+    // **재지 않은 것을 0이라고 말하지 않는다** (ADR-0003 §16.3). 값 없음과 '소리 없음'은
+    // 사람이 해야 할 일이 다르다.
+    let temp = TempRoot::new("level-absent");
+    let (recorder, microphone, _clock, _) = recorder_with(&temp);
+
+    let idle = recorder.status().expect("상태를 물어볼 수 있어야 한다");
+    assert_eq!(idle.state, "idle");
+    assert_eq!(idle.level, None, "녹음 전에는 잰 것이 없다");
+
+    // 장치는 열렸지만 아직 한 샘플도 파일에 쓰이지 않았다. 여전히 없음이다.
+    recorder.start(DEVICE_KEY).expect("시작");
+    let started = recorder.status().expect("상태를 물어본다");
+    assert_eq!(started.state, "recording");
+    assert_eq!(started.level, None, "'소리 없음'이 아니라 값 없음이다");
+
+    microphone.speak(1_685);
+    assert_eq!(level_of(&recorder).verdict, "usable");
+
+    recorder.stop().expect("정지");
+    let after = recorder.status().expect("상태를 물어본다");
+    assert_eq!(after.state, "idle");
+    assert_eq!(after.level, None, "끝난 녹음의 레벨은 남지 않는다");
+}
+
+#[test]
+fn the_status_that_reaches_the_screen_carries_numbers_and_a_sentence_but_no_audio() {
+    // INV-6은 오디오가 기기 밖으로 나가는 길을 막는다. 이 검사는 **앱 안의 IPC 경계에서도**
+    // 같은 선을 지키는지 본다 (ADR-0003 §16.3) — 화면이 샘플을 받을 이유가 없다.
+    let temp = TempRoot::new("level-wire");
+    let (recorder, microphone, _clock, _) = recorder_with(&temp);
+
+    recorder.start(DEVICE_KEY).expect("시작");
+    microphone.speak(1_685);
+    level_of(&recorder);
+
+    let status = recorder.status().expect("상태를 물어본다");
+    let json = serde_json::to_value(&status).expect("직렬화할 수 있어야 한다");
+    let text = json.to_string();
+
+    let mut keys: Vec<String> = json
+        .as_object()
+        .expect("객체여야 한다")
+        .keys()
+        .cloned()
+        .collect();
+    keys.sort();
+    assert_eq!(keys, ["elapsedLabel", "elapsedMs", "level", "state"]);
+
+    let mut level_keys: Vec<String> = json["level"]
+        .as_object()
+        .expect("레벨도 객체다")
+        .keys()
+        .cloned()
+        .collect();
+    level_keys.sort();
+    assert_eq!(
+        level_keys,
+        ["averageDbfs", "message", "peakDbfs", "verdict"],
+        "나가는 것은 수치 둘 · 판정 하나 · 문장 하나뿐이다"
+    );
+
+    // 파형도 스펙트럼도 샘플 배열도 없다. 배열이 하나도 없다는 것으로 그 자리를 막는다.
+    assert!(!text.contains('['), "payload에 배열이 실렸다: {text}");
+    assert!(
+        !text.contains("1685"),
+        "샘플 값 자체가 payload에 새어 나왔다: {text}"
+    );
+
+    recorder.stop().expect("정지");
 }
 
 #[test]

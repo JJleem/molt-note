@@ -1,0 +1,36 @@
+`npm run test` 안의 cargo test 출력에서 새 모듈의 테스트만 뽑은 것이다.
+원본: .loop-local/self-check/gates/test/stdout.log
+전체 결과: test result: ok. 555 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+
+test transcription::chunking::tests::no_samples_means_no_chunks ... ok
+test transcription::chunking::tests::audio_shorter_than_one_chunk_is_a_single_chunk_of_its_own_length ... ok
+test transcription::chunking::tests::exactly_one_chunk_length_is_one_chunk ... ok
+test transcription::chunking::tests::an_exact_multiple_of_the_chunk_length_has_no_short_last_chunk ... ok
+test transcription::chunking::tests::one_frame_past_a_multiple_makes_a_short_last_chunk ... ok
+test transcription::chunking::tests::chunks_are_adjacent_and_no_frame_is_used_twice ... ok
+test transcription::chunking::tests::the_offset_of_chunk_k_is_twelve_thousand_centiseconds_times_k ... ok
+test transcription::chunking::tests::twelve_thousand_centiseconds_comes_out_of_the_frame_count_without_remainder ... ok
+test transcription::chunking::tests::the_chunk_range_is_what_the_caller_slices_with ... ok
+test transcription::chunking::tests::a_zero_sample_rate_is_a_failure_not_a_guess ... ok
+test transcription::chunking::tests::an_offset_that_cannot_be_represented_is_a_failure_not_a_saturated_value ... ok
+test transcription::chunking::tests::shifting_adds_the_offset_and_changes_nothing_else ... ok
+test transcription::chunking::tests::the_second_chunk_does_not_rewind_to_the_start_of_the_timeline ... ok
+test transcription::chunking::tests::a_chunk_that_produced_nothing_does_not_shift_the_chunks_after_it ... ok
+test transcription::chunking::tests::segments_without_text_pass_through_the_shift_untouched ... ok
+test transcription::chunking::tests::merging_nothing_gives_an_empty_transcription ... ok
+test transcription::chunking::tests::the_first_reported_language_wins ... ok
+test transcription::chunking::tests::a_language_nobody_reported_is_not_invented ... ok
+test transcription::chunking::tests::a_shifted_timestamp_that_cannot_be_represented_is_a_failure ... ok
+test transcription::chunking::tests::three_consecutive_repeats_survive ... ok
+test transcription::chunking::tests::the_fourth_consecutive_repeat_is_blocked ... ok
+test transcription::chunking::tests::everything_past_the_third_in_one_run_is_blocked ... ok
+test transcription::chunking::tests::a_different_sentence_restarts_the_count ... ok
+test transcription::chunking::tests::repeats_that_are_not_consecutive_are_not_blocked ... ok
+test transcription::chunking::tests::sentences_that_differ_only_in_whitespace_are_the_same_sentence ... ok
+test transcription::chunking::tests::segments_without_a_sentence_are_neither_counted_nor_blocked ... ok
+test transcription::chunking::tests::many_blank_segments_in_a_row_are_all_kept ... ok
+test transcription::chunking::tests::blocking_nothing_gives_nothing ... ok
+test transcription::chunking::tests::this_module_does_not_know_the_outside_world ... ok
+test transcription::chunking::tests::the_three_values_live_in_exactly_one_place ... ok
+
+30개.

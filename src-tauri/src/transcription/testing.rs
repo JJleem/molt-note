@@ -16,7 +16,7 @@ use std::sync::Mutex;
 use crate::domain::Failure;
 
 use super::audio_input::TranscriptionInput;
-use super::engine::{ensure_usable, TranscriptionEngine};
+use super::engine::{ensure_usable, LanguageChoice, TranscriptionEngine};
 use super::model::ModelFile;
 use super::parse::RawTranscription;
 
@@ -29,6 +29,11 @@ pub struct StubCall {
     pub model_path: PathBuf,
     /// 넘어온 모델 파일의 식별자.
     pub model_id: String,
+    /// 넘어온 **언어 선택** (ADR-0007 §17.1.4).
+    ///
+    /// 실제 whisper 없이 "고르지 않음이면 감지, 골랐으면 지정"을 판정할 수 있는 자리가
+    /// 여기다 — 이 값이 남지 않으면 그 갈림은 모델 파일이 있는 기기에서만 확인된다.
+    pub language: LanguageChoice,
 }
 
 /// 미리 정해 둔 결과를 돌려주는 엔진.
@@ -102,11 +107,13 @@ impl TranscriptionEngine for StubEngine {
         &self,
         input: &TranscriptionInput,
         model: &ModelFile,
+        language: &LanguageChoice,
     ) -> Result<RawTranscription, Failure> {
         self.locked_calls().push(StubCall {
             frames: input.frames(),
             model_path: model.path().to_path_buf(),
             model_id: model.id().to_owned(),
+            language: language.clone(),
         });
 
         let mut responses = self.responses.lock().expect("stub 결과 목록을 잠근다");
@@ -196,7 +203,7 @@ mod tests {
         let engine = StubEngine::returning(spoken("들린 문장"));
 
         let output = engine
-            .transcribe(&input(), &model)
+            .transcribe(&input(), &model, &LanguageChoice::Chosen("ko".to_owned()))
             .expect("정상 출력을 돌려줘야 한다");
 
         assert_eq!(output, spoken("들린 문장"), "값을 그대로 옮긴다");
@@ -207,8 +214,33 @@ mod tests {
                 frames: 1_600,
                 model_path: model.path().to_path_buf(),
                 model_id: "ggml-base.bin".to_owned(),
+                language: LanguageChoice::Chosen("ko".to_owned()),
             }
         );
+    }
+
+    #[test]
+    fn the_double_tells_detection_and_a_chosen_language_apart() {
+        // 실제 whisper도 모델도 없이 판정되는 갈림이다 (ADR-0007 §17.1.4).
+        let temp = TempDir::new("language");
+        let model = model_in(temp.path());
+        let engine = StubEngine::returning(spoken("들린 문장"));
+
+        engine
+            .transcribe(&input(), &model, &LanguageChoice::Detect)
+            .expect("고르지 않아도 전사는 돈다");
+        engine
+            .transcribe(&input(), &model, &LanguageChoice::Chosen("ko".to_owned()))
+            .expect("고른 언어로도 전사는 돈다");
+
+        let calls = engine.calls();
+        assert_eq!(calls[0].language, LanguageChoice::Detect);
+        assert_eq!(
+            calls[0].language.chosen(),
+            None,
+            "고르지 않았으면 지정할 코드가 없다 = 감지다"
+        );
+        assert_eq!(calls[1].language.chosen(), Some("ko"), "고른 값이 그대로 온다");
     }
 
     #[test]
@@ -220,9 +252,9 @@ mod tests {
             Ok(spoken("두 번째 시도")),
         ]);
 
-        let first = engine.transcribe(&input(), &model);
-        let second = engine.transcribe(&input(), &model);
-        let third = engine.transcribe(&input(), &model);
+        let first = engine.transcribe(&input(), &model, &LanguageChoice::Detect);
+        let second = engine.transcribe(&input(), &model, &LanguageChoice::Detect);
+        let third = engine.transcribe(&input(), &model, &LanguageChoice::Detect);
 
         assert_eq!(
             first.expect_err("첫 시도는 실패다").kind,
@@ -240,7 +272,7 @@ mod tests {
         let engine = StubEngine::failing(model_missing("모델이 없다"));
 
         let failure = engine
-            .transcribe(&input(), &model)
+            .transcribe(&input(), &model, &LanguageChoice::Detect)
             .expect_err("실패를 돌려줘야 한다");
 
         assert_eq!(failure.kind, FailureKind::TranscriptionModelMissing);
@@ -257,7 +289,7 @@ mod tests {
         });
 
         let failure = engine
-            .transcribe(&input(), &model)
+            .transcribe(&input(), &model, &LanguageChoice::Detect)
             .expect_err("빈 출력은 실패다");
 
         assert_eq!(failure.kind, FailureKind::TranscriptionOutputUnusable);

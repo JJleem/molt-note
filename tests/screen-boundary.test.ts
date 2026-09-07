@@ -73,13 +73,29 @@ describe('길이 포맷은 Rust에만 있다', () => {
 
   it('예외인 모듈이 녹음 길이 쪽으로 넘어오지 않는다', () => {
     // 이 모듈이 만드는 것은 segment의 위치뿐이다. 녹음 하나의 길이(durationLabel ·
-    // elapsedLabel)를 여기서 만들기 시작하면 규칙이 두 벌이 되고 조용히 갈라진다.
+    // elapsedLabel)나 전사에 걸린 시간(transcriptionMs)을 여기서 만들기 시작하면 규칙이
+    // 두 벌이 되고 조용히 갈라진다.
     const source = readFileSync(TIMESTAMP_MODULE, 'utf8');
-    const timestampFacts = [/durationMs/, /durationLabel/, /elapsedMs/, /elapsedLabel/];
+    const timestampFacts = [
+      /durationMs/,
+      /durationLabel/,
+      /elapsedMs/,
+      /elapsedLabel/,
+      // 전사에 걸린 시간의 밀리초. 이 모듈은 Rust가 만든 문장(transcriptionLabel)만 나른다.
+      /transcriptionMs/,
+    ];
 
     for (const shape of timestampFacts) {
       expect(source, '녹음 길이는 Rust가 만든 값을 쓴다').not.toMatch(shape);
     }
+  });
+
+  it('전사에 걸린 시간이 backend가 준 문장 그대로다', () => {
+    // 사람이 Metal 전후를 비교하는 값이다 (phase-prompt/05.6 성공 기준 3). 여기서 밀리초를
+    // 나눠 문장을 만들기 시작하면 저장된 값과 화면이 서로 다른 규칙으로 읽히게 된다.
+    const source = readFileSync(TIMESTAMP_MODULE, 'utf8');
+
+    expect(source).toMatch(/transcriptionLabel:\s*transcript\.transcriptionLabel/);
   });
 
   it('목록 항목의 길이가 저장소에서 온 값 그대로다', () => {
@@ -90,6 +106,60 @@ describe('길이 포맷은 Rust에만 있다', () => {
     // 녹음 중에 화면에 가장 크게 보이는 값이다 (§19). 여기서 초를 세기 시작하면 화면과
     // 저장되는 길이가 서로 다른 규칙으로 만들어진다.
     expect(recordingViewSource).toMatch(/elapsedLabel:\s*session\.elapsedLabel/);
+  });
+});
+
+/**
+ * 입력 레벨의 **환산과 판정**이 TypeScript에 다시 생기지 않았다는 것을 원문으로 못박는 자리
+ * (docs/ADR-0003-recording-engine.md §16.3 · §16.4).
+ *
+ * 위의 길이 포맷 검사와 같은 이유다 — dBFS 환산도, `-36`/`-60`의 판정 구간도, 사람이 읽는
+ * 문장도 `src-tauri/src/audio/level.rs` 한 자리에 있다. 화면이 같은 규칙을 한 벌 더 갖는
+ * 순간 둘은 조용히 갈라지고, 그때 화면이 보여 주는 "쓸 만함"은 저장되는 소리와 무관해진다.
+ *
+ * 갈래의 모양은 `src/screens/recordingView.test.ts`가 고정한다 — 값 없음 · 낮음 · 쓸 만함이
+ * 서로 다른 결과이고 경고가 언제 나오는지가 거기 있다. 여기서 보는 것은 **그 규칙을 만드는
+ * 자리가 숫자를 다시 만지지 않는다**는 것이며, 파일 하나가 새로 생기는 것만으로 조용히 깨질
+ * 수 있으므로 원문을 읽는 이 파일에 있다.
+ */
+describe('입력 레벨의 환산과 판정은 Rust에만 있다 (ADR-0003 §16.4)', () => {
+  /** 규칙을 설명하는 주석은 검사 대상이 아니다 — 찾는 것은 **코드에 쓰인 숫자**다. */
+  const codeOf = (file: string): string =>
+    readFileSync(file, 'utf8')
+      .split('\n')
+      .filter((line) => !line.trim().startsWith('*') && !line.trim().startsWith('//'))
+      .join('\n');
+
+  it('src/ 아래에 dBFS 환산이 없다', () => {
+    // 환산의 모양 — 로그와 16-bit 풀스케일. 하나라도 생기면 화면이 자기 수치를 갖게 된다.
+    const conversion = [/\blog10\b/, /\b32768\b/, /\b32_768\b/];
+
+    for (const file of frontendSources) {
+      const source = codeOf(file);
+      for (const shape of conversion) {
+        expect(source, `${file}에 dBFS 환산이 있다`).not.toMatch(shape);
+      }
+    }
+  });
+
+  it('src/ 아래에 판정 임계값이 없다', () => {
+    // -36(쓸 만함)과 -60(소리 없음)은 §16.4가 정한 구간이다. 같은 숫자가 화면에 생기면
+    // 규칙이 두 벌이 되고, 한쪽만 고쳐지는 날 화면은 사용자에게 거짓말을 하게 된다.
+    const thresholds = [/-\s*36(?!\d)/, /-\s*60(?!\d)/];
+
+    for (const file of frontendSources) {
+      const source = codeOf(file);
+      for (const shape of thresholds) {
+        expect(source, `${file}에 레벨 판정 임계값이 있다`).not.toMatch(shape);
+      }
+    }
+  });
+
+  it('화면이 backend의 판정과 문장을 그대로 나른다', () => {
+    // 갈래는 `verdict`, 사람이 읽는 문장은 `message`다. 화면이 문장을 조립하기 시작하면
+    // 수치와 문장이 서로 다른 자리에서 만들어진다.
+    expect(recordingViewSource).toMatch(/kind:\s*level\.verdict/);
+    expect(recordingViewSource).toMatch(/text:\s*level\.message/);
   });
 });
 
@@ -186,6 +256,68 @@ describe('token은 화면에 남지 않는다 (INV-7)', () => {
     // 상태에 남는 secret이 된다.
     expect(source).not.toMatch(/token\s*:\s*string/);
     expect(source).not.toMatch(/saveNotionToken|deleteNotionToken|invoke\s*\(/);
+  });
+});
+
+/**
+ * 파일이 놓인 자리를 여는 일이 **화면 쪽에서 OS를 알지 않는다**는 것을 원문으로 못박는 자리
+ * (`phase-prompt/05.6` 성공 기준 2 · R-4 · INV-10).
+ *
+ * 값의 모양은 `src/screens/savedFileView.test.ts`가 고정한다 — 여는 동작이 값으로 있고, 열지
+ * 못했을 때 무엇이 그대로인지도 값에 있다는 것이 거기 있다. 여기서 보는 것은 **그 규칙을 만드는
+ * 자리가 OS도 command도 알지 않는다**는 것이며, 컴포넌트 하나가 새로 생기는 것만으로 조용히
+ * 깨질 수 있으므로 원문을 읽는 이 파일에 있다.
+ *
+ * OS 이름이 화면 쪽으로 새면 두 가지가 무너진다 — 다른 플랫폼에서 틀린 문장을 말하게 되고
+ * (`savedFileView`의 문장은 사용자에게 그대로 보인다), 갈아 끼울 자리가 backend 하나가 아니게
+ * 된다 (`src-tauri/src/platform/file_manager.rs`).
+ */
+const SAVED_FILE_VIEW_MODULE = path('../src/screens/savedFileView.ts');
+
+describe('자리를 여는 규칙은 순수 모듈에 있고 OS를 알지 않는다 (INV-10)', () => {
+  it('그 모듈이 실제로 그 자리에 있고 React 컴포넌트가 아니다', () => {
+    expect(frontendSources).toContain(SAVED_FILE_VIEW_MODULE);
+    expect(SAVED_FILE_VIEW_MODULE.endsWith('.tsx')).toBe(false);
+  });
+
+  it('순수 모듈이 command도 DOM도 OS도 부르지 않는다', () => {
+    const source = readFileSync(SAVED_FILE_VIEW_MODULE, 'utf8');
+
+    // 판정이 command 없이 끝나야 창 하나 열지 않고 vitest로 전부 판정된다 (§18).
+    expect(source).not.toContain("from '../ipc/commands'");
+    expect(source).not.toMatch(/\binvoke\s*[<(]/);
+    expect(source).not.toContain('showSavedFile(');
+    // **그것을 쓰는 모양**을 찾는다 — 이 모듈의 문장 하나가 "opens a window."로 끝나므로,
+    // 낱말 자체를 막으면 사용자에게 보이는 문장이 규칙 위반으로 보고된다.
+    expect(source).not.toMatch(/\b(?:document|window)\s*(?:\.\s*\w|\[)/);
+  });
+
+  it('src/ 아래 어디에도 어느 OS의 파일 관리자인지 아는 코드가 없다', () => {
+    // 화면은 "자리를 연다"까지만 안다. 무엇으로 여는지는 backend의 platform 경계 하나가 안다.
+    // 주석이 아니라 **코드에 쓰인 이름**을 찾는다 — 규칙을 설명하는 문장은 검사 대상이 아니다.
+    const osNames = [/\bFinder\b/, /\bexplorer\.exe\b/, /'open'/, /"open"/, /\bAppleScript\b/];
+
+    for (const file of frontendSources) {
+      const source = readFileSync(file, 'utf8')
+        .split('\n')
+        .filter((line) => !line.trim().startsWith('*') && !line.trim().startsWith('//'))
+        .join('\n');
+
+      for (const shape of osNames) {
+        expect(source, `${file}이 OS 파일 관리자를 이름으로 안다 (INV-10)`).not.toMatch(shape);
+      }
+    }
+  });
+
+  it('만들어진 파일의 전체 경로가 화면에서 사라지지 않았다 (§4.1 · 성공 기준 2)', () => {
+    // 여는 수단은 경로의 **대체가 아니라 추가다.** 경로 줄이 사라지면 여는 수단이 실패했을 때
+    // 사용자에게 남는 길이 없어진다.
+    const screen = readFileSync(path('../src/screens/RecordingDetailScreen.tsx'), 'utf8');
+
+    expect(screen).toContain('{body.file.path}');
+    expect(screen).toContain('{body.path}');
+    // 그리고 그 옆에 여는 수단이 있다 — 두 export 자리 모두에.
+    expect([...screen.matchAll(/<ShowFileControl/g)]).toHaveLength(2);
   });
 });
 

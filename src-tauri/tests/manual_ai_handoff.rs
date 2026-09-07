@@ -30,7 +30,7 @@ use molt_note_lib::domain::{
     AiNote, Failure, FailureKind, NoteType, ProcessingStatus, Recording, RecordingId, Settings,
     Transcript, TranscriptId, TranscriptSegment,
 };
-use molt_note_lib::export::AiRequest;
+use molt_note_lib::export::{AiRequest, PORTION_MAX_BYTES};
 use molt_note_lib::platform::app_data_dir::AppDataDirectory;
 
 /// 이 파일이 쓰는 녹음 시각. 파일 이름의 날짜가 여기서 나온다 (ADR-0009 §4.2).
@@ -145,6 +145,7 @@ impl Fixture {
             created_at: CREATED_AT.to_string(),
             engine: "stub".to_string(),
             model: "ggml-base.bin".to_string(),
+            transcription_ms: None,
         };
 
         let mut connection = self.connection();
@@ -162,12 +163,80 @@ impl Fixture {
         transcript.id
     }
 
+    /// **72분 규모의 전사** — segment 하나가 한 줄이 되는 압축 모양에서 예산을 넘긴다
+    /// (`phase-prompt/05.6` R-5의 실측: segment 1,711개 · 99 KB).
+    fn save_long_transcript(
+        &self,
+        recording_id: &RecordingId,
+        id: &str,
+        segments: usize,
+    ) -> TranscriptId {
+        let segments: Vec<TranscriptSegment> = (0..segments)
+            .map(|index| {
+                let start_ms = (index as i64) * 3_000;
+                TranscriptSegment {
+                    start_ms,
+                    end_ms: start_ms + 3_000,
+                    text: format!(
+                        "발표자는 {index}번째 구간에서 3D Gaussian Splatting의 학습 파이프라인과 \
+                         렌더링 품질 지표를 설명했고, 다음 주까지 실험 결과를 정리해 공유하기로 했다."
+                    ),
+                }
+            })
+            .collect();
+
+        let transcript = Transcript {
+            id: TranscriptId::new(id),
+            recording_id: recording_id.clone(),
+            language: Some("ko".to_string()),
+            raw_text: segments
+                .iter()
+                .map(|segment| segment.text.as_str())
+                .collect::<Vec<_>>()
+                .join(" "),
+            segments,
+            created_at: CREATED_AT.to_string(),
+            engine: "stub".to_string(),
+            model: "ggml-base.bin".to_string(),
+            transcription_ms: None,
+        };
+
+        let mut connection = self.connection();
+        store::append_transcript(&mut connection, &transcript).expect("사전 조건: 전사를 저장한다");
+        store::set_current_transcript(&connection, recording_id, Some(&transcript.id), CREATED_AT)
+            .expect("사전 조건: current를 지정한다");
+
+        transcript.id
+    }
+
+    /// 저장된 녹음 하나. 순수 렌더러가 만드는 기대 문자열을 세우는 데 쓴다.
+    fn recording(&self, recording_id: &RecordingId) -> Recording {
+        store::load_recording(&self.connection(), recording_id)
+            .expect("녹음을 읽는다")
+            .expect("녹음이 있다")
+    }
+
+    /// 저장된 전사 하나.
+    fn transcript(&self, id: &str) -> Transcript {
+        store::load_transcript(&self.connection(), &TranscriptId::new(id))
+            .expect("전사를 읽는다")
+            .expect("전사가 있다")
+    }
+
+    /// 프롬프트의 **첫 조각**. 이 파일의 전사는 전부 한 조각에 들어가므로 그것이 전체다
+    /// (`phase-prompt/05.6` 성공 기준 4의 나눔은 `src/export/handoff.rs`가 따로 본다).
     fn ai_prompt(&self, recording_id: &RecordingId, mode: NoteType) -> Result<String, Failure> {
-        self.storage.ai_prompt(recording_id.as_str(), mode)
+        let taken = self.storage.ai_prompt(recording_id.as_str(), mode, None)?;
+        assert!(taken.portion.portion_count == 1, "사전 조건: 한 조각이다");
+
+        Ok(taken.text)
     }
 
     fn transcript_text(&self, recording_id: &RecordingId) -> Result<String, Failure> {
-        self.storage.transcript_text(recording_id.as_str())
+        let taken = self.storage.transcript_text(recording_id.as_str(), None)?;
+        assert!(taken.portion.portion_count == 1, "사전 조건: 한 조각이다");
+
+        Ok(taken.text)
     }
 
     fn export_ai_request(
@@ -175,7 +244,12 @@ impl Fixture {
         recording_id: &RecordingId,
         mode: NoteType,
     ) -> Result<ExportedFilePayload, Failure> {
-        self.exporter.export_ai_request(recording_id.as_str(), mode)
+        let written = self
+            .exporter
+            .export_ai_request(recording_id.as_str(), mode, None)?;
+        assert!(written.portion.portion_count == 1, "사전 조건: 한 조각이다");
+
+        Ok(written.file)
     }
 
     /// 저장된 것 전부를 한 값으로 찍는다. **실패 전후를 그대로 비교하기 위한 것이다** (MH-7).
@@ -264,10 +338,8 @@ fn all_three_outputs_are_produced_without_any_ai_provider_configured() {
     let text = fixture
         .transcript_text(&recording_id)
         .expect("provider가 없어도 전사를 복사할 수 있다");
-    assert_eq!(
-        text,
-        "## Transcript\n\n### 00:00:03\n안녕하세요. 오늘은 3DGS를 봅니다.\n"
-    );
+    // 압축 모양이다 — segment 하나가 `HH:MM:SS 문장` 한 줄이다 (`phase-prompt/05.6` R-5).
+    assert_eq!(text, "## Transcript\n00:00:03 안녕하세요. 오늘은 3DGS를 봅니다.\n");
 }
 
 #[test]
@@ -497,6 +569,169 @@ fn a_second_ai_request_gets_a_number_instead_of_overwriting_the_first() {
             .expect("둘째 파일을 읽는다")
             .contains("## Mode\nMeeting\n"),
         "두 번째 요청의 mode가 그대로 들어간다"
+    );
+}
+
+// --- 5. 크기 때문에 조용히 실패하지 않는다 (`phase-prompt/05.6` 성공 기준 4 · R-5) --------
+
+#[test]
+fn a_long_recording_says_how_big_it_is_and_hands_over_in_ordered_portions() {
+    // 2026-09-05의 실사용: 72분 녹음의 산출물이 99 KB였고, 사람은 그것을 채팅 창에 붙여 넣으려다
+    // 실패했으며 **앱은 그 사실을 말해 주지 않았다.** 여기서 판정하는 것은 그 침묵이 사라졌는가다.
+    let fixture = Fixture::new("long-recording");
+    let recording_id = fixture.save_recording("rec-1", "3DGS Study #04");
+    fixture.save_long_transcript(&recording_id, "tr-1", 1_711);
+
+    for mode in NoteType::ALL {
+        let first = fixture
+            .storage
+            .ai_prompt(recording_id.as_str(), mode, None)
+            .expect("provider가 없어도 첫 조각을 가져올 수 있다");
+
+        // 1. 얼마나 큰가가 값으로 온다 — 이 값이 없으면 화면은 크기를 말할 수 없다.
+        assert!(
+            first.portion.total_size.bytes > 2 * PORTION_MAX_BYTES,
+            "{mode}: 72분 규모라기에 너무 작다: {} 바이트",
+            first.portion.total_size.bytes
+        );
+        assert!(first.portion.total_size.chars > 0);
+        assert!(first.portion.total_size.lines > 0);
+
+        // 2. 나뉘었다는 사실과 자기 자리가 값으로 온다.
+        assert!(first.portion.portion_count > 2, "{mode}: 나뉘지 않았다");
+        assert_eq!(first.portion.portion, 1);
+        assert!(
+            first.portion.portion_size.bytes < first.portion.total_size.bytes,
+            "{mode}: 조각이 전체와 같다고 말한다"
+        );
+
+        // 3. 순서대로 다 가져가면 원본이다 — 크기 때문에 잃는 글자가 없다.
+        let rejoined: String = (1..=first.portion.portion_count)
+            .map(|portion| {
+                let taken = fixture
+                    .storage
+                    .ai_prompt(recording_id.as_str(), mode, Some(portion))
+                    .expect("조각을 가져올 수 있다");
+                assert_eq!(taken.portion.portion, portion);
+                assert_eq!(taken.portion.portion_count, first.portion.portion_count);
+                assert_eq!(taken.portion.total_size, first.portion.total_size);
+                assert_eq!(taken.recording_id, "rec-1");
+                taken.text
+            })
+            .collect();
+
+        let whole = AiRequest::new(mode, &fixture.recording(&recording_id), &fixture.transcript("tr-1"))
+            .manual_prompt();
+        assert_eq!(rejoined, whole, "{mode}: 이어 붙인 결과가 원본과 다르다");
+    }
+
+    // 전사 텍스트도 같은 규칙을 지난다 — 여기서만 조용하면 사용자는 같은 자리에서 다시 막힌다.
+    let text = fixture
+        .storage
+        .transcript_text(recording_id.as_str(), None)
+        .expect("전사 텍스트의 첫 조각");
+    assert!(text.portion.portion_count > 2);
+    assert!(text.portion.total_size.lines > 1_000, "segment 하나가 한 줄이다");
+}
+
+#[test]
+fn asking_for_a_portion_that_is_not_there_is_refused_instead_of_coming_back_empty() {
+    // 빈 텍스트로 답하면 사용자는 그것을 "가져갈 것이 더 없다"로 읽는다 — **잘린 결과를 완전한
+    // 것처럼 말하는 상태를 만들지 않는다** (성공 기준 4).
+    let fixture = Fixture::new("no-such-portion");
+    let recording_id = fixture.save_recording("rec-1", "3DGS Study #04");
+    fixture.save_transcript(&recording_id, "tr-1", "한 조각에 들어가는 짧은 전사.", true);
+
+    let taken = fixture
+        .storage
+        .transcript_text(recording_id.as_str(), None)
+        .expect("첫 조각");
+    assert_eq!(taken.portion.portion_count, 1, "사전 조건: 한 조각이다");
+
+    for portion in [0, 2, 9] {
+        let failure = fixture
+            .storage
+            .transcript_text(recording_id.as_str(), Some(portion))
+            .expect_err("없는 조각이다");
+
+        assert_eq!(failure.kind, FailureKind::InvalidInput);
+        assert!(failure.source_data_safe, "아무것도 건드리지 않았다 (MH-7)");
+        assert!(!failure.message.trim().is_empty(), "화면에 띄울 문장이 있다");
+    }
+
+    // 저장된 것도, export 디렉터리도 그대로다.
+    assert_eq!(fixture.exported_files(), Vec::new());
+}
+
+#[test]
+fn every_portion_of_a_long_document_becomes_its_own_file_and_none_overwrites_another() {
+    // 나눔이 사용자의 문서를 지우는 경로가 되지 않는다 (ADR-0009 §4.3).
+    let fixture = Fixture::new("portion-files");
+    let recording_id = fixture.save_recording("rec-1", "3DGS Study #04");
+    fixture.save_long_transcript(&recording_id, "tr-1", 1_711);
+
+    let first = fixture
+        .exporter
+        .export_ai_request(recording_id.as_str(), NoteType::Study, None)
+        .expect("첫 조각을 파일로 쓸 수 있다");
+    let count = first.portion.portion_count;
+    assert!(count > 2, "나뉘지 않았다");
+
+    let mut written = vec![first];
+    for portion in 2..=count {
+        written.push(
+            fixture
+                .exporter
+                .export_ai_request(recording_id.as_str(), NoteType::Study, Some(portion))
+                .expect("나머지 조각도 파일로 쓸 수 있다"),
+        );
+    }
+
+    // 1. 파일 이름이 **몇 번째 조각인지** 말한다 — 충돌 번호(`-2`)에 기대지 않는다.
+    let names: Vec<String> = written
+        .iter()
+        .map(|one| one.file.file_name.clone())
+        .collect();
+    assert_eq!(names[0], format!("2026-09-01-3dgs-study-04-ai-request-part-1-of-{count}.md"));
+    let mut unique = names.clone();
+    unique.sort();
+    unique.dedup();
+    assert_eq!(unique.len(), count, "같은 이름으로 쓰인 조각이 있다");
+
+    // 2. 조각마다 파일이 하나씩 생겼고, 어느 것도 덮어써지지 않았다.
+    let files = fixture.exported_files();
+    assert_eq!(files.len(), count);
+    for one in &written {
+        assert!(Path::new(&one.file.path).is_file());
+    }
+
+    // 3. 파일들을 순서대로 이어 붙이면 문서 전체다 — 크기 때문에 잃은 글자가 없다.
+    let rejoined: String = written
+        .iter()
+        .map(|one| fs::read_to_string(&one.file.path).expect("내보낸 파일을 읽는다"))
+        .collect();
+    assert_eq!(
+        rejoined,
+        AiRequest::new(
+            NoteType::Study,
+            &fixture.recording(&recording_id),
+            &fixture.transcript("tr-1")
+        )
+        .ai_ready_document()
+    );
+
+    // 4. 같은 조각을 또 내보내도 앞서 쓴 파일은 그대로다 (§4.3).
+    fs::write(&written[1].file.path, "사용자가 손댄 문서").expect("사전 조건: 파일을 손댄다");
+    let again = fixture
+        .exporter
+        .export_ai_request(recording_id.as_str(), NoteType::Study, Some(2))
+        .expect("같은 조각을 또 쓸 수 있다");
+
+    assert_ne!(again.file.path, written[1].file.path);
+    assert_eq!(again.portion.portion, 2);
+    assert_eq!(
+        fs::read_to_string(&written[1].file.path).expect("손댄 파일을 읽는다"),
+        "사용자가 손댄 문서"
     );
 }
 

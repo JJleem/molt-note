@@ -1,0 +1,53 @@
+TASK-072 — 이 Task가 더한 단위 테스트 (cargo test 원문에서 그대로 옮겼다)
+출처: .loop-local/self-check/gates/test/stdout.log
+
+── 크기와 나눔의 규칙: src-tauri/src/export/portion.rs (17개) ────────────────────
+
+크기를 값으로 낸다
+test export::portion::tests::measuring_says_how_big_the_text_is_in_bytes_characters_and_lines ... ok
+test export::portion::tests::an_empty_text_has_no_size_and_no_portion_at_all ... ok
+test export::portion::tests::the_size_says_whether_it_fits_in_one_portion_and_the_split_agrees ... ok
+
+무손실 · 순서 · 자기 자리
+test export::portion::tests::a_text_under_the_budget_is_one_whole_portion ... ok
+test export::portion::tests::a_text_over_the_budget_is_split_and_rejoins_into_the_original ... ok
+test export::portion::tests::every_portion_says_which_one_it_is_and_how_many_there_are ... ok
+test export::portion::tests::splitting_the_same_text_twice_gives_exactly_the_same_portions ... ok
+test export::portion::tests::a_text_without_a_trailing_newline_keeps_its_last_byte ... ok
+
+경계값
+test export::portion::tests::a_text_of_exactly_the_budget_is_not_split_and_one_byte_more_is ... ok
+test export::portion::tests::one_character_of_the_budget_is_a_portion_of_its_own ... ok
+
+경계가 놓이는 자리 (문단 → 줄 → 문장)
+test export::portion::tests::a_split_lands_on_a_paragraph_boundary_when_it_can ... ok
+test export::portion::tests::a_paragraph_bigger_than_the_budget_is_split_at_its_line_boundaries ... ok
+test export::portion::tests::a_line_bigger_than_the_budget_is_split_between_sentences ... ok
+test export::portion::tests::a_number_with_a_dot_in_it_is_not_a_sentence_boundary ... ok
+
+마지막 수단에서도 한 글자도 잃지 않는다 (낱말 → 글자)
+test export::portion::tests::a_sentence_longer_than_the_budget_is_split_without_losing_a_character ... ok
+test export::portion::tests::a_word_longer_than_the_budget_is_split_only_at_character_boundaries ... ok
+
+예산의 출처
+test export::portion::tests::the_budget_is_this_apps_choice_and_not_the_notion_api_constraint ... ok
+
+── 압축 모양: src-tauri/src/export/markdown.rs (5개) ─────────────────────────────
+
+test export::markdown::tests::the_compact_shape_writes_one_line_per_segment_with_its_own_timestamp ... ok
+test export::markdown::tests::the_compact_shape_keeps_every_timestamp_and_every_word_of_the_transcript ... ok
+test export::markdown::tests::the_compact_shape_is_smaller_than_the_section_11_shape_for_the_same_transcript ... ok
+test export::markdown::tests::both_shapes_choose_the_same_segments_and_fall_back_the_same_way ... ok
+test export::markdown::tests::the_compact_transcript_section_is_one_block_and_the_section_11_one_is_not ... ok
+test export::markdown::tests::the_section_11_document_is_never_written_in_the_compact_shape ... ok
+
+── AI 경로가 그 모양을 쓴다: src-tauri/src/export/ai_request.rs (2개 추가 · 1개 갱신) ──
+
+test export::ai_request::tests::the_three_outputs_use_the_compact_shape_and_the_section_11_document_does_not ... ok
+test export::ai_request::tests::the_compact_shape_loses_no_transcript_text_and_no_timestamp ... ok
+test export::ai_request::tests::the_transcript_text_is_the_compact_body_with_its_heading ... ok   (기대 문자열 갱신)
+
+── 규모 요약 ────────────────────────────────────────────────────────────────────
+
+cargo test 의 lib 단위 테스트: 517 passed; 0 failed
+통합 테스트 바이너리: 전부 0 failed

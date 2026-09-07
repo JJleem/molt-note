@@ -163,6 +163,7 @@ impl Fixture {
             created_at: CREATED_AT.to_string(),
             engine: "stub".to_string(),
             model: "ggml-base.bin".to_string(),
+            transcription_ms: None,
         };
 
         let mut connection = self.connection();

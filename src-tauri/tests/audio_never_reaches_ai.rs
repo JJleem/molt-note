@@ -131,6 +131,7 @@ impl Fixture {
                 created_at: "2026-09-03T10:01:00.000Z".to_owned(),
                 engine: "fixture-engine".to_owned(),
                 model: "fixture-model".to_owned(),
+                transcription_ms: None,
             },
         )
         .expect("사전 조건: Transcript를 추가한다");

@@ -11,19 +11,23 @@
 //   3. provider 부재가 오류로도 설정 요구로도 그려지지 않는다              (INV-8 · 요구 6)
 //   4. Export for AI 여섯 갈래와, 실패가 남기는 것 (§13 · MH-7)
 //   5. 기존 Connected Provider 경로의 값이 그대로 실려 있다                (MH-8)
+//   6. **문서가 얼마나 크고 이 파일이 몇 번째인가** (`phase-prompt/05.6` 성공 기준 4)
 import { describe, expect, it } from 'vitest';
 import type { Failure, FailureKind } from '../ipc/failure';
 import type {
   AiNote,
   AiProviderStatus,
+  ExportedAiRequest,
   ExportedFile,
   MeetingNote,
   NoteMode,
   Recording,
+  TextSize,
   Transcript,
 } from '../ipc/types';
 import {
   AI_EXPORT_DONE_HEADLINE,
+  AI_EXPORT_DONE_PORTION_HEADLINE,
   AI_EXPORT_FAILED_HEADLINE,
   AI_EXPORT_LABEL,
   AI_EXPORT_PRESERVED_NOTICE,
@@ -40,7 +44,23 @@ import {
   type ManualHandoffInput,
 } from './aiHandoffView';
 import { aiNoteTab, type AiNoteInput } from './aiNoteView';
-import { COPY_PROMPT_LABEL, COPY_TRANSCRIPT_LABEL, NO_COPY_ATTEMPT, startedCopy } from './copyView';
+import {
+  COPY_PROMPT_LABEL,
+  COPY_TRANSCRIPT_LABEL,
+  NO_COPY_ATTEMPT,
+  TOO_LONG_NOTICE,
+  WHOLE_PORTION_LABEL,
+  startedCopy,
+} from './copyView';
+import {
+  NO_SHOW_FILE_ATTEMPT,
+  SHOW_FILE_LABEL,
+  SHOW_FILE_PRESERVED_NOTICE,
+  SHOW_FILE_RESOLUTION,
+  SHOW_FILE_RETRY_LABEL,
+  failedShowFile,
+  showingFile,
+} from './savedFileView';
 
 // --- 사실들 --------------------------------------------------------------------------
 
@@ -73,6 +93,8 @@ function transcript(): Transcript {
     createdAt: '2026-09-03T04:50:26.000Z',
     engine: 'whisper.cpp',
     model: 'ggml-base.bin',
+    transcriptionMs: null,
+    transcriptionLabel: null,
   };
 }
 
@@ -96,12 +118,44 @@ function file(overrides: Partial<ExportedFile> = {}): ExportedFile {
   };
 }
 
+function size(chars: number, lines: number): TextSize {
+  return { bytes: chars * 3, chars, lines };
+}
+
+/**
+ * 쓰인 파일 하나. 기본값은 **나뉘지 않은 문서**다 — 짧은 녹음에서 늘 그렇고, 그때의 화면이
+ * 이 Phase 이전과 달라지지 않아야 한다 (`phase-prompt/05.6` 성공 기준 4).
+ */
+function written(overrides: Partial<ExportedAiRequest> = {}): ExportedAiRequest {
+  return {
+    file: file(),
+    totalSize: size(2_400, 61),
+    portion: 1,
+    portionCount: 1,
+    portionSize: size(2_400, 61),
+    ...overrides,
+  };
+}
+
+/** 예산을 넘어 넷으로 나뉜 문서의 `index`번째 조각이 파일이 된 결과. */
+function writtenPart(index: number, count = 4): ExportedAiRequest {
+  return written({
+    file: file({ fileName: `2026-09-01-3dgs-study-04-ai-request-part-${index}-of-${count}.md` }),
+    totalSize: size(41_320, 1_711),
+    portion: index,
+    portionCount: count,
+    portionSize: size(12_000, 430),
+  });
+}
+
 function input(overrides: Partial<ManualHandoffInput> = {}): ManualHandoffInput {
   return {
     recording: recording(),
     mode: 'meeting',
     copy: NO_COPY_ATTEMPT,
     aiExport: NO_AI_EXPORT_ATTEMPT,
+    // 자리를 여는 시도는 아직 하지 않았다 (`phase-prompt/05.6` 성공 기준 2).
+    show: NO_SHOW_FILE_ATTEMPT,
     ...overrides,
   };
 }
@@ -177,7 +231,12 @@ describe('provider가 하나도 없어도 세 동작이 전부 가능하다 (MH-
   it('아래 줄의 입력에 AI provider를 담을 자리가 없다', () => {
     // 담을 자리가 없으므로 "provider가 없어서 복사할 수 없다"는 상태를 만들 수단이 없다.
     // 필드를 통째로 고정한다 — 새 필드가 하나 생기면 여기서 먼저 드러난다.
-    expect(Object.keys(input()).sort()).toEqual(['aiExport', 'copy', 'mode', 'recording']);
+    //
+    // **필드가 하나 늘었다** — `show`다 (`phase-prompt/05.6` 성공 기준 2 · R-4). 그것은
+    // provider가 아니라 **이미 만들어진 파일 하나가 놓인 자리를 여는 시도**이며, 담고 있는
+    // 것은 파일 경로다. 그 시도가 어떤 상태든 세 자리가 눌리는 사실은 달라지지 않는다
+    // (아래 '자리를 여는 수단'이 그것을 값으로 못박는다).
+    expect(Object.keys(input()).sort()).toEqual(['aiExport', 'copy', 'mode', 'recording', 'show']);
   });
 
   it('provider를 고르지 않은 그 순간에도 세 자리가 전부 눌린다', () => {
@@ -412,7 +471,7 @@ describe('Export for AI 자리 (요구 3)', () => {
   });
 
   it('쓰는 중에는 다시 누를 자리가 없다', () => {
-    const view = manualHandoff(input({ aiExport: startedAiExport('r-1', 'meeting') }));
+    const view = manualHandoff(input({ aiExport: startedAiExport('r-1', 'meeting', 1) }));
 
     expect(view.aiExport.body.kind).toBe('exporting');
     expect(view.steps[2].usable).toBe(false);
@@ -422,7 +481,7 @@ describe('Export for AI 자리 (요구 3)', () => {
   });
 
   it('파일이 만들어지면 이름과 전체 경로가 문장과 함께 보인다 (§4.1)', () => {
-    const view = manualHandoff(input({ aiExport: exportedAiRequest(file()) }));
+    const view = manualHandoff(input({ aiExport: exportedAiRequest(written()) }));
 
     if (view.aiExport.body.kind !== 'done') {
       throw new Error('파일이 만들어진 상태여야 한다');
@@ -434,6 +493,82 @@ describe('Export for AI 자리 (요구 3)', () => {
     // 또 내보낼 수 있고, 있던 파일은 그대로다.
     expect(view.aiExport.body.again.kind).toBe('again');
     expect(view.aiExport.body.text).toMatch(/never overwrites/);
+    // 나뉘지 않았으면 더 꺼낼 것이 없다 — 없는 조각을 가리키는 버튼을 만들지 않는다.
+    expect(view.aiExport.body.next).toBeNull();
+    expect(view.aiExport.body.portion.label).toBe(WHOLE_PORTION_LABEL);
+    expect(view.aiExport.body.size.fitsInOne).toBe(true);
+  });
+
+  it('만들어진 파일이 놓인 자리를 여는 수단이 경로와 함께 있다 (05.6 성공 기준 2 · R-4)', () => {
+    // 만든 파일을 AI 채팅에 첨부하려면 그 파일에 실제로 도달할 수 있어야 한다. 경로만으로는
+    // 도달하지 못한다는 것이 2026-09-05의 실사용에서 드러났다 (macOS의 `~/Library` 숨김).
+    const document = written();
+    const view = manualHandoff(input({ aiExport: exportedAiRequest(document) }));
+
+    if (view.aiExport.body.kind !== 'done') {
+      throw new Error('파일이 만들어진 상태여야 한다');
+    }
+    // 대체가 아니라 추가다 — 경로는 그대로다.
+    expect(view.aiExport.body.path).toBe(document.file.path);
+    expect(view.aiExport.body.show.action.kind).toBe('show');
+    expect(view.aiExport.body.show.action.label).toBe(SHOW_FILE_LABEL);
+    expect(view.aiExport.body.show.action.path).toBe(document.file.path);
+    expect(view.aiExport.body.show.trouble).toBeNull();
+    // 이 자리는 여전히 눌린다 — 여는 수단이 생겼다고 다시 내보낼 수 없게 되지 않는다.
+    expect(view.steps[2].usable).toBe(true);
+  });
+
+  it('자리를 열지 못해도 파일 · 경로 · 세 자리는 그대로다 (§13 · INV-3 · MH-7)', () => {
+    const document = written();
+    const view = manualHandoff(
+      input({
+        aiExport: exportedAiRequest(document),
+        show: failedShowFile(document.file.path, failure('storage')),
+      }),
+    );
+
+    if (view.aiExport.body.kind !== 'done') {
+      throw new Error('여는 데 실패해도 파일은 만들어진 채다');
+    }
+    expect(view.aiExport.body.headline).toBe(AI_EXPORT_DONE_HEADLINE);
+    expect(view.aiExport.body.path).toBe(document.file.path);
+
+    const trouble = view.aiExport.body.show.trouble;
+    if (trouble === null) {
+      throw new Error('실패가 값으로 있어야 한다');
+    }
+    expect(trouble.failure.kind).toBe('storage');
+    expect(trouble.preservedNotice).toBe(SHOW_FILE_PRESERVED_NOTICE);
+    // 그래도 도달할 길이 남아 있다 — 위에 그대로 있는 경로다.
+    expect(trouble.resolution).toBe(SHOW_FILE_RESOLUTION);
+    expect(view.aiExport.body.show.action.label).toBe(SHOW_FILE_RETRY_LABEL);
+    // 복사 두 자리도, 다시 내보내는 자리도 그대로 쓸 수 있다.
+    expect(view.steps.every((step) => step.usable)).toBe(true);
+  });
+
+  it('여는 중이라는 사실이 문장으로 있고, 다른 파일의 시도는 보이지 않는다', () => {
+    const document = written();
+
+    const showing = manualHandoff(
+      input({ aiExport: exportedAiRequest(document), show: showingFile(document.file.path) }),
+    );
+    if (showing.aiExport.body.kind !== 'done') {
+      throw new Error('파일이 만들어진 상태여야 한다');
+    }
+    expect(showing.aiExport.body.show.showing).toBe(true);
+    expect(showing.aiExport.body.show.text.trim()).not.toBe('');
+
+    const elsewhere = manualHandoff(
+      input({
+        aiExport: exportedAiRequest(document),
+        show: failedShowFile('/somewhere/else.md', failure('storage')),
+      }),
+    );
+    if (elsewhere.aiExport.body.kind !== 'done') {
+      throw new Error('파일이 만들어진 상태여야 한다');
+    }
+    expect(elsewhere.aiExport.body.show.trouble).toBeNull();
+    expect(elsewhere.aiExport.body.show.showing).toBe(false);
   });
 
   it('실패는 §13의 세 질문에 답하고 재시도 수단을 남긴다 (MH-7)', () => {
@@ -444,7 +579,7 @@ describe('Export for AI 자리 (요구 3)', () => {
     ];
 
     for (const [kind, cause, resolution] of cases) {
-      const view = manualHandoff(input({ aiExport: failedAiExport('r-1', failure(kind)) }));
+      const view = manualHandoff(input({ aiExport: failedAiExport('r-1', 1, failure(kind)) }));
 
       if (view.aiExport.body.kind !== 'failed') {
         throw new Error('실패 상태여야 한다');
@@ -469,7 +604,7 @@ describe('Export for AI 자리 (요구 3)', () => {
   });
 
   it('실패해도 복사 두 자리는 그대로 쓸 수 있다 (MH-7)', () => {
-    const view = manualHandoff(input({ aiExport: failedAiExport('r-1', failure('storage')) }));
+    const view = manualHandoff(input({ aiExport: failedAiExport('r-1', 1, failure('storage')) }));
 
     expect(view.copy.prompt.body.kind).toBe('notAsked');
     expect(view.copy.transcript.body.kind).toBe('notAsked');
@@ -478,9 +613,9 @@ describe('Export for AI 자리 (요구 3)', () => {
 
   it('다른 녹음의 결과가 이 자리에 보이지 않는다', () => {
     const others: readonly AiExportAttempt[] = [
-      startedAiExport('r-2', 'meeting'),
-      exportedAiRequest(file({ recordingId: 'r-2' })),
-      failedAiExport('r-2', failure('storage')),
+      startedAiExport('r-2', 'meeting', 1),
+      exportedAiRequest(written({ file: file({ recordingId: 'r-2' }) })),
+      failedAiExport('r-2', 1, failure('storage')),
     ];
 
     for (const aiExport of others) {
@@ -490,10 +625,80 @@ describe('Export for AI 자리 (요구 3)', () => {
   });
 
   it('복사 중인 자리와 내보내기 자리가 서로를 가리지 않는다', () => {
-    const view = manualHandoff(input({ copy: startedCopy('prompt', 'r-1') }));
+    const view = manualHandoff(input({ copy: startedCopy('prompt', 'r-1', 1) }));
 
     expect(view.steps[0].usable).toBe(false);
     expect(view.steps[1].usable).toBe(true);
     expect(view.steps[2].usable).toBe(true);
+  });
+});
+
+// --- 6. 크기와 나눔 (`phase-prompt/05.6` 성공 기준 4 · R-5) --------------------------------
+
+describe('나뉜 문서를 완전한 것처럼 말하지 않는다', () => {
+  it('조각 하나만 파일이 됐으면 문서가 준비됐다고 말하지 않는다', () => {
+    const view = manualHandoff(input({ aiExport: exportedAiRequest(writtenPart(1)) }));
+
+    if (view.aiExport.body.kind !== 'done') {
+      throw new Error('파일이 만들어진 상태여야 한다');
+    }
+    expect(view.aiExport.body.headline).toBe(AI_EXPORT_DONE_PORTION_HEADLINE);
+    expect(view.aiExport.body.headline).not.toBe(AI_EXPORT_DONE_HEADLINE);
+    // 얼마나 크고 몇 번째인가가 값으로 있다.
+    expect(view.aiExport.body.portion.label).toBe('Part 1 of 4.');
+    expect(view.aiExport.body.size.label).toContain('41,320');
+    expect(view.aiExport.body.size.tooLongNotice).toBe(TOO_LONG_NOTICE);
+    // 파일 이름 자체가 몇 번째인지 말한다 (backend가 붙인 이름 그대로다).
+    expect(view.aiExport.body.fileName).toContain('part-1-of-4');
+  });
+
+  it('나머지를 마저 파일로 꺼내는 수단이 그 자리에 있다', () => {
+    const view = manualHandoff(input({ aiExport: exportedAiRequest(writtenPart(2)) }));
+
+    if (view.aiExport.body.kind !== 'done') {
+      throw new Error('파일이 만들어진 상태여야 한다');
+    }
+    expect(view.aiExport.body.next?.kind).toBe('next');
+    expect(view.aiExport.body.next?.portion).toBe(3);
+    expect(view.aiExport.body.next?.label).toBe('Export part 3 of 4');
+    expect(view.aiExport.body.next?.mode).toBe('meeting');
+    // 같은 조각을 다시 쓰는 수단은 그대로다 — 있던 파일을 덮어쓰지 않는다.
+    expect(view.aiExport.body.again.portion).toBe(2);
+    expect(view.aiExport.body.text).toMatch(/never overwrites/);
+    // 이 자리는 여전히 눌린다.
+    expect(view.steps[2].usable).toBe(true);
+  });
+
+  it('마지막 조각에서만 문서 전체가 나왔다고 말한다', () => {
+    const view = manualHandoff(input({ aiExport: exportedAiRequest(writtenPart(4)) }));
+
+    if (view.aiExport.body.kind !== 'done') {
+      throw new Error('파일이 만들어진 상태여야 한다');
+    }
+    expect(view.aiExport.body.next).toBeNull();
+    expect(view.aiExport.body.portion.remaining).toBe(0);
+    expect(view.aiExport.body.text).toContain('last part');
+  });
+
+  it('쓰려던 조각으로 다시 시도한다 — 건너뛰지 않는다', () => {
+    const view = manualHandoff(input({ aiExport: failedAiExport('r-1', 3, failure('storage')) }));
+
+    if (view.aiExport.body.kind !== 'failed') {
+      throw new Error('실패 상태여야 한다');
+    }
+    expect(view.aiExport.body.retry.portion).toBe(3);
+  });
+
+  it('provider가 하나도 없어도 크기와 조각을 그대로 말한다 (MH-1 · MH-2)', () => {
+    // 나눔은 provider와 아무 상관이 없다 — 입력에 provider를 담을 자리가 없으므로 그것 때문에
+    // 달라질 수단 자체가 없다.
+    const withProvider = layout({ provider: readyProvider() }, {
+      aiExport: exportedAiRequest(writtenPart(2)),
+    });
+    const withoutProvider = layout({ provider: noProvider() }, {
+      aiExport: exportedAiRequest(writtenPart(2)),
+    });
+
+    expect(withoutProvider.manual).toEqual(withProvider.manual);
   });
 });
