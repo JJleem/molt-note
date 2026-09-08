@@ -2943,3 +2943,152 @@ EXEC-20260905T152808Z-TASK-060   RECOVERY_AMBIGUOUS · attempts=1 · 0s · LLM 0
 9. 실제 사용 결과 Runtime V1에 넣을 가치가 확인된 기능은 무엇인가?
 
 이 리뷰를 기반으로 다음 Runtime 개선 순서를 정한다.
+
+---
+
+## OBS-028 — Planner가 600s 기본 timeout에 stdout 0바이트로 SIGKILL됐고, CLI가 그것을 "conversational transcript"라고 보고했다
+
+**Date:** 2026-09-08
+
+**Project phase / Goal:** Molt Note Phase 5.9 (`phase-prompt/05.9-silence-hallucination-and-vad.md`)
+
+**Plan ID:** `PLAN-20260908T010805Z`
+
+**Runtime stage:** Planner
+
+**Command:** `./loopctl plan --file phase-prompt/05.9-silence-hallucination-and-vad.md`
+
+**Artifacts:** `.loop-local/plans/PLAN-20260908T010805Z/`
+
+### What happened
+
+**[관측된 사실]** Planner가 **정확히 600.006초에 SIGKILL**됐고 Task를 하나도 내지 못했다.
+
+```text
+duration_ms          600006
+timeout_seconds      600            ← --timeout을 주지 않았을 때의 기본값
+signal               SIGKILL
+timed_out            true
+exit_code            null
+
+stdout_bytes         0              ← 600초 동안 아무것도 쓰지 않았다
+stderr_bytes         0
+tokens               unavailable
+provider_cost_usd    null
+task_count           0
+planner_result       null
+approvable           false
+```
+
+**[관측된 사실]** subject는 흔들리지 않았다 — `repository_subject_stable: true`,
+before/after sha256 동일, `control_plane.violated: false`, 읽기 전용 도구 강제도 지켜졌다.
+**fail-closed 자체는 올바르게 동작했다.**
+
+### 이 항목이 기록하는 것 — 두 가지다
+
+#### (1) 기본 timeout이 이 Goal class에 부족하다
+
+**[관측된 사실]** Planner에게 주어진 context는 **41.8 KB (546줄)** 로 크지 않다.
+그런데도 600초를 다 쓰고 아무것도 내지 못했다.
+
+**[유력한 설명]** Planner는 `Read` · `Grep` · `Glob`만 갖고 **스스로 저장소를 읽는다.**
+이 Goal은 참조 밀도가 높다 — `ADR-0007`(약 1,950줄) · `ADR-0003 §16` · `PRODUCT-SPEC` ·
+`transcription/` 소스 여러 파일 · 경계 테스트 둘을 가리킨다. context 크기가 아니라
+**Goal이 지시하는 읽기량**이 시간을 지배했을 가능성이 높다.
+
+**[미검증]** 실제로 무엇을 몇 개나 읽었는지는 알 수 없다. **stdout이 0바이트라
+Planner가 어디까지 갔는지 보여 주는 흔적이 아무것도 남지 않았다.** 이것 자체가 관측 대상이다.
+
+**[관측된 사실]** `usage.tokens.source: "unavailable"` · `provider_cost_usd: null`.
+**10분을 태운 실행의 비용을 이 저장소가 알 수 없다.** OBS-016 · OBS-023이 기록한
+timeout 초과 집행과 달리 **집행 시점 자체는 정확했다**(600.006s) — 그 점은 개선된 상태다.
+
+#### (2) CLI 보고가 실제로 일어난 일과 다르다
+
+**[관측된 사실]** 실패 메시지가 이렇게 나왔다.
+
+```text
+planner produced no structured result (the conversational transcript is not a plan)
+```
+
+**그런데 `stdout_bytes`는 0이다. conversational transcript는 존재하지 않았다.**
+`adapter_meta.parse_error`도 `"stdout was not a single JSON object"`라 적었지만
+stdout은 빈 문자열이었다.
+
+**[관측된 사실]** 더 혼동을 주는 것은 그다음이다. CLI가 **Goal 문서 전문을 그대로 출력했다.**
+`plan-report.json`의 `goal` 필드(12,828자)를 렌더한 것인데, 터미널에서는 **Planner가
+Goal을 산문으로 되읊고 끝난 것처럼 보인다.** 실제로 Planner는 한 글자도 내놓지 않았다.
+
+운영자가 이 화면에서 내리는 결론과 사실이 어긋난다.
+
+```text
+화면이 보여 준 것        Planner가 Goal을 산문으로 되풀이했다 → "구조화 출력을 안 따랐구나"
+실제로 일어난 일          Planner가 끝내 아무것도 출력하지 못하고 시간 초과로 죽었다
+                          → "시간이 부족했구나"
+```
+
+**두 결론의 다음 조치가 다르다.** 앞은 프롬프트/스키마를 의심하게 하고,
+뒤는 `--timeout`을 올리게 한다. **이번엔 뒤가 맞다.**
+
+### Expected
+
+- timeout으로 죽은 실행은 **timeout이 원인이라고** 보고돼야 한다.
+  `stdout_bytes == 0`이면 "conversational transcript"라는 표현을 쓰지 않아야 한다.
+- 실패 출력에 Goal 전문을 붙이지 않아야 한다. 그것은 Planner의 산출물이 아니라 **입력**이며,
+  실패 화면에서 산출물처럼 보인다.
+- 무엇이 부족했는지 판단할 근거가 남아야 한다. **stdout 0바이트 + tokens unavailable +
+  cost null이면 남는 근거가 `duration_ms` 하나뿐이다.**
+
+### Current workaround
+
+`--timeout`을 올려 다시 돌린다 (`./loopctl plan --file <goal> --timeout 1800`).
+
+**비용:** 실패한 10분이 그대로 버려진다. 부분 결과가 없어 이어서 할 수 없다.
+
+### Impact
+
+- Phase 5.9 착수가 최소 10분 지연됐고, 그 10분의 provider 비용은 **측정되지 않는다.**
+- 참조 밀도가 높은 Goal일수록 이 실패가 반복될 가능성이 있다. Phase 5.9는 `[미검증]` 해소를
+  Goal에 담는 성격이라 **문서 참조가 앞으로 더 늘어난다.**
+- 보고가 잘못된 방향을 가리키면 운영자가 Goal을 불필요하게 깎게 된다.
+  **이번엔 Goal이 문제가 아니었다.**
+
+### Possible improvement (미검증 · 제안일 뿐이다)
+
+1. `plan`의 기본 timeout을 올리거나, `.loop/project.yaml`에서 stage별로 정할 수 있게 한다.
+   **어느 값이 맞는지는 이 관측 하나로 정할 수 없다** — 성공한 plan들의 소요 시간 분포가 필요하다.
+2. `timed_out: true`일 때의 실패 메시지를 timeout 원인으로 고정하고,
+   `stdout_bytes == 0`이면 transcript 표현을 쓰지 않는다.
+3. 실패 출력에서 Goal 전문 렌더를 뺀다 (경로만 남긴다).
+4. Planner 프로세스의 stdout을 스트리밍으로 받아 부분 진행이 남게 한다.
+   그래야 "어디까지 갔는가"를 다음 번에 답할 수 있다.
+
+**Field-Test Principle에 따라 지금 Runtime을 고치지 않는다.** 이 관측은 1회이며,
+`--timeout`을 올린 재실행 결과가 (1)의 근거를 늘리거나 반박할 것이다.
+
+### 재실행 결과 (2026-09-08)
+
+**[관측된 사실]** `--timeout 1800`으로 다시 돌린 실행이 성공했다.
+
+```text
+PLAN-20260908T011945Z   duration 629,666 ms = 629.7초   timed_out false
+                        Task 10개 · Validation PASS · provider-reported cost $3.4505
+                        tokens: input 28 · output 45,701 · cached_input 1,391,823
+```
+
+**성공한 실행은 629.7초 걸렸다. 기본 timeout 600초에서 29.7초 모자랐다 — 5% 미만이다.**
+
+이것이 (1)의 해석을 바꾼다. **Goal이 크거나 참조가 과한 것이 아니었다** — 기본값이
+이 Goal class에 **아슬아슬하게** 짧았다. 몇 초 차이로 10분과 $3.45를 버렸다.
+
+**[미검증]** 성공한 plan들의 소요 시간 분포는 여전히 없다. 629.7초가 이 저장소의 Goal에
+전형적인 값인지, 이번이 특히 길었던 것인지 이 관측 하나로는 알 수 없다.
+
+### Status
+
+**OPEN** — 관측 2회(실패 1 · 성공 1). 개선 제안 (2)(3)은 이 한 번으로도 근거가 섰다
+(`timed_out: true`인데 메시지가 transcript를 말했고, 실패 화면이 Goal 전문을 렌더했다).
+(1)의 값은 아직 정할 근거가 없다.
+
+⚠️ **이 Plan은 승인되지 않았다.** 운영자가 2026-09-08에 Runtime 경로를 중단하고 직접
+구현으로 전환했다 — 그 뒤의 변경은 Runtime을 거치지 않았다.
