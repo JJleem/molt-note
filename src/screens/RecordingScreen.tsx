@@ -74,24 +74,65 @@ export function RecordingScreen({ navigate }: ScreenProps) {
   const latestStatusRequest = useRef(0);
 
   /**
+   * 지금 답을 기다리는 상태 조회가 있는가.
+   *
+   * 조회는 500ms마다 돈다 — 2시간 녹음이면 14,400번이다. `setInterval`은 앞 요청이 끝났는지
+   * 묻지 않으므로, backend가 한 번이라도 느려지면 답을 못 받은 요청이 **끝없이 쌓인다.**
+   * 화면이 쓰는 것은 어차피 가장 최근 답 하나뿐이다 (위 `latestStatusRequest`).
+   */
+  const statusInFlight = useRef(false);
+
+  /**
+   * 기다리는 동안 다시 물어봐 달라는 요청이 있었는가.
+   *
+   * **겹친 조회를 그냥 버리면 안 된다.** 시작·일시정지·재개·정지 뒤의 조회가 그렇게 버려지면
+   * 화면이 옛 상태에 멈춘다 — 특히 **시작 직후에는 되풀이 조회가 아직 돌지 않으므로**
+   * (녹음 중일 때만 돈다) 그 한 번을 잃으면 다음 조회가 영영 오지 않는다.
+   * 그래서 버리는 대신 미뤄 두고, 지금 것이 끝나면 곧바로 한 번 더 묻는다.
+   */
+  const statusAgain = useRef(false);
+
+  /**
    * 지금 녹음이 어떤 상태인지 backend에 물어본다.
    *
    * 화면이 상태를 만들어 내지 않는 자리다. 시작·일시정지·재개·정지 뒤에도 이것을 부른다 —
    * 요청이 받아들여졌다는 것과 session이 지금 어떤 상태인지는 다른 사실이기 때문이다.
    */
   const refreshStatus = useCallback(() => {
-    const request = (latestStatusRequest.current += 1);
-    const isLatest = () => request === latestStatusRequest.current;
+    function ask() {
+      // 답을 기다리는 조회가 이미 있으면 겹쳐 묻지 않는다 — 없으면 느려진 backend 뒤로
+      // 요청이 쌓인다. 대신 **잊지 않는다**: 지금 것이 끝나면 한 번 더 묻는다.
+      if (statusInFlight.current) {
+        statusAgain.current = true;
+        return;
+      }
+      statusInFlight.current = true;
 
-    captureStatus().then(
-      (session) => {
-        if (isLatest()) setView((state) => observedSession(state, session));
-      },
-      // 실패를 console에만 남기지 않는다. 화면 상태가 된다 (§13).
-      (error: unknown) => {
-        if (isLatest()) setView((state) => failedSession(state, error));
-      },
-    );
+      const request = (latestStatusRequest.current += 1);
+      const isLatest = () => request === latestStatusRequest.current;
+
+      function settled() {
+        statusInFlight.current = false;
+        if (statusAgain.current) {
+          statusAgain.current = false;
+          ask();
+        }
+      }
+
+      captureStatus().then(
+        (session) => {
+          if (isLatest()) setView((state) => observedSession(state, session));
+          settled();
+        },
+        // 실패를 console에만 남기지 않는다. 화면 상태가 된다 (§13).
+        (error: unknown) => {
+          if (isLatest()) setView((state) => failedSession(state, error));
+          settled();
+        },
+      );
+    }
+
+    ask();
   }, []);
 
   const sessionState = view.session?.state ?? null;

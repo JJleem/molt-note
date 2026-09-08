@@ -9,6 +9,7 @@ import {
   type NavigationState,
   type Route,
 } from './navigation/routes';
+import { ErrorBoundary } from './screens/ErrorBoundary';
 import { SCREEN_COMPONENTS } from './screens/registry';
 import './App.css';
 
@@ -52,7 +53,12 @@ function App() {
           )}
           <h1 className="header__title">{definition.title}</h1>
         </header>
-        <Screen route={nav.current} navigate={go} goBack={back} />
+        {/* 화면 하나가 죽어도 사이드바와 헤더는 남는다 — 다른 화면으로 갈 수 있어야
+            녹음 화면으로 되돌아갈 수 있다. `resetKey`가 route이므로 화면을 옮기면 앞
+            화면의 실패는 따라오지 않는다. */}
+        <ErrorBoundary resetKey={nav.current.screen}>
+          <Screen route={nav.current} navigate={go} goBack={back} />
+        </ErrorBoundary>
       </main>
     </div>
   );
