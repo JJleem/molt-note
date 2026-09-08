@@ -1162,6 +1162,17 @@ function TranscriptTab({
           {tab.transcriptionLabel !== null && (
             <p className="hint">Transcribed in {tab.transcriptionLabel}</p>
           )}
+          {/* 같은 녹음을 다시 전사한다 (2026-09-08). 이 자리에 수단이 없어서 저장소에
+              레코드를 직접 넣어 우회한 적이 있다. **잃는 것이 없다는 사실을 버튼 옆에
+              둔다** — 그 말이 없으면 누르기를 망설이고, 그러면 우회가 다시 생긴다. */}
+          <button
+            type="button"
+            className="btn btn--secondary"
+            onClick={() => onTranscribe(tab.redo.recordingId)}
+          >
+            {tab.redo.label}
+          </button>
+          <p className="hint">{tab.redoNotice}</p>
           <TranscriptLines lines={tab.lines} />
         </>
       )}

@@ -274,6 +274,41 @@ describe('완료', () => {
     expect(view.model).toBe('ggml-base.bin');
   });
 
+  /**
+   * 2026-09-08의 회귀 테스트다. `done`에 다시 전사할 수단이 없어서, 모델을 바꿔 다시
+   * 돌리려면 저장소에 레코드를 직접 넣는 수밖에 없었다 — 제품이 만든 적 없는 레코드가
+   * DB에 생겼다.
+   */
+  it('완료된 전사에도 다시 전사할 수단이 있다', () => {
+    const view = transcriptTab(
+      recording({ transcriptionStatus: 'done', currentTranscriptId: 't-1' }),
+      transcript(),
+      status({ state: 'done', recordingId: 'r-1', transcriptId: 't-1' }),
+    );
+
+    expect(view.kind).toBe('done');
+    if (view.kind !== 'done') return;
+    expect(view.redo.kind).toBe('redo');
+    expect(view.redo.recordingId).toBe('r-1');
+    expect(view.redo.label.length).toBeGreaterThan(0);
+  });
+
+  it('다시 전사해도 지금 것을 잃지 않는다고 말한다', () => {
+    // Transcript는 immutable이므로 다시 돌리면 **추가**된다 (INV-2). 그 사실을 말하지 않으면
+    // 사용자는 버튼을 누르기를 망설이고, 그러면 저장소를 직접 건드리는 우회가 다시 생긴다.
+    const view = transcriptTab(
+      recording({ transcriptionStatus: 'done', currentTranscriptId: 't-1' }),
+      transcript(),
+      status({ state: 'done', recordingId: 'r-1', transcriptId: 't-1' }),
+    );
+
+    if (view.kind !== 'done') throw new Error('done이어야 한다');
+    expect(view.redoNotice).toContain('kept');
+    // 덮어쓴다는 인상을 주는 말을 쓰지 않는다.
+    expect(view.redo.label.toLowerCase()).not.toContain('replace');
+    expect(view.redo.label.toLowerCase()).not.toContain('overwrite');
+  });
+
   it('언어를 모르는 Transcript도 그대로 보여준다', () => {
     const view = transcriptTab(
       recording({ transcriptionStatus: 'done', currentTranscriptId: 't-1' }),
@@ -575,8 +610,10 @@ describe('요청이 거절됐을 때', () => {
 
 describe('이 모듈이 하지 않는 일', () => {
   it('Recording이나 Transcript를 지우거나 고치는 함수가 없다', () => {
-    // 화면에서 시작할 수 있는 동작은 시작과 재시도 둘뿐이다. transcript 편집·삭제 UI는
-    // 범위 밖이며(phase-prompt/03의 Out of Scope), 그 수단이 값에도 없다.
+    // 화면에서 시작할 수 있는 동작은 **시작 · 재시도 · 다시 전사** 셋이다. 셋 다 전사를
+    // **새로 만드는** 동작이며, 다시 전사도 덮어쓰지 않고 추가한다 (INV-2).
+    // transcript 편집·삭제 UI는 여전히 범위 밖이며(phase-prompt/03의 Out of Scope),
+    // 그 수단이 값에도 없다.
     const view = transcriptTab(
       recording({ transcriptionStatus: 'done', currentTranscriptId: 't-1' }),
       transcript(),
@@ -589,8 +626,34 @@ describe('이 모듈이 하지 않는 일', () => {
       'language',
       'lines',
       'model',
+      'redo',
+      'redoNotice',
       'transcriptionLabel',
     ]);
+  });
+
+  /**
+   * 위 검사는 키 목록이라 새 필드가 생길 때마다 함께 고쳐야 한다. **정말 지켜야 하는 것**은
+   * 목록이 아니라 "고치거나 지우는 수단이 없다"는 것이므로, 그것을 따로 못박는다.
+   */
+  it('어떤 상태에도 편집·삭제를 뜻하는 수단이 없다', () => {
+    const forbidden = /delete|remove|edit|update|overwrite|replace|discard/i;
+
+    const views = [
+      transcriptTab(recording({ transcriptionStatus: 'none' }), null, status()),
+      transcriptTab(
+        recording({ transcriptionStatus: 'done', currentTranscriptId: 't-1' }),
+        transcript(),
+        status({ state: 'done', recordingId: 'r-1', transcriptId: 't-1' }),
+      ),
+      transcriptTab(recording({ transcriptionStatus: 'failed' }), null, status()),
+    ];
+
+    for (const view of views) {
+      for (const key of Object.keys(view)) {
+        expect(key, `${view.kind}.${key}`).not.toMatch(forbidden);
+      }
+    }
   });
 
   it('완료 상태가 저장된 값을 그대로 옮긴다', () => {

@@ -47,11 +47,14 @@ pub mod audio_input;
 pub mod chunking;
 pub mod collapse;
 pub mod engine;
+pub mod gain;
+pub mod live;
 pub mod model;
 pub mod parse;
 pub mod progress;
 pub mod run;
 pub mod testing;
+pub mod vad;
 pub mod whisper;
 
 pub use audio_input::{

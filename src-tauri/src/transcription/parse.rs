@@ -264,7 +264,13 @@ fn to_milliseconds(centiseconds: i64, raw_index: usize, field: &str) -> Result<i
 /// 살아남은 segment의 텍스트를 한 칸 공백으로 잇는다 ([`Transcription::raw_text`]).
 ///
 /// 버려진 segment는 여기에 도달하지 않으므로 빈 자리가 이중 공백을 만들지 않는다.
-fn join_text(segments: &[TranscriptSegment]) -> String {
+///
+/// **이 규칙은 여기 한 곳에만 있다.** `raw_text`는 언제나 *살아남은 segment*에서 나오며,
+/// segment가 뒤에서 더 걸러지면(`run.rs`의 붕괴 차단·축약) `raw_text`도 **같은 함수로**
+/// 다시 만들어야 한다. 그러지 않으면 둘이 어긋난다 — 2026-09-08에 실제로 어긋났다:
+/// 저장된 `raw_text`에 24회 있던 되풀이가 `segments`에는 3회뿐이었고,
+/// `raw_text`를 읽는 AI Note만 차단되지 않은 텍스트를 받았다.
+pub(super) fn join_text(segments: &[TranscriptSegment]) -> String {
     let mut raw_text = String::new();
     for segment in segments {
         if !raw_text.is_empty() {

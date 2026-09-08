@@ -925,3 +925,141 @@ fn a_recording_whose_audio_file_is_gone_fails_without_touching_the_record() {
     );
     assert!(fixture.transcripts().is_empty());
 }
+
+// --- raw_text는 차단·축약을 지난 segment에서 나온다 (2026-09-08) --------------------------
+
+/// 2026-09-08에 실제로 나온 되풀이. 회의 전사 한가운데에서 같은 문장이 이어졌다.
+///
+/// 차단 임계값(`MAX_CONSECUTIVE_REPEATS = 3`)을 **넘는** 개수를 만들어, 차단이 실제로
+/// 무언가를 지우게 한다. 지우고 나면 `raw_text`도 함께 줄어야 한다.
+fn repeated_run() -> RawTranscription {
+    let mut segments: Vec<RawSegment> = (0..8)
+        .map(|index| thirty_second_segment(index, "공유 작업으로 다시 리셋을 하는 게"))
+        .collect();
+    segments.push(thirty_second_segment(8, "역할이 뭐 없겠네."));
+
+    RawTranscription {
+        language: Some("ko".to_owned()),
+        segments,
+    }
+}
+
+/// **2026-09-08의 회귀 테스트다.**
+///
+/// 저장된 `raw_text`에 되풀이가 24회 남아 있었는데 `segments`에는 3회뿐이었다.
+/// `run`이 segment만 거르고 `raw_text`는 엔진이 준 것(차단 전)을 그대로 저장했기 때문이다.
+/// `raw_text`를 읽는 것은 AI Note(`ai/run.rs`)이므로, **AI만 정제되지 않은 텍스트를 받았다.**
+///
+/// 이 검사는 **둘이 어긋나면 실패한다.**
+#[test]
+fn raw_text_is_rebuilt_from_the_segments_that_survived_blocking() {
+    let mut fixture = Fixture::new("raw-text-after-blocking");
+    let engine = StubEngine::returning(repeated_run());
+
+    let completed = fixture.transcribe(&engine).expect("전사가 성공해야 한다");
+
+    assert!(
+        completed.removed_segments > 0,
+        "이 fixture는 차단이 실제로 동작해야 의미가 있다"
+    );
+
+    let transcript = &completed.transcript;
+    let joined = transcript
+        .segments
+        .iter()
+        .map(|segment| segment.text.as_str())
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    assert_eq!(
+        transcript.raw_text, joined,
+        "raw_text는 살아남은 segment를 이은 것과 같아야 한다"
+    );
+
+    let repeats = transcript.raw_text.matches("공유 작업으로 다시 리셋을 하는 게").count();
+    assert_eq!(
+        repeats,
+        transcript
+            .segments
+            .iter()
+            .filter(|segment| segment.text.contains("공유 작업으로 다시 리셋을 하는 게"))
+            .count(),
+        "raw_text에 segment보다 많은 되풀이가 남아서는 안 된다"
+    );
+}
+
+/// 저장된 것에 대해서도 같은 규칙이 성립한다 — 메모리 안의 값만 맞는 것으로는 부족하다.
+#[test]
+fn the_stored_raw_text_matches_the_stored_segments() {
+    let mut fixture = Fixture::new("raw-text-stored");
+    let engine = StubEngine::returning(repeated_run());
+
+    let completed = fixture.transcribe(&engine).expect("전사가 성공해야 한다");
+
+    let stored = fixture.transcript(&completed.transcript.id);
+
+    let joined = stored
+        .segments
+        .iter()
+        .map(|segment| segment.text.as_str())
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    assert_eq!(stored.raw_text, joined);
+}
+
+// --- 낮은 입력을 전사 전에 키운다 (2026-09-08) -------------------------------------------
+
+/// **이 검사가 이 기능에서 가장 중요하다** — 증폭은 파생 버퍼에만 일어나고
+/// **녹음 파일은 한 바이트도 바뀌지 않는다** (INV-1).
+///
+/// 2026-09-08에 사람이 손으로 증폭할 때도 원본은 읽기만 했다. 그 규칙을 제품 안으로
+/// 옮기면서 깨뜨리면, 사용자가 실제로 녹음한 소리를 앱이 되돌릴 수 없게 고치는 것이 된다.
+#[test]
+fn amplifying_the_transcription_input_never_touches_the_recording_file() {
+    let mut fixture = Fixture::new("gain-leaves-original");
+    let engine = StubEngine::returning(first_run());
+
+    let before = fs::read(&fixture.audio_path).expect("원본을 읽을 수 있어야 한다");
+
+    fixture.transcribe(&engine).expect("전사가 성공해야 한다");
+
+    let after = fs::read(&fixture.audio_path).expect("원본이 그대로 있어야 한다");
+    assert_eq!(before, after, "녹음 파일이 바뀌었다 (INV-1 위반)");
+}
+
+/// 낮게 녹음된 fixture는 실제로 키워진다. **결정이 값으로 남는다.**
+#[test]
+fn a_quiet_recording_is_amplified_and_says_by_how_much() {
+    let mut fixture = Fixture::new("gain-applied");
+    let engine = StubEngine::returning(first_run());
+
+    let completed = fixture.transcribe(&engine).expect("전사가 성공해야 한다");
+
+    // fixture의 WAV는 진폭이 아주 작다(0..128 counts) — 목표(-23 dBFS)보다 훨씬 낮다.
+    assert!(
+        completed.gain.changed(),
+        "낮은 입력이 키워져야 한다: {:?}",
+        completed.gain
+    );
+    assert!(completed.gain.gain_db > 0.0);
+    assert!(
+        completed.gain.after_dbfs > completed.gain.before_dbfs,
+        "{:?}",
+        completed.gain
+    );
+}
+
+/// 증폭이 전사 결과를 바꾸지 않는다는 것이 아니라, **경로가 그대로 지난다**는 것.
+/// 저장·current 갱신·상태 전이는 증폭이 있든 없든 같다.
+#[test]
+fn amplification_does_not_change_what_gets_stored() {
+    let mut fixture = Fixture::new("gain-stored");
+    let engine = StubEngine::returning(first_run());
+
+    let completed = fixture.transcribe(&engine).expect("전사가 성공해야 한다");
+    let stored = fixture.transcript(&completed.transcript.id);
+
+    assert_eq!(stored.segments.len(), 2);
+    assert_eq!(stored.raw_text, completed.transcript.raw_text);
+}

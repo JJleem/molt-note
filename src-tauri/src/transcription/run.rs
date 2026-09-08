@@ -80,6 +80,7 @@ use crate::domain::{
 use super::audio_input;
 use super::collapse::{self, CollapseAssessment, CollapseVerdict};
 // 반복 차단은 전사 모듈의 공개 표면에서 온다 — 그 규칙이 어느 파일에 사는지 이 모듈은 모른다.
+use super::gain;
 use super::{block_consecutive_repeats, MAX_CONSECUTIVE_REPEATS};
 use super::engine::{output_unusable, LanguageChoice, TranscriptionEngine};
 use super::model;
@@ -98,7 +99,10 @@ pub struct ModelChoice<'a> {
 }
 
 /// 성공한 전사 한 건의 결과.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// `Eq`가 아닌 것은 [`gain::Applied`]가 dBFS를 `f64`로 갖기 때문이다 — 잰 값이지
+/// 동치를 따질 값이 아니다.
+#[derive(Debug, Clone, PartialEq)]
 pub struct Completed {
     /// 방금 **추가된** Transcript. 이 시점에 이미 current다 (§7.2).
     pub transcript: Transcript,
@@ -111,6 +115,11 @@ pub struct Completed {
     /// [`collapse::assess`]가 본 수치는 **차단 전** 열의 것이므로 저장된 segment 수보다 크다.
     /// 그 차이가 이 값이다 — 남기지 않으면 다음 사람이 두 수치의 차이를 설명하지 못한다.
     pub removed_segments: usize,
+    /// 전사 입력을 얼마나 키웠는가. 키우지 않았으면 `gain_db`가 `0.0`이다.
+    ///
+    /// **값으로 남겨야 비교할 수 있다** — 같은 녹음을 다시 돌렸을 때 무엇이 달랐는지
+    /// 말할 수 있어야 하고, 2026-09-08의 실측이 정확히 그 비교였다.
+    pub gain: gain::Applied,
     /// segment **안쪽**의 되풀이를 줄여서 텍스트가 짧아진 segment 수 (§20.6.1의 빈자리).
     pub shortened_segments: usize,
 }
@@ -173,7 +182,15 @@ fn attempt(
     let model = model::resolve(model_choice.models_dir, model_choice.configured)?;
 
     // 원본은 읽기 전용으로만 열린다 ([`audio_input::load`] · INV-1).
-    let input = audio_input::load(Path::new(&recording.audio_path))?;
+    let mut input = audio_input::load(Path::new(&recording.audio_path))?;
+
+    // **낮게 녹음된 오디오를 여기서 키운다** (`super::gain` · 2026-09-08의 실측).
+    //
+    // 만지는 것은 방금 메모리에 만든 파생 버퍼뿐이며 **녹음 파일은 손대지 않는다** (INV-1).
+    // 이미 충분한 녹음은 지나가고, 소리가 없는 것은 키우지 않는다 — 무음을 목표까지
+    // 끌어올리면 잡음만 커지고 그것이 whisper가 자막 상투구를 뱉는 조건이다.
+    let gain = gain::normalize(&mut input.samples);
+
     let raw = engine.transcribe(&input, &model, language)?;
 
     // 파생 입력은 여기서 쓸모를 다한다. 1시간짜리 녹음이면 수백 MB이므로 영속화 전에
@@ -235,6 +252,15 @@ fn attempt(
     // 만들지 않으며, 이 값은 Transcript와 함께만 존재한다.
     let transcription_ms = elapsed_ms(started);
 
+    // **차단·축약 뒤의 segment에서 다시 만든다.** `parse`가 세운 규칙과 같은 함수를 쓴다 —
+    // 규칙을 두 번 정의하지 않는다 (`parse::join_text`).
+    //
+    // 2026-09-08까지 `raw_text`는 `transcription.raw_text`, 즉 **차단 전** segment로 만든
+    // 값이었다. 그래서 차단이 지운 되풀이가 `raw_text`에 그대로 남았고, `raw_text`를 읽는
+    // `ai/run.rs`만 정제되지 않은 텍스트를 받았다 (실측: 되풀이 24회 vs segments 3회 ·
+    // 1,201자 차이). `export/ai_request.rs`는 segment를 쓰므로 영향이 없었다.
+    let raw_text = super::parse::join_text(&segments);
+
     let transcript = Transcript {
         id: TranscriptId::new(store::new_id(connection)?),
         recording_id: recording.id.clone(),
@@ -249,7 +275,7 @@ fn attempt(
                 text: segment.text,
             })
             .collect(),
-        raw_text: transcription.raw_text,
+        raw_text,
         created_at: store::now(connection)?,
         // provenance는 실제로 쓴 것을 적는다 — 설정 값이 아니라 해석된 모델 파일의 이름이다
         // (§7 · ADR-0007 §8.2.4).
@@ -271,6 +297,7 @@ fn attempt(
         anomalies: transcription.anomalies,
         removed_segments,
         shortened_segments,
+        gain,
     })
 }
 

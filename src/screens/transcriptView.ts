@@ -143,8 +143,16 @@ export function progressLabel(progress: number | null): string | null {
  * (`RecordingDetailScreen`의 `startTranscription`).
  */
 export interface TranscriptAction {
-  /** 처음 시작하는 것인가, 실패한 뒤 다시 하는 것인가. 사용자에게는 다른 상황이다. */
-  readonly kind: 'start' | 'retry';
+  /**
+   * 처음 시작하는가 · 실패한 뒤 다시 하는가 · **이미 있는 전사를 두고 다시 하는가.**
+   * 사용자에게는 셋 다 다른 상황이다.
+   *
+   * `redo`가 나머지 둘과 다른 점은 **잃을 것이 있다고 오해할 수 있다**는 것이다.
+   * 실제로는 잃지 않는다 — Transcript는 immutable이고 다시 돌리면 **새 Transcript가
+   * 추가된다** (INV-2 · `run`의 `a_second_successful_run_adds_a_transcript_instead_of_updating_the_first`).
+   * 그 사실을 문구가 말해야 한다.
+   */
+  readonly kind: 'start' | 'retry' | 'redo';
   /** 버튼에 적히는 말. */
   readonly label: string;
   readonly recordingId: string;
@@ -238,6 +246,16 @@ export type TranscriptTabView =
        * 모르는 것을 지어내지 않는 규칙은 {@link language}와 같다.
        */
       readonly transcriptionLabel: string | null;
+      /**
+       * 같은 녹음을 **다시 전사한다.**
+       *
+       * 2026-09-08까지 이 자리에 수단이 없었다. 모델을 바꾸거나 조건이 달라져 다시 돌리고
+       * 싶을 때 화면에서 할 수 있는 일이 없었고, 그래서 저장소에 레코드를 직접 넣어
+       * 우회했다 — **제품이 만든 적 없는 레코드가 DB에 생겼다.**
+       */
+      readonly redo: TranscriptAction;
+      /** 다시 돌려도 지금 것을 잃지 않는다는 사실 (INV-2). 버튼 옆에 그대로 놓인다. */
+      readonly redoNotice: string;
     }
   | {
       readonly kind: 'failed';
@@ -262,6 +280,16 @@ export type TranscriptTabView =
     };
 
 /** 화면을 열었을 때. 아직 아무것도 읽지 못했다. */
+/**
+ * 다시 돌려도 **지금 보고 있는 전사를 잃지 않는다**는 사실.
+ *
+ * Transcript는 immutable이므로 다시 돌리면 새 것이 추가되고 그것이 current가 된다.
+ * 이 문장이 없으면 사용자는 버튼을 누르기를 망설이고, 그래서 2026-09-08처럼 저장소를
+ * 직접 건드리는 우회가 다시 생긴다.
+ */
+export const TRANSCRIPTION_REDO_NOTICE =
+  'Running it again adds a new transcript and shows that one. This transcript is kept.';
+
 export const LOADING_TRANSCRIPT_TAB: TranscriptTabView = { kind: 'loading' };
 
 /** 아직 전사한 적이 없다. **오류가 아니라 정상 상태다** (§7 · INV-8). */
@@ -392,6 +420,8 @@ export function transcriptTab(
       model: transcript.model,
       // 받은 문장을 그대로 나른다. 없으면 없는 채로 나른다 — 여기서 만들지 않는다.
       transcriptionLabel: transcript.transcriptionLabel,
+      redo: redoTranscript(recording.id),
+      redoNotice: TRANSCRIPTION_REDO_NOTICE,
     };
   }
   if (recording.currentTranscriptId !== null) {
@@ -482,4 +512,15 @@ function failureCause(failure: Failure | null): TranscriptFailureCause {
 /** 수동으로 전사를 시작하는 동작. 자동 전사 설정과 무관하게 언제나 할 수 있다 (요구 2). */
 function startTranscript(recordingId: string): TranscriptAction {
   return { kind: 'start', label: 'Start transcription', recordingId };
+}
+
+/**
+ * 이미 전사된 녹음을 **다시** 전사하는 동작.
+ *
+ * 라벨이 `Transcribe again`인 이유는 이것이 **덮어쓰기가 아니기 때문이다.** `Re-transcribe`나
+ * `Redo`는 지금 것을 버린다는 인상을 주는데, 실제로는 새 Transcript가 추가되고 그것이
+ * current가 된다. 앞의 것은 그대로 남는다 (INV-2).
+ */
+function redoTranscript(recordingId: string): TranscriptAction {
+  return { kind: 'redo', label: 'Transcribe again', recordingId };
 }

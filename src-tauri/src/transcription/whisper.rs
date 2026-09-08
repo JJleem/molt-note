@@ -110,7 +110,9 @@
 //! ADR-0007 §4.2가 B를 고른 이유이기 때문이다. 사람이 옮겨 둔 파일이 없어도 저장소가 엔진을
 //! 재현한다.
 
-use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
+use whisper_rs::{
+    FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters, WhisperVadParams,
+};
 
 use crate::domain::Failure;
 
@@ -213,6 +215,24 @@ impl TranscriptionEngine for WhisperEngine {
                 .with_detail(error)
             })?;
 
+        // **VAD 모델을 모델 파일 옆에서 찾는다.** `model::resolve`가 상대 이름을 모델
+        // 디렉터리 안에서 풀므로 보통은 그 디렉터리이고, 사용자가 절대 경로로 모델을 다른
+        // 자리에 뒀다면 VAD 모델도 그 옆에 있는 것이 규칙이다 — 모델을 함께 둔다.
+        //
+        // **없으면 없는 대로 간다.** 그때의 실행은 2026-09-08 이전과 한 글자도 다르지 않다.
+        let vad = model
+            .path()
+            .parent()
+            .map(super::vad::find)
+            .unwrap_or(super::vad::VadChoice::Disabled);
+
+        // 경로가 UTF-8이 아니면 VAD를 켜지 않는다. **여기서 실패를 만들지 않는다** — VAD는
+        // 보강이지 전제가 아니며, 이것 때문에 전사가 멈추면 전보다 나빠진다.
+        let vad_path: Option<String> = vad
+            .path()
+            .and_then(|path| path.to_str())
+            .map(str::to_owned);
+
         // ① **어디서 자르는가는 여기서 정하지 않는다** (ADR-0007 §20.8). 넘기는 것은 프레임
         // 수와 샘플레이트뿐이고, 돌아오는 것은 구간과 오프셋이다 — 값도 규칙도 chunking에 있다.
         // 전체가 청크 하나에 들어가면 목록은 하나이며 지금까지와 완전히 같은 실행이 된다.
@@ -267,6 +287,29 @@ impl TranscriptionEngine for WhisperEngine {
             params.set_print_progress(false);
             params.set_print_realtime(false);
             params.set_print_timestamps(false);
+
+            // **무음을 디코더에 주지 않는다** (`super::vad` 문서 · 2026-09-08의 두 관측).
+            //
+            // ⚠️ **순서가 규칙이다.** `enable_vad(true)`는 경로가 설정돼 있지 않으면
+            // **panic한다** (`whisper_params.rs:823`). 경로를 먼저 넣고, 넣은 경우에만 켠다.
+            if let Some(path) = &vad_path {
+                params.set_vad_model_path(Some(path));
+                params.enable_vad(true);
+
+                // 기본값에서 **두 가지만** 안전한 쪽으로 옮긴다. 나머지는 whisper.cpp가 정한
+                // 값 그대로다 — 재본 적 없는 값을 이 앱이 고르지 않는다.
+                //
+                // 이 Phase의 가장 큰 위험은 **무음 억제가 실제 발화를 함께 지우는 것**이다.
+                // 아래 둘은 그 위험을 줄이는 방향(오디오를 더 남기는 쪽)으로만 움직인다.
+                let mut vad_params = WhisperVadParams::default();
+                // 침묵이 이만큼은 이어져야 발화가 끝난 것으로 본다 (기본 100ms).
+                // 말 사이의 짧은 숨이 발화를 끊지 않게 한다 — 끊길수록 잘려 나갈 위험이 커진다.
+                vad_params.set_min_silence_duration(500);
+                // 발화 앞뒤로 이만큼 남긴다 (기본 30ms). 말의 첫 소리와 끝 소리가 잘리지 않게
+                // 한다. 문제였던 것은 **몇 분짜리** 무음이지 0.2초가 아니다.
+                vad_params.set_speech_pad(200);
+                params.set_vad_params(vad_params);
+            }
 
             // **입력은 이미 16 kHz mono f32다** (ADR-0007 §9 · audio_input.rs). 여기서 오디오를
             // 다시 만지지 않고, 파생 파일도 만들지 않는다 — 넘기는 것은 메모리 위의 슬라이스,

@@ -581,3 +581,66 @@ fn ch4_a_run_of_repeats_that_crosses_a_chunk_boundary_is_still_one_run() {
     // 살아남은 문장의 시각은 손대지 않는다 — 차단은 지우기만 한다.
     assert_eq!(blocked.segments[2].start_ms, segments[2].start_ms);
 }
+
+// --- VAD: 켜는 순서와 "없어도 된다"는 것 (2026-09-08) ------------------------------------
+
+/// VAD를 켜는 순서는 실행 시점에만 드러나므로 **소스에서 고정한다.**
+const WHISPER_SOURCE: &str = include_str!("../src/transcription/whisper.rs");
+
+/// `enable_vad(true)`는 `vad_model_path`가 없으면 **panic한다**
+/// (`whisper-rs 0.16.0` · `whisper_params.rs:823`).
+///
+/// panic은 Gate가 잡아 주지 않는 자리(실행 시점)에서 앱 전체를 죽인다. 그래서 **순서를
+/// 소스에서 고정한다**: 경로 설정이 켜기보다 먼저 나와야 하고, 켜는 것은 경로가 있을 때뿐이다.
+#[test]
+fn the_vad_model_path_is_always_set_before_vad_is_enabled() {
+    let source = WHISPER_SOURCE;
+
+    let set_path = source
+        .find("params.set_vad_model_path(")
+        .expect("VAD 모델 경로를 설정하는 자리가 있어야 한다");
+    let enable = source
+        .find("params.enable_vad(")
+        .expect("VAD를 켜는 자리가 있어야 한다");
+
+    assert!(
+        set_path < enable,
+        "set_vad_model_path 가 enable_vad 보다 먼저 와야 한다 — 아니면 panic한다"
+    );
+}
+
+/// 켜는 것은 **경로가 있을 때뿐**이다. 무조건 켜면 모델 파일이 없는 기기에서 panic한다.
+#[test]
+fn vad_is_only_enabled_when_a_path_was_found() {
+    let source = WHISPER_SOURCE;
+    let enable = source
+        .find("params.enable_vad(")
+        .expect("VAD를 켜는 자리가 있어야 한다");
+
+    let before = &source[..enable];
+    let guard = before
+        .rfind("if let Some(path) = &vad_path {")
+        .expect("경로가 있을 때만 켜는 분기 안에 있어야 한다");
+
+    // 그 분기가 닫히기 전에 enable_vad 가 온다.
+    let closing = source[guard..].find("\n            }").map(|at| guard + at);
+    assert!(
+        closing.is_none_or(|closing| enable < closing),
+        "enable_vad 가 경로 분기 밖에 있다"
+    );
+}
+
+/// VAD 모델이 없는 것은 **실패가 아니다.** 없으면 전사는 지금까지처럼 그대로 돈다.
+///
+/// 이 규칙이 깨지면 모델을 받지 않은 기기에서 전사가 통째로 실패한다 — 2026-09-08 이전보다
+/// 나빠진다.
+#[test]
+fn a_missing_vad_model_does_not_fail_transcription() {
+    use molt_note_lib::transcription::vad::{self, VadChoice};
+
+    let empty = std::env::temp_dir().join("molt-note-vad-absent-for-sure-9f2c1a");
+    let _ = std::fs::remove_dir_all(&empty);
+
+    // Result 가 아니라 VadChoice 다 — 없는 것이 실패로 표현될 수 없는 형태다.
+    assert_eq!(vad::find(&empty), VadChoice::Disabled);
+}
