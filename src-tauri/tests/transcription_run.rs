@@ -252,6 +252,18 @@ fn collapsed_run() -> RawTranscription {
     }
 }
 
+/// 사람이 말하는 속도의 segment 하나 — 3초에 열 글자 안팎이다. **센티초다**.
+///
+/// 정상 전사를 세울 때 쓴다. 창을 채운 상투구(`hallucination`)와 갈리는 것이 이 속도다.
+fn speaking_segment(index: i64, text: &str) -> RawSegment {
+    let start_centiseconds = index * 300;
+    RawSegment {
+        start_centiseconds,
+        end_centiseconds: start_centiseconds + 298,
+        text: Some(format!(" {text}")),
+    }
+}
+
 /// 관측된 붕괴처럼 경계가 정확히 30초인 segment 하나. **센티초다** (ADR-0007 §10).
 fn thirty_second_segment(index: i64, text: &str) -> RawSegment {
     let start_centiseconds = index * 3_000;
@@ -387,7 +399,14 @@ fn the_timestamps_are_not_off_by_a_factor_of_ten_or_a_hundred() {
         segments: vec![RawSegment {
             start_centiseconds: 100,
             end_centiseconds: 6_000,
-            text: Some("1초에서 60초까지".to_owned()),
+            // **59초짜리 segment에 아홉 글자면 그것은 환각의 모양이다** — 창을 채웠는데
+            // 말이 없는 것이고, `hallucination`이 그런 것을 지운다 (2026-09-08).
+            // 이 테스트가 지키는 것은 단위 변환이지 그 규칙이 아니므로, 시각은 그대로 두고
+            // 말의 속도만 사람이 말한 것처럼 만든다.
+            text: Some(
+                "1초에서 60초까지 이어지는 문장이며 이 자리는 단위 변환을 확인하는 자리다.                  백 센티초가 일 초이고 육천 센티초가 육십 초라는 것 하나만 본다."
+                    .to_owned(),
+            ),
         }],
     });
 
@@ -607,11 +626,15 @@ fn a_collapsed_transcription_reaches_the_user_saying_what_went_wrong_and_by_how_
 fn a_transcription_that_merely_repeats_a_little_is_still_stored() {
     // 붕괴 판정이 정상 전사를 버리기 시작하면 그 대가는 사람이 실제로 녹음한 회의다
     // (ADR-0007 §18.3). 고유 94% · 최다 7%는 2026-09-05에 사람이 쓸 수 있다고 판정한 값이다.
+    //
+    // **30초짜리 segment를 쓰지 않는다** (2026-09-08). 그 모양은 창을 채웠는데 말이 없는
+    // 것이고 `hallucination`이 지운다 — 여기서 세우려는 것은 *정상 전사*이므로 사람이
+    // 말하는 속도로 만든다. 붕괴한 출력을 세우는 위 테스트는 그 모양이 맞으므로 그대로 둔다.
     let mut fixture = Fixture::new("usable-with-repeats");
     let mut segments: Vec<RawSegment> = (0..94)
-        .map(|index| thirty_second_segment(index, &format!("문장 {index}")))
+        .map(|index| speaking_segment(index, &format!("사람이 말한 문장 {index}")))
         .collect();
-    segments.extend((94..100).map(|index| thirty_second_segment(index, "문장 0")));
+    segments.extend((94..100).map(|index| speaking_segment(index, "사람이 말한 문장 0")));
     let engine = StubEngine::returning(RawTranscription {
         language: Some("ko".to_owned()),
         segments,
@@ -1062,4 +1085,65 @@ fn amplification_does_not_change_what_gets_stored() {
 
     assert_eq!(stored.segments.len(), 2);
     assert_eq!(stored.raw_text, completed.transcript.raw_text);
+}
+
+// --- 창을 채운 상투구를 지운다 (2026-09-08) ----------------------------------------------
+
+/// 2026-09-08에 실제로 나온 출력. 30초 창마다 상투구 한 줄이 붙었다.
+///
+/// **사이에 실제 발화를 끼워 둔다** — 그래야 이것이 연속 반복 차단으로 잡히는 것이 아니라
+/// 말의 속도로 잡힌다는 것이 드러난다.
+fn window_boilerplate_run() -> RawTranscription {
+    let mut segments = Vec::new();
+    for index in 0..4 {
+        let start = index * 6_000;
+        // 30초 창을 통째로 채운 11자 — 0.37 자/초다.
+        segments.push(RawSegment {
+            start_centiseconds: start,
+            end_centiseconds: start + 3_000,
+            text: Some(" 한글자막 by 한효정".to_owned()),
+        });
+        // 그 사이의 실제 발화. 되풀이 묶음이 성립하지 않게 한다.
+        segments.push(RawSegment {
+            start_centiseconds: start + 3_000,
+            end_centiseconds: start + 3_200,
+            text: Some(format!(" 실제로 말한 문장 {index}")),
+        });
+    }
+
+    RawTranscription {
+        language: Some("ko".to_owned()),
+        segments,
+    }
+}
+
+/// **2026-09-08의 회귀 테스트다.**
+///
+/// VAD를 켜고 같은 파일을 다시 돌려도 이 구간은 남았다 — 그 10분은 디지털 무음이 아니라
+/// 알아들을 수 없이 작은 소리이고, VAD는 거기서 음성 활동을 찾아낸다. 지우는 근거는
+/// **말의 속도**이며, 그 규칙이 저장 경로에 실제로 닿아 있어야 한다.
+#[test]
+fn boilerplate_that_filled_a_whole_window_never_reaches_the_stored_transcript() {
+    let mut fixture = Fixture::new("window-boilerplate");
+    let engine = StubEngine::returning(window_boilerplate_run());
+
+    let completed = fixture.transcribe(&engine).expect("전사가 성공해야 한다");
+    let stored = fixture.transcript(&completed.transcript.id);
+
+    assert!(
+        !stored.raw_text.contains("한글자막"),
+        "창을 채운 상투구가 저장됐다: {}",
+        stored.raw_text
+    );
+    for segment in &stored.segments {
+        assert!(!segment.text.contains("한글자막"), "{:?}", segment.text);
+    }
+
+    // 사이의 실제 발화는 전부 남는다 — 지우는 것이 말한 것을 함께 지우면 안 된다.
+    assert_eq!(stored.segments.len(), 4);
+    for index in 0..4 {
+        assert!(stored.raw_text.contains(&format!("실제로 말한 문장 {index}")));
+    }
+
+    assert!(completed.removed_segments >= 4, "지운 개수가 값으로 남아야 한다");
 }

@@ -81,6 +81,7 @@ use super::audio_input;
 use super::collapse::{self, CollapseAssessment, CollapseVerdict};
 // 반복 차단은 전사 모듈의 공개 표면에서 온다 — 그 규칙이 어느 파일에 사는지 이 모듈은 모른다.
 use super::gain;
+use super::hallucination;
 use super::{block_consecutive_repeats, MAX_CONSECUTIVE_REPEATS};
 use super::engine::{output_unusable, LanguageChoice, TranscriptionEngine};
 use super::model;
@@ -229,8 +230,16 @@ fn attempt(
     //
     // 2026-09-07까지 이 함수를 부르는 제품 코드가 없었다. 모듈과 테스트만 있었고, 그래서
     // Phase 5.8이 만든 차단은 실사용에서 한 번도 동작하지 않았다.
-    let blocked = block_consecutive_repeats(&transcription.segments);
-    let removed_segments = blocked.removed_count;
+    // **창을 채운 상투구를 먼저 지운다** (`super::hallucination` · 2026-09-08).
+    //
+    // 반복 차단보다 앞이다: 이 상투구는 30초 창마다 하나씩 나오므로 *이어진* 것처럼 보이지만,
+    // 사이에 다른 문장이 끼면 반복 차단이 묶음을 성립시키지 못한다. 판정 근거가 다르므로
+    // (하나는 되풀이, 하나는 말의 속도) 서로를 대신하지 않고 순서만 정한다.
+    let despoken = hallucination::drop_windows_without_speech(&transcription.segments);
+    let removed_hallucinations = despoken.removed_count;
+
+    let blocked = block_consecutive_repeats(&despoken.segments);
+    let removed_segments = blocked.removed_count + removed_hallucinations;
 
     // segment **안쪽**의 되풀이는 위 차단이 잡지 못한다 — 묶음이 성립하지 않기 때문이다
     // (§20.6.1). "엉덩이 × 13"이 한 segment였던 자리다.

@@ -48,6 +48,7 @@ pub mod chunking;
 pub mod collapse;
 pub mod engine;
 pub mod gain;
+pub mod hallucination;
 pub mod live;
 pub mod model;
 pub mod parse;
