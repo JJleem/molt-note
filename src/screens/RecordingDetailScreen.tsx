@@ -8,6 +8,7 @@ import {
   getNotionSync,
   getRecording,
   getTranscript,
+  renameRecording,
   getTranscriptText,
   listAiNotes,
   listMissingAudio,
@@ -32,6 +33,7 @@ import type {
   TranscriptionStatus,
 } from '../ipc/types';
 // 이 앱에서 clipboard에 쓰는 유일한 경로 (R-4 · INV-10). 실패는 던져지지 않고 값으로 온다.
+import { toFailure, type Failure } from '../ipc/failure';
 import { copyText } from '../platform/clipboard';
 import {
   NO_AI_EXPORT_ATTEMPT,
@@ -202,6 +204,18 @@ const NOTION_REFRESH_MS = 2_000;
 export function RecordingDetailScreen({ route, goBack }: ScreenProps) {
   const [tab, setTab] = useState<Tab>('Transcript');
   const [view, setView] = useState<RecordingDetailView>(LOADING_RECORDING_DETAIL);
+
+  /**
+   * 제목 고치기 (2026-09-08).
+   *
+   * **고치는 것은 제목 하나다** — 오디오도 Transcript도 AI 노트도 그대로다 (INV-1 · INV-2).
+   * 저장한 뒤에는 화면이 자기가 보낸 값으로 상태를 만들지 않고 **저장소가 돌려준 레코드**를
+   * 쓴다 (`update_settings`가 세운 규칙과 같다).
+   */
+  const [renaming, setRenaming] = useState(false);
+  const [draftTitle, setDraftTitle] = useState('');
+  const [renameBusy, setRenameBusy] = useState(false);
+  const [renameTrouble, setRenameTrouble] = useState<Failure | null>(null);
   /** 레코드 그대로. 상세 표시는 {@link view}가 하고, 전사 상태 판단에는 이 값이 필요하다. */
   const [record, setRecord] = useState<Recording | null>(null);
   /** current Transcript (§7.2). 아직 읽지 못했거나 없으면 `null`이다. */
@@ -329,6 +343,53 @@ export function RecordingDetailScreen({ route, goBack }: ScreenProps) {
       current = false;
     };
   }, [recordingId, attempt]);
+
+  const startRename = () => {
+    if (view.kind !== 'playable' && view.kind !== 'audioMissing') {
+      return;
+    }
+    setDraftTitle(view.recording.title);
+    setRenameTrouble(null);
+    setRenaming(true);
+  };
+
+  /** 되돌리는 길. 고치다 만 값은 남기지 않는다. */
+  const cancelRename = () => {
+    setRenaming(false);
+    setRenameTrouble(null);
+  };
+
+  /**
+   * 바꾼 제목을 저장한다.
+   *
+   * **빈 값을 여기서 걸러 내지 않는다.** 무엇이 저장될 수 있는 값인지는 backend가 정하며
+   * 그 답도 §13의 실패로 온다 — 같은 규칙이 두 벌이 되지 않게 한다 (`saveToken`과 같다).
+   */
+  const commitRename = () => {
+    setRenameBusy(true);
+    setRenameTrouble(null);
+    renameRecording(recordingId ?? '', draftTitle).then(
+      (saved) => {
+        setRenameBusy(false);
+        if (saved === null) {
+          // 없는 녹음이다. 화면이 그 사실을 지어내지 않고 다시 읽게 둔다.
+          setRenaming(false);
+          return;
+        }
+        setRecord(saved);
+        setView((state) =>
+          state.kind === 'playable' || state.kind === 'audioMissing'
+            ? loadedRecordingDetail(saved.id, saved, [], recordingAudioSource)
+            : state,
+        );
+        setRenaming(false);
+      },
+      (error: unknown) => {
+        setRenameBusy(false);
+        setRenameTrouble(toFailure(error));
+      },
+    );
+  };
 
   // 화면을 열 때 한 번 물어본다 — 이 화면에 오기 전에 걸어 둔 전사가 돌고 있을 수 있다.
   useEffect(() => {
@@ -733,7 +794,52 @@ export function RecordingDetailScreen({ route, goBack }: ScreenProps) {
 
   return (
     <div className="screen">
-      <p className="detail__title">{recording.title}</p>
+      {/* 제목은 사람이 붙인 이름이므로 고칠 수 있다 (2026-09-08). 녹음을 정지할 때
+          비워 두면 자동 이름이 붙고, 그때까지는 그것을 바꿀 길이 없었다.
+
+          **고치는 것은 제목 하나다** — 오디오도 Transcript도 AI 노트도 그대로다
+          (INV-1 · INV-2). 그래서 이 자리에 경고를 두지 않는다. */}
+      {renaming ? (
+        <form
+          className="detail__rename"
+          onSubmit={(event) => {
+            event.preventDefault();
+            commitRename();
+          }}
+        >
+          <label className="field" htmlFor="recording-rename">
+            <span className="field__label">제목</span>
+            <input
+              id="recording-rename"
+              type="text"
+              className="input"
+              value={draftTitle}
+              autoFocus
+              onChange={(event) => setDraftTitle(event.currentTarget.value)}
+              onKeyDown={(event) => {
+                // 되돌리는 길을 키보드에도 둔다 — 실수로 들어온 사람이 갇히지 않게.
+                if (event.key === 'Escape') cancelRename();
+              }}
+            />
+          </label>
+          <button type="submit" className="btn btn--secondary" disabled={renameBusy}>
+            {renameBusy ? '저장하는 중…' : '제목 저장'}
+          </button>
+          <button type="button" className="btn btn--ghost" onClick={cancelRename}>
+            취소
+          </button>
+        </form>
+      ) : (
+        <div className="detail__title-row">
+          <p className="detail__title">{recording.title}</p>
+          <button type="button" className="btn btn--ghost" onClick={startRename}>
+            제목 고치기
+          </button>
+        </div>
+      )}
+      {renameTrouble !== null && (
+        <FailureNotice failure={renameTrouble} headline="제목을 바꾸지 못했다." />
+      )}
       <p className="hint">
         {recording.recordedAtLabel} · {recording.durationLabel}
       </p>

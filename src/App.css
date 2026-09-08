@@ -1405,3 +1405,28 @@ p.loading {
 .sidebar__working-line + .sidebar__working-line {
   margin-top: var(--space-1);
 }
+
+/*
+ * 제목과 그것을 고치는 자리 (2026-09-08).
+ *
+ * 제목이 여전히 이 화면에서 가장 먼저 읽히는 것이고, 고치는 수단은 그 옆에서 조용히
+ * 기다린다 — ghost 버튼인 것이 그 뜻이다.
+ */
+
+.detail__title-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+}
+
+.detail__rename {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.detail__rename .field {
+  flex: 1 1 240px;
+  margin: 0;
+}

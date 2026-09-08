@@ -398,6 +398,22 @@ impl Storage {
         Ok(store::delete_recording(&connection, &RecordingId::new(id))?)
     }
 
+    /// 제목을 바꾸고 **바뀐 레코드를 다시 읽어** 돌려준다.
+    ///
+    /// 화면이 자기가 보낸 값으로 상태를 만들지 않게 한다 — 저장소가 실제로 무엇을 갖게
+    /// 됐는지 그대로 받는다 (`update_settings`가 세운 규칙과 같다).
+    ///
+    /// 없는 id면 `None`이다. **없는 것을 고치지 못한 것은 실패가 아니다.**
+    pub fn rename_recording(&self, id: &str, title: &str) -> Result<Option<RecordingPayload>, Failure> {
+        let connection = self.connection()?;
+        let id = RecordingId::new(id);
+        if !store::rename_recording(&connection, &id, title, &store::now(&connection)?)? {
+            return Ok(None);
+        }
+        let view = store::load_recording_view(&connection, &id)?;
+        Ok(view.map(RecordingPayload::from))
+    }
+
     /// 저장된 설정을 돌려준다. 저장된 적이 없으면 기본값이다 (오류가 아니다).
     pub fn settings(&self) -> Result<SettingsPayload, Failure> {
         let connection = self.connection()?;
@@ -1370,4 +1386,29 @@ fn ai_credential_status() -> Result<AiCredentialStatusPayload, Failure> {
             .get(crate::platform::secret_store::SecretKey::AnthropicApiKey)?
             .is_some(),
     })
+}
+
+/// 녹음의 제목을 바꾼다 (2026-09-08).
+///
+/// **바뀌는 것은 제목 하나다.** 오디오 파일(INV-1) · Transcript(INV-2) · AI 노트 ·
+/// Notion 페이지는 그대로다 — 제목은 사람이 붙인 이름이지 녹음이 만든 사실이 아니며,
+/// 그래서 고칠 수 있어야 한다.
+///
+/// 빈 제목을 받지 않는다. 이름이 없는 녹음은 목록에서 구분되지 않고, 그 상태를
+/// 되돌릴 수단이 화면에 또 필요해진다.
+#[tauri::command(async)]
+pub fn rename_recording(
+    storage: State<'_, Storage>,
+    recording_id: String,
+    title: String,
+) -> Result<Option<RecordingPayload>, Failure> {
+    let title = title.trim();
+    if title.is_empty() {
+        return Err(Failure::permanent(
+            FailureKind::InvalidInput,
+            "녹음 제목이 비어 있다.",
+        ));
+    }
+
+    storage.rename_recording(&recording_id, title)
 }

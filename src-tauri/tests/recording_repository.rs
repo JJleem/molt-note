@@ -510,3 +510,66 @@ fn tests_never_write_outside_the_system_temp_directory() {
         "테스트는 실제 사용자 앱 데이터 디렉터리를 건드리지 않는다"
     );
 }
+
+// --- 제목 고치기 (2026-09-08) ------------------------------------------------------------
+
+/// **바뀌는 것은 제목과 `updated_at` 둘뿐이다.**
+///
+/// 제목은 사람이 붙인 이름이지 녹음이 만든 사실이 아니다. 그러나 그것을 고치면서 오디오
+/// 경로나 상태까지 함께 건드리면, 이름을 바꾸는 일이 녹음을 바꾸는 일이 된다.
+#[test]
+fn renaming_changes_the_title_and_nothing_else() {
+    let dir = TempDir::new("rename");
+    let connection = open(&dir);
+    let before = recording("r-1", "2026-09-08T00:00:00.000Z", 61_000);
+    store::insert_recording(&connection, &before).expect("저장할 수 있어야 한다");
+
+    let changed = store::rename_recording(
+        &connection,
+        &RecordingId::new("r-1"),
+        "실제로 붙인 이름",
+        "2026-09-08T01:00:00.000Z",
+    )
+    .expect("바꿀 수 있어야 한다");
+    assert!(changed);
+
+    let after = store::load_recording(&connection, &RecordingId::new("r-1"))
+        .expect("읽을 수 있어야 한다")
+        .expect("그 녹음이 있어야 한다");
+
+    assert_eq!(after.title, "실제로 붙인 이름");
+    assert_eq!(after.updated_at, "2026-09-08T01:00:00.000Z");
+
+    // 나머지는 하나도 바뀌지 않는다.
+    assert_eq!(after.audio_path, before.audio_path, "오디오 경로가 바뀌었다 (INV-1)");
+    assert_eq!(after.audio_format, before.audio_format);
+    assert_eq!(after.created_at, before.created_at, "만들어진 시각이 바뀌었다");
+    assert_eq!(after.duration_ms, before.duration_ms);
+    assert_eq!(after.current_transcript_id, before.current_transcript_id, "(INV-2)");
+    assert_eq!(after.transcription_status, before.transcription_status);
+    assert_eq!(after.ai_status, before.ai_status);
+    assert_eq!(after.notion_status, before.notion_status);
+}
+
+/// **없는 것을 고치지 못한 것은 실패가 아니다.** 다른 녹음도 건드리지 않는다.
+#[test]
+fn renaming_a_recording_that_is_not_there_changes_nothing() {
+    let dir = TempDir::new("rename-missing");
+    let connection = open(&dir);
+    store::insert_recording(&connection, &recording("r-1", "2026-09-08T00:00:00.000Z", 1_000))
+        .expect("저장할 수 있어야 한다");
+
+    let changed = store::rename_recording(
+        &connection,
+        &RecordingId::new("없는-id"),
+        "새 이름",
+        "2026-09-08T01:00:00.000Z",
+    )
+    .expect("실패가 아니다");
+
+    assert!(!changed);
+    let untouched = store::load_recording(&connection, &RecordingId::new("r-1"))
+        .expect("읽을 수 있어야 한다")
+        .expect("그대로 있어야 한다");
+    assert_eq!(untouched.title, "녹음 r-1");
+}

@@ -132,6 +132,7 @@ pub fn run() {
             commands::get_transcript,
             commands::create_recording,
             commands::delete_recording,
+            commands::rename_recording,
             commands::get_settings,
             commands::update_settings,
             commands::list_input_devices,

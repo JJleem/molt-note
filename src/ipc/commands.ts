@@ -577,3 +577,15 @@ export function deleteAiApiKey(): Promise<AiCredentialStatus> {
 export function aiApiKeyStatus(): Promise<AiCredentialStatus> {
   return call<AiCredentialStatus>('ai_api_key_status');
 }
+
+/**
+ * 녹음의 제목을 바꾼다 (2026-09-08).
+ *
+ * **바뀌는 것은 제목 하나다.** 오디오 파일도 Transcript도 AI 노트도 그대로다 —
+ * 제목은 사람이 붙인 이름이지 녹음이 만든 사실이 아니다.
+ *
+ * 없는 녹음이면 `null`이다. **없는 것을 고치지 못한 것은 실패가 아니다.**
+ */
+export function renameRecording(recordingId: string, title: string): Promise<Recording | null> {
+  return call<Recording | null>('rename_recording', { recordingId, title });
+}

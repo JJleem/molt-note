@@ -101,6 +101,9 @@ const REGISTERED_COMMANDS = [
   // 아래 'out of scope' 정규식이 `anthropic`·`claude` 같은 이름을 여전히 막는다.
   //
   // 값을 **읽는** command는 없다. 셋 다 저장 여부만 돌려준다 (INV-7).
+  // 녹음의 제목을 고친다 (2026-09-08). 제목은 사람이 붙인 이름이므로 고칠 수 있어야
+  // 한다 — 오디오도 Transcript도 이 이름과 무관하게 그대로다 (INV-1 · INV-2).
+  'rename_recording',
   'save_ai_api_key',
   'delete_ai_api_key',
   'ai_api_key_status',

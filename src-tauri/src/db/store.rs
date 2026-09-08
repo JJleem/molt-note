@@ -149,6 +149,31 @@ pub fn delete_recording(
     Ok(removed > 0)
 }
 
+/// Recording의 **제목만** 바꾼다 (2026-09-08).
+///
+/// 제목은 녹음을 정지할 때 정해지고, 그때 비워 두면 자동으로 붙은 이름이 그대로 남는다.
+/// 그것을 나중에 고칠 길이 없었다.
+///
+/// **이 함수가 만지는 것은 제목과 `updated_at` 둘뿐이다.** 오디오 파일도(INV-1),
+/// Transcript도(INV-2), 후처리 상태도 건드리지 않는다 — 제목은 사람이 붙인 이름이지
+/// 녹음이 만든 사실이 아니다.
+///
+/// 없는 id면 `false`다. **없는 것을 고치지 못한 것은 실패가 아니다.**
+pub fn rename_recording(
+    connection: &Connection,
+    id: &RecordingId,
+    title: &str,
+    updated_at: &str,
+) -> Result<bool, DatabaseError> {
+    let changed = connection
+        .execute(
+            "UPDATE recordings SET title = ?2, updated_at = ?3 WHERE id = ?1",
+            rusqlite::params![id.as_str(), title, updated_at],
+        )
+        .map_err(DatabaseError::Sql)?;
+    Ok(changed > 0)
+}
+
 /// Recording의 후처리 상태를 갱신한다 (§7). Transcript는 건드리지 않는다.
 pub fn update_recording_statuses(
     connection: &Connection,
