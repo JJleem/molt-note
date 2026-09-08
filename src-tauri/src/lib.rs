@@ -4,6 +4,7 @@ pub mod commands;
 pub mod db;
 pub mod domain;
 pub mod export;
+pub mod net;
 pub mod notion;
 pub mod platform;
 pub mod sync;
@@ -204,6 +205,9 @@ pub fn run() {
             commands::check_notion_connection,
             commands::save_notion_token,
             commands::delete_notion_token,
+            commands::save_ai_api_key,
+            commands::delete_ai_api_key,
+            commands::ai_api_key_status,
         ])
         .run(tauri::generate_context!());
 

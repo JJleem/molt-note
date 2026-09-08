@@ -222,6 +222,19 @@ pub trait HttpTransport: Send + Sync {
     fn send(&self, request: &HttpRequest<'_>) -> Result<HttpResponse, TransportError>;
 }
 
+/// 서버가 "이만큼 뒤에 다시 오라"고 말하는 표준 헤더의 이름.
+///
+/// **HTTP 표준이다** — Notion도 Anthropic도 429에서 이것을 쓴다.
+pub const RETRY_AFTER_HEADER: &str = "Retry-After";
+
+/// `Retry-After` 헤더 값을 정수 초로 읽는다. 읽을 수 없으면 `None`이다.
+///
+/// **날짜 형식은 읽지 않는다.** 이 저장소가 상대해 본 provider는 초를 보낸다.
+/// 지어낸 값으로 기다리는 것보다 모른다고 하는 편이 낫다.
+pub fn retry_after_seconds(header_value: &str) -> Option<u32> {
+    header_value.trim().parse::<u32>().ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

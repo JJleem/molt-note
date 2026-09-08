@@ -96,6 +96,14 @@ const payloadSource = readText('../src-tauri/src/commands/payload.rs');
  * 부분집합이 아니라 **정확히 같은 집합**을 요구한다.
  */
 const REGISTERED_COMMANDS = [
+  // AI provider 자격증명 (2026-09-08 · PRODUCT-SPEC §16.1). **이름이 벤더 중립이다** —
+  // 어떤 provider를 쓰는지는 설정 값이고, 그것을 아는 코드는 adapter 안에만 있다 (INV-9).
+  // 아래 'out of scope' 정규식이 `anthropic`·`claude` 같은 이름을 여전히 막는다.
+  //
+  // 값을 **읽는** command는 없다. 셋 다 저장 여부만 돌려준다 (INV-7).
+  'save_ai_api_key',
+  'delete_ai_api_key',
+  'ai_api_key_status',
   'list_recordings',
   'get_recording',
   'get_transcript',

@@ -41,6 +41,7 @@
 //! [`run`]은 이 조각들을 잇고 저장소에 닿는 유일한 자리다. 그 위(스레드 · command · 화면)와
 //! 그 아래(벤더)는 서로를 알지 않는다.
 
+pub mod anthropic;
 pub mod note;
 pub mod ollama;
 pub mod prompt;
@@ -99,15 +100,24 @@ pub fn provider_for(settings: &Settings) -> Option<Arc<dyn NoteAiProvider>> {
 
     // 알아볼 수 없는 식별자를 다른 provider로 바꿔 고르지 않는다 — 사용자가 고른 적 없는
     // provider에게 전사를 보내는 일이 추측으로 일어나서는 안 된다 (§12 · INV-9).
-    if chosen != ollama::PROVIDER_ID {
-        return None;
+    //
+    // **두 갈래가 됐다** (2026-09-08). 어느 쪽인지는 사용자가 고른 식별자가 정하며, 이
+    // 함수는 그 값을 해석할 뿐 기본값을 세우지 않는다.
+    match chosen {
+        ollama::PROVIDER_ID => Some(Arc::new(ollama::OllamaProvider::new(
+            settings.ai_base_url_or_default(),
+            settings.ai_model.clone().unwrap_or_default(),
+            Arc::new(ollama::UreqTransport::new()),
+        ))),
+        // **전사 텍스트가 기기 밖으로 나가는 갈래다** (`Locality::External`). 자격증명은
+        // 설정이 아니라 SecretStore에서 오므로 `ai_base_url`도 `ai_model`도 키를 담지 않는다.
+        anthropic::PROVIDER_ID => Some(Arc::new(anthropic::AnthropicProvider::new(
+            settings.ai_model.clone().unwrap_or_default(),
+            crate::platform::secret_store::app_secret_store(),
+            Arc::new(crate::net::UreqTransport::new()),
+        ))),
+        _ => None,
     }
-
-    Some(Arc::new(ollama::OllamaProvider::new(
-        settings.ai_base_url_or_default(),
-        settings.ai_model.clone().unwrap_or_default(),
-        Arc::new(ollama::UreqTransport::new()),
-    )))
 }
 
 #[cfg(test)]

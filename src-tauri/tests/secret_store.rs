@@ -145,14 +145,28 @@ fn the_error_type_has_no_room_for_a_value() {
 fn the_list_of_secrets_this_app_keeps_is_closed() {
     // ADR-0009 §10.1 · §10.6 — 임의의 문자열 키를 받지 않는다. 변형을 전부 나열하는 이
     // match는 자리가 하나 늘어나면 컴파일되지 않으므로, "언젠가 쓸지 모른다"는 이유로
-    // Cloud AI 자격증명 자리가 조용히 생기지 않는다.
-    let key = SecretKey::NotionIntegrationToken;
-    let account = match key {
-        SecretKey::NotionIntegrationToken => "notion-integration-token",
-    };
+    // 자격증명 자리가 조용히 생기지 않는다.
+    //
+    // **2026-09-08에 자리가 하나 늘었다 — 그리고 이 검사가 그것을 막아 세웠다.**
+    // `AnthropicApiKey`는 "언젠가"가 아니라 **지금 쓰는** 자리다: `ai::anthropic`이
+    // 실제로 이 키를 읽어 `x-api-key` 헤더에 싣는다. 쓰는 코드 없이 이 목록에 이름만
+    // 늘리는 변경은 여전히 이 검사가 잡아야 한다.
+    for (key, account) in [
+        (
+            SecretKey::NotionIntegrationToken,
+            "notion-integration-token",
+        ),
+        (SecretKey::AnthropicApiKey, "anthropic-api-key"),
+    ] {
+        let expected = match key {
+            SecretKey::NotionIntegrationToken => "notion-integration-token",
+            SecretKey::AnthropicApiKey => "anthropic-api-key",
+        };
+        assert_eq!(expected, account);
+        // 사용자가 자기 자격증명 저장소에서 이 항목을 찾아 지울 수 있어야 한다 (§10.2).
+        assert_eq!(key.account(), account);
+    }
 
-    // 사용자가 자기 자격증명 저장소에서 이 항목을 찾아 지울 수 있어야 한다 (§10.2).
-    assert_eq!(key.account(), account);
     assert_eq!(SECRET_SERVICE, "molt-note");
 }
 

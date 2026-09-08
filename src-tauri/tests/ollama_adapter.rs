@@ -369,20 +369,27 @@ fn only_the_two_declared_files_in_the_repository_can_open_a_socket() {
     // §18: 자동 검증이 실제 서버에 닿지 않는다는 것은 "그런 테스트를 안 썼다"가 아니라
     // **네트워크에 닿을 수 있는 코드가 어디에 있는지**로 말한다.
     //
-    // 둘인 것은 Phase 5가 Notion adapter를 더했기 때문이다 (`notion/network.rs`). 그 파일도
-    // 같은 규약 위에 있다 — Gate가 컴파일만 하고 테스트는 double을 쓴다
-    // (`tests/notion_adapter.rs`가 그 사실을 따로 확인한다). **목록은 이 둘로 닫혀 있다.**
+    // 둘인 것은 Phase 5가 두 번째 adapter를 더했기 때문이다. 그 파일도 같은 규약 위에
+    // 있다 — Gate가 컴파일만 하고 테스트는 double을 쓴다. **목록은 이 둘로 닫혀 있다.**
+    //
+    // **2026-09-08에 둘째 파일이 `net/ureq.rs`로 옮겨 갔다.** 세 번째 adapter가 생기면서
+    // (외부 HTTPS · 헤더 필요) 그 transport에 두 번째 사용자가 붙었기 때문이다. 수는 그대로
+    // 둘이며, 새 adapter는 소켓을 여는 파일을 만들지 않았다 — 있는 것을 쓴다.
     let mut users: Vec<String> = Vec::new();
 
     for path in rust_sources() {
         let source = std::fs::read_to_string(&path).expect("소스 파일을 읽는다");
-        if source.contains("ureq") || source.contains("std::net") || source.contains("TcpStream") {
+        // 재수출(`pub use ureq::…`)은 소켓을 열지 않는다. 실제로 연결을 만드는 타입을 본다.
+        if source.contains("ureq::Agent")
+            || source.contains("std::net")
+            || source.contains("TcpStream")
+        {
             users.push(path.display().to_string().replace('\\', "/"));
         }
     }
 
     users.sort();
-    let expected = ["ai/ollama/network.rs", "notion/network.rs"];
+    let expected = ["ai/ollama/network.rs", "net/ureq.rs"];
 
     assert_eq!(
         users.len(),

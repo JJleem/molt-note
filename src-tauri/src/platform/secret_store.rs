@@ -66,6 +66,11 @@ pub const SECRET_SERVICE: &str = "molt-note";
 pub enum SecretKey {
     /// Notion integration이 요구하는 자격증명 (ADR-0009 §5.2의 `Authorization` 헤더).
     NotionIntegrationToken,
+    /// Anthropic Messages API가 요구하는 자격증명 (`x-api-key` 헤더).
+    ///
+    /// **설정에 두지 않는다.** 설정은 평문 DB이고 API 키는 돈이 나가는 자격증명이다 —
+    /// Notion 토큰이 여기 있는 것과 같은 이유다.
+    AnthropicApiKey,
 }
 
 impl SecretKey {
@@ -75,6 +80,7 @@ impl SecretKey {
     pub const fn account(self) -> &'static str {
         match self {
             Self::NotionIntegrationToken => "notion-integration-token",
+            Self::AnthropicApiKey => "anthropic-api-key",
         }
     }
 }

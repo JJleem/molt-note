@@ -127,7 +127,8 @@ pub use payload::{
     AiNotePayload, AiNoteStatusPayload, AiProviderStatusPayload, CaptureReportPayload,
     ExportedAiRequestPayload, ExportedFilePayload, HandoffTextPayload, InputDevicePayload,
     InputLevelPayload, MissingAudioPayload, NewRecording, NotionConnectionPayload,
-    NotionSendStatusPayload, NotionSyncPayload, NotionTokenStatusPayload, PortionPayload,
+    AiCredentialStatusPayload, NotionSendStatusPayload, NotionSyncPayload,
+    NotionTokenStatusPayload, PortionPayload,
     RecordingPayload, SessionStatusPayload, SettingsPayload, StoppedRecordingPayload,
     StructuredNotePayload, TextSizePayload, TranscriptPayload, TranscriptSegmentPayload,
     TranscriptionStatusPayload,
@@ -1309,4 +1310,64 @@ pub fn delete_notion_token(
     sender: State<'_, NotionSender>,
 ) -> Result<NotionTokenStatusPayload, Failure> {
     sender.delete_token()
+}
+
+// --- AI provider 자격증명 (PRODUCT-SPEC §16.1 · 2026-09-08) -----------------------------
+
+/// AI provider의 API 키를 자격증명 저장소에 넣는다.
+///
+/// **값은 이 함수의 인자로 한 번 지나갈 뿐이다** (INV-7). 돌아가는 것은 저장돼 있다는 사실
+/// 하나이며, 실패 문장에도 값이 섞이지 않는다 — 빈 값을 거절하는 실패조차 받은 것을 되돌려
+/// 적지 않는다. `save_notion_token`이 세운 규칙 그대로다.
+///
+/// 앞뒤 공백은 벗긴다 — 붙여 넣은 값에 딸려 온 줄바꿈이 키를 다른 값으로 만들지 않게 한다.
+/// **그것뿐이다**: 모양을 검사하지도, 유효한지 물어보지도 않는다. 키가 맞는지는 실제로
+/// 노트를 만들 때 드러난다 (`ai::anthropic`의 401/403 갈래).
+///
+/// `async`인 이유는 OS 자격증명 저장소가 잠겨 있을 때 **사용자의 허용을 기다릴 수 있기
+/// 때문이다** — 그동안 창 전체가 멈추지 않게 한다.
+#[tauri::command(async)]
+pub fn save_ai_api_key(key: String) -> Result<AiCredentialStatusPayload, Failure> {
+    let key = key.trim();
+    if key.is_empty() {
+        return Err(Failure::permanent(
+            FailureKind::InvalidInput,
+            "저장할 AI provider API 키가 비어 있다.",
+        ));
+    }
+
+    let secrets = crate::platform::secret_store::app_secret_store();
+    secrets.set(
+        crate::platform::secret_store::SecretKey::AnthropicApiKey,
+        &crate::platform::secret_store::Secret::new(key),
+    )?;
+
+    ai_credential_status()
+}
+
+/// 저장된 API 키를 지운다.
+///
+/// **없던 것을 지우는 것은 실패가 아니다.** 지운 뒤에도 녹음 · 전사 · 이미 만들어진 노트는
+/// 그대로다 (INV-3) — 이 command가 만지는 것은 자격증명 저장소의 항목 하나뿐이다.
+#[tauri::command(async)]
+pub fn delete_ai_api_key() -> Result<AiCredentialStatusPayload, Failure> {
+    let secrets = crate::platform::secret_store::app_secret_store();
+    secrets.delete(crate::platform::secret_store::SecretKey::AnthropicApiKey)?;
+
+    ai_credential_status()
+}
+
+/// 지금 키가 저장돼 있는가. **값을 꺼내지 않고 있는지만 본다.**
+#[tauri::command(async)]
+pub fn ai_api_key_status() -> Result<AiCredentialStatusPayload, Failure> {
+    ai_credential_status()
+}
+
+fn ai_credential_status() -> Result<AiCredentialStatusPayload, Failure> {
+    let secrets = crate::platform::secret_store::app_secret_store();
+    Ok(AiCredentialStatusPayload {
+        stored: secrets
+            .get(crate::platform::secret_store::SecretKey::AnthropicApiKey)?
+            .is_some(),
+    })
 }

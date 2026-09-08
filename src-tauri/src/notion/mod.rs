@@ -43,14 +43,17 @@
 pub mod chunk;
 pub mod client;
 pub mod http;
-pub mod network;
 pub mod testing;
 pub mod wire;
 
 pub use chunk::{split_markdown, AtomKind, OversizedAtom, CHUNK_MAX_BLOCK_UNITS, CHUNK_MAX_BYTES};
 pub use client::{NotionClient, NotionFailure, RetryAfter, NOTION_FAILURE_KINDS};
-pub use http::{HttpMethod, HttpRequest, HttpResponse, HttpTransport, TransportError};
-pub use network::UreqNotionTransport;
+// HTTP 계약은 2026-09-08에 `crate::net`으로 옮겼다 (두 번째 사용자가 생겼다).
+// 여기서는 재수출만 한다 — 이 모듈을 쓰는 코드는 한 줄도 바뀌지 않는다.
+pub use crate::net::{HttpMethod, HttpRequest, HttpResponse, HttpTransport, TransportError};
+pub use crate::net::UreqTransport;
+/// 옛 이름. 부르는 자리를 한 번에 고치지 않기 위해 남긴다.
+pub use crate::net::UreqTransport as UreqNotionTransport;
 pub use wire::{ApiErrorCode, ConnectedIdentity, PageId, NOTION_VERSION};
 
 // **test double은 여기서 다시 내보내지 않는다** — AI adapter가 따르는 규칙과 같다.

@@ -13,11 +13,12 @@ import {
   AI_BASE_URL_NOTICE,
   AI_CHECK_FAILED_TEXT,
   AI_IS_OPTIONAL_TEXT,
+  AI_KEY_INPUT_NOTICE,
   AI_NOT_CHECKED_TEXT,
-  AI_SECTION_TITLE,
   AI_PROVIDER_HAS_NO_MODELS_TEXT,
   AI_PROVIDER_NOT_RUNNING_TEXT,
   AI_PROVIDER_RUNNING_TEXT,
+  AI_SECTION_TITLE,
   AI_SETTINGS_UNAFFECTED_NOTICE,
   AI_WITHOUT_A_PROVIDER_TEXT,
   AUDIO_IS_NEVER_SENT,
@@ -31,6 +32,8 @@ import {
   NO_AI_PROVIDER_TEXT,
   OPTIONAL_TITLE_SUFFIX,
   UNKNOWN_AI_PROVIDER_LABEL,
+  aiCredentialNotice,
+  aiCredentialState,
   aiModelNotice,
   aiModelOptions,
   aiProviderChoices,
@@ -42,6 +45,7 @@ import {
   confirmedAiModels,
   failedAiCheck,
   localProviderSetups,
+  needsApiKey,
   type AiConnection,
 } from './aiProviderSettings';
 import {
@@ -111,11 +115,33 @@ describe('provider 선택지', () => {
     expect(first.usable).toBe(true);
   });
 
-  it('지금 고를 수 있는 provider는 로컬 Ollama 하나뿐이다', () => {
+  it('지금 고를 수 있는 provider는 둘이고, 하나는 기기 밖으로 나간다', () => {
+    // 2026-09-08에 하나가 늘었다 (PRODUCT-SPEC §16.1). **목록은 `provider_for`가 실제로
+    // 세울 수 있는 것과 같아야 한다** — 여기에만 있고 backend에 없으면 사용자가 고를 수는
+    // 있는데 아무 일도 일어나지 않는 항목이 생긴다.
     const values = aiProviderChoices(NO_AI_PROVIDER).map((choice) => choice.value);
 
-    expect(values).toEqual([NO_AI_PROVIDER, 'ollama']);
+    expect(values).toEqual([NO_AI_PROVIDER, 'ollama', 'anthropic']);
     expect(aiProviderLocality('ollama')).toBe('local');
+    expect(aiProviderLocality('anthropic')).toBe('external');
+  });
+
+  /**
+   * **§12 · INV-5.** 기기를 떠나는 provider가 있다는 사실이 값으로 있어야 하고, 화면은 그
+   * 값에서 문구를 만든다. 이 검사가 깨지면 사용자가 무엇을 고르는지 모른 채 전사를
+   * 밖으로 보내게 된다.
+   */
+  it('기기를 떠나는 provider는 선택지에서 그 사실을 값으로 말한다', () => {
+    const external = aiProviderChoices(NO_AI_PROVIDER).filter(
+      (choice) => choice.locality === 'external',
+    );
+
+    expect(external.length).toBeGreaterThan(0);
+    for (const choice of external) {
+      expect(choice.usable).toBe(true);
+      // locality는 label의 글자가 아니라 값에서 온다 — label에도 드러나야 한다.
+      expect(choice.label.length).toBeGreaterThan(0);
+    }
   });
 
   it('테스트 전용 fake provider가 선택지에 없다', () => {
@@ -512,5 +538,56 @@ describe('연결 대상 주소', () => {
     // 고쳤을 때 화면이 조용히 거짓말을 한다.
     expect(AI_BASE_URL_NOTICE).not.toMatch(/https?:\/\//);
     expect(AI_BASE_URL_NOTICE).not.toMatch(/\d{4,5}/);
+  });
+});
+
+describe('AI provider 자격증명 (2026-09-08 · PRODUCT-SPEC §16.1)', () => {
+  it('저장 여부만 알 수 있다 — 값을 읽는 경로가 없다', () => {
+    expect(aiCredentialState({ stored: true })).toBe('stored');
+    expect(aiCredentialState({ stored: false })).toBe('notStored');
+  });
+
+  it('키가 없는 것은 오류가 아니라 상태다', () => {
+    // provider를 하나도 쓰지 않는 것이 정상이다 (INV-8). 문장이 실패처럼 들리면 안 된다.
+    const notice = aiCredentialNotice('notStored');
+
+    expect(notice.text).not.toMatch(/error|failed|invalid/i);
+    // 그러나 무엇을 하면 되는지는 말해 준다.
+    expect(notice.resolution).not.toBeNull();
+  });
+
+  it('저장돼 있으면 더 할 일을 말하지 않는다', () => {
+    expect(aiCredentialNotice('stored').resolution).toBeNull();
+  });
+
+  it('입력란 안내가 값이 어디 저장되고 어떻게 사라지는지 말한다', () => {
+    // 넘긴 뒤 입력란이 비워지므로, 그 사실을 먼저 알리지 않으면 사라진 것처럼 보인다.
+    expect(AI_KEY_INPUT_NOTICE).toContain('credential store');
+    expect(AI_KEY_INPUT_NOTICE).toContain('cleared');
+    // 앱 DB에 쓰이지 않는다는 사실 (INV-7).
+    expect(AI_KEY_INPUT_NOTICE).toContain('never written to the app database');
+  });
+
+  /**
+   * 자격증명 입력란을 **기기 밖으로 나가는 provider에서만** 보인다.
+   *
+   * "기기를 떠난다"는 경고 자체는 `aiTransferNotice`가 이미 하고 있으므로 여기서 다시
+   * 만들지 않았다 — 두 문구가 언젠가 어긋나는 것을 막는다.
+   */
+  it('키 입력란은 기기 밖으로 나가는 provider에서만 필요하다', () => {
+    expect(needsApiKey('anthropic')).toBe(true);
+    expect(needsApiKey('ollama')).toBe(false);
+    // 고르지 않은 것도 요구하지 않는다.
+    expect(needsApiKey(NO_AI_PROVIDER)).toBe(false);
+  });
+
+  it('전송 경계 문구는 이 구역이 새로 만들지 않고 기존 규칙이 낸다', () => {
+    // 같은 것을 두 번 정의하지 않는다. 외부 provider의 문구는 여기가 아니라
+    // `aiTransferNotice`에서 나오며, 그것이 전사와 오디오를 구분해 말한다 (INV-5 · INV-6).
+    const notice = aiTransferNotice('external');
+
+    expect(notice).not.toBeNull();
+    expect(notice?.transcriptText.length).toBeGreaterThan(0);
+    expect(notice?.audioText.length).toBeGreaterThan(0);
   });
 });

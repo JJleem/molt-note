@@ -26,19 +26,21 @@
 use std::io::ErrorKind;
 use std::time::Duration;
 
-use super::http::{HttpMethod, HttpRequest, HttpResponse, HttpTransport, TransportError};
-use super::wire::{self, RETRY_AFTER_HEADER};
+use super::http::{
+    retry_after_seconds, HttpMethod, HttpRequest, HttpResponse, HttpTransport, TransportError,
+    RETRY_AFTER_HEADER,
+};
 
 /// 서지 않는 연결을 오래 붙들고 있지 않기 위한 값.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// `ureq`로 왕복 하나를 수행하는 transport.
 #[derive(Debug)]
-pub struct UreqNotionTransport {
+pub struct UreqTransport {
     agent: ureq::Agent,
 }
 
-impl UreqNotionTransport {
+impl UreqTransport {
     pub fn new() -> Self {
         let config = ureq::Agent::config_builder()
             .timeout_connect(Some(CONNECT_TIMEOUT))
@@ -54,13 +56,13 @@ impl UreqNotionTransport {
     }
 }
 
-impl Default for UreqNotionTransport {
+impl Default for UreqTransport {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl HttpTransport for UreqNotionTransport {
+impl HttpTransport for UreqTransport {
     fn send(&self, request: &HttpRequest<'_>) -> Result<HttpResponse, TransportError> {
         // 메서드마다 builder의 타입이 다르므로(본문이 있는 것과 없는 것) 세 갈래가 그대로 있다.
         let outcome = match request.method {
@@ -90,13 +92,13 @@ impl HttpTransport for UreqNotionTransport {
         let response = outcome.map_err(classify)?;
 
         // **헤더 중 이것 하나만 꺼낸다** (ADR-0009 §5.5). 정수 초로 읽는 규칙은 이 파일이 다시
-        // 쓰지 않고 [`wire::retry_after_seconds`]가 그대로 한다 — 그래서 그 규칙이 네트워크
+        // 쓰지 않고 [`retry_after_seconds`]가 그대로 한다 — 그래서 그 규칙이 네트워크
         // 없이 검증된다.
         let retry_after = response
             .headers()
             .get(RETRY_AFTER_HEADER)
             .and_then(|value| value.to_str().ok())
-            .and_then(wire::retry_after_seconds);
+            .and_then(retry_after_seconds);
 
         let status = response.status().as_u16();
         let body = response

@@ -21,6 +21,7 @@
 import { convertFileSrc, invoke } from '@tauri-apps/api/core';
 import { toFailure } from './failure';
 import type {
+  AiCredentialStatus,
   AiNote,
   AiNoteStatus,
   AiProviderStatus,
@@ -555,4 +556,24 @@ export function saveNotionToken(token: string): Promise<NotionTokenStatus> {
  */
 export function deleteNotionToken(): Promise<NotionTokenStatus> {
   return call<NotionTokenStatus>('delete_notion_token');
+}
+
+/**
+ * AI provider의 API 키를 자격증명 저장소에 넣는다 (PRODUCT-SPEC §16.1).
+ *
+ * **값이 이 함수를 지나 backend로 한 번 갈 뿐이다.** 돌아오는 것은 저장돼 있다는 사실
+ * 하나이며, 이 앱에는 저장된 값을 읽어 오는 경로가 없다 (INV-7).
+ */
+export function saveAiApiKey(key: string): Promise<AiCredentialStatus> {
+  return call<AiCredentialStatus>('save_ai_api_key', { key });
+}
+
+/** 저장된 API 키를 지운다. **없던 것을 지우는 것은 실패가 아니다.** */
+export function deleteAiApiKey(): Promise<AiCredentialStatus> {
+  return call<AiCredentialStatus>('delete_ai_api_key');
+}
+
+/** 지금 키가 저장돼 있는가. **값을 꺼내지 않고 있는지만 본다.** */
+export function aiApiKeyStatus(): Promise<AiCredentialStatus> {
+  return call<AiCredentialStatus>('ai_api_key_status');
 }

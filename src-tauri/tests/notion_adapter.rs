@@ -479,12 +479,20 @@ fn no_source_outside_the_adapter_knows_the_notion_api() {
         "insert_content",
         "restricted_resource",
         "object_not_found",
-        "Retry-After",
     ];
+
+    // `Retry-After`는 2026-09-08에 이 목록에서 빠졌다. **Notion 고유 지식이 아니라 HTTP
+    // 표준 헤더**이며, `crate::net`이 그것을 읽는다 — Anthropic도 429에서 같은 헤더를 쓴다.
+    // 나머지 아홉은 그대로 Notion만 아는 것들이다.
 
     for path in rust_sources() {
         let shown = path.display().to_string().replace('\\', "/");
         if shown.contains(ADAPTER_DIR) || shown.ends_with(ADAPTER_MOUNT) {
+            continue;
+        }
+        // 벤더를 모르는 HTTP 경계. Notion 고유 지식이 여기 있으면 안 되는 것은 같지만,
+        // 위 목록에서 빠진 표준 헤더는 여기 있는 것이 맞다.
+        if shown.contains("/src/net/") {
             continue;
         }
 
@@ -500,7 +508,11 @@ fn no_source_outside_the_adapter_knows_the_notion_api() {
 
 #[test]
 fn only_the_network_file_of_this_adapter_can_open_a_socket() {
-    // 이 adapter 안에서 소켓을 열 수 있는 파일이 하나인지 — 나머지는 값에서 값을 만든다.
+    // **이 adapter 안에서는 아무 파일도 소켓을 열지 않는다.**
+    //
+    // 2026-09-08까지는 `notion/network.rs` 하나였고, 그날 그 파일이 `crate::net`으로 옮겨
+    // 갔다 — 두 번째 사용자(`ai::anthropic`)가 생겼기 때문이다. 규칙은 약해지지 않고
+    // **더 강해졌다**: 이 adapter는 이제 값에서 값을 만드는 코드만 갖는다.
     let mut users: Vec<String> = Vec::new();
 
     for path in adapter_sources() {
@@ -510,8 +522,7 @@ fn only_the_network_file_of_this_adapter_can_open_a_socket() {
         }
     }
 
-    assert_eq!(users.len(), 1, "네트워크에 닿는 파일이 하나가 아니다: {users:?}");
-    assert!(users[0].ends_with("notion/network.rs"), "{users:?}");
+    assert!(users.is_empty(), "adapter 안에서 소켓을 여는 파일이 있다: {users:?}");
 }
 
 #[test]

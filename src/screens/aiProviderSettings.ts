@@ -53,7 +53,7 @@
  * ({@link AI_SETTINGS_UNAFFECTED_NOTICE}).
  */
 import { toFailure, type Failure } from '../ipc/failure';
-import type { AiProviderLocality, AiProviderStatus } from '../ipc/types';
+import type { AiCredentialStatus, AiProviderLocality, AiProviderStatus } from '../ipc/types';
 import type { SettingsForm } from './settingsView';
 
 /** `<select>`가 "고르지 않음"을 나타낼 때 쓰는 값. 폼은 `null`을 담을 수 없다. */
@@ -85,8 +85,12 @@ interface SelectableAiProvider {
  * 고를 수 있는 provider의 **전부**.
  *
  * `src-tauri/src/ai/mod.rs`의 `provider_for`가 실제로 세울 수 있는 것과 같아야 한다 — 지금
- * 그것은 Ollama 하나다. 여기에 없는 식별자를 고르면 backend는 아무 provider도 만들지 않으며,
+ * 그것은 둘이다. 여기에 없는 식별자를 고르면 backend는 아무 provider도 만들지 않으며,
  * 다른 provider로 바꿔 고르지도 않는다.
+ *
+ * **둘의 `locality`가 다르다** (2026-09-08 · PRODUCT-SPEC §16.1). 하나는 이 기기에서 돌고,
+ * 하나는 전사 텍스트를 기기 밖으로 보낸다. 그 차이가 label의 글자가 아니라 **값**으로 있는
+ * 이유가 여기서 드러난다 — 화면은 이 값을 읽어 사용자에게 알린다 (§12 · INV-5).
  *
  * **테스트 전용 double(fake provider)은 이 목록에 없다.** 그것은 계약을 검증하기 위한 것이지
  * 사용자가 고를 수 있는 제품 기능이 아니며 (ADR-0008 §4.3), 목록에 있으면 사용자의 노트가
@@ -95,6 +99,7 @@ interface SelectableAiProvider {
  */
 const SELECTABLE_AI_PROVIDERS: readonly SelectableAiProvider[] = [
   { id: 'ollama', name: 'Ollama', locality: 'local' },
+  { id: 'anthropic', name: 'Claude (Anthropic)', locality: 'external' },
 ];
 
 /** 선택지에 붙는 locality 표시. **provider의 값에서 나오며 문구가 값을 정하지 않는다.** */
@@ -581,4 +586,63 @@ export function localProviderSetups(chosen: string): readonly LocalProviderSetup
       };
     },
   );
+}
+
+// --- AI provider 자격증명 (PRODUCT-SPEC §16.1 · 2026-09-08) ------------------------------
+
+/**
+ * API 키가 저장돼 있는가. **저장돼 있지 않은 것은 오류가 아니라 상태다** (INV-8).
+ *
+ * `notionSettings.ts`의 token 상태와 같은 규칙이다 — 값을 읽어 오는 경로가 없으므로
+ * 화면이 알 수 있는 것은 "있는가" 하나뿐이다 (INV-7).
+ */
+export type AiCredentialState = 'stored' | 'notStored';
+
+export function aiCredentialState(status: AiCredentialStatus): AiCredentialState {
+  return status.stored ? 'stored' : 'notStored';
+}
+
+/** 상태 하나에 대해 화면이 할 말. */
+export interface AiCredentialNotice {
+  readonly text: string;
+  /** 사용자가 먼저 해야 하는 일. 할 일이 없으면 `null`이다. */
+  readonly resolution: string | null;
+}
+
+const AI_CREDENTIAL_NOTICE: Record<AiCredentialState, AiCredentialNotice> = {
+  stored: {
+    text: 'An API key is saved in the operating system credential store.',
+    resolution: null,
+  },
+  notStored: {
+    text: 'No API key is saved.',
+    // **없는 것을 실패처럼 말하지 않는다.** provider를 하나도 쓰지 않는 것이 정상 상태다.
+    resolution:
+      'A provider that runs outside this device needs one. Paste a key below, or choose a provider that runs on this device.',
+  },
+};
+
+export function aiCredentialNotice(state: AiCredentialState): AiCredentialNotice {
+  return AI_CREDENTIAL_NOTICE[state];
+}
+
+/** 입력란에 적히는 안내. **저장된 값이 여기 채워지는 일은 없다** (INV-7). */
+export const AI_KEY_INPUT_PLACEHOLDER = 'Paste the API key';
+
+/** 넘긴 뒤 입력란이 비워진다는 사실을 먼저 알린다 — 사라진 것처럼 보이지 않게 한다. */
+export const AI_KEY_INPUT_NOTICE =
+  'The key is handed to this app once and kept in the operating system credential store. It is cleared from this box as soon as it is saved, and it is never written to the app database or the browser.';
+
+/**
+ * 이 provider를 쓰면 **API 키가 필요한가.**
+ *
+ * 기기 밖에서 도는 provider는 자격증명을 요구하고, 이 기기에서 도는 것은 요구하지 않는다.
+ * **식별자를 여기서 다시 나열하지 않는다** — provider 목록의 `locality`에서 나온다 (INV-9).
+ *
+ * ⚠️ **"기기를 떠난다"는 사실 자체를 여기서 말하지 않는다.** 그것은 이미
+ * {@link aiTransferNotice}가 하는 일이고, 같은 것을 두 번 정의하면 두 문구가 언젠가 어긋난다.
+ * 이 함수가 답하는 것은 **입력란을 보일 것인가** 하나다.
+ */
+export function needsApiKey(providerId: string): boolean {
+  return aiProviderLocality(providerId) === 'external';
 }

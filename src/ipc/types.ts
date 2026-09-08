@@ -790,3 +790,14 @@ export interface NotionConnection {
 export interface NotionTokenStatus {
   readonly stored: boolean;
 }
+
+/**
+ * AI provider의 API 키가 저장돼 있는가 (INV-7 · PRODUCT-SPEC §16.1).
+ *
+ * **값을 돌려주는 command는 없다.** 이 타입에도 값을 담을 자리가 없다 — 저장하는 command의
+ * 입력으로 한 번 지나갈 뿐이며, `NotionTokenStatus`가 세운 규칙 그대로다.
+ */
+export interface AiCredentialStatus {
+  /** 저장돼 있으면 `true`. **저장한 적이 없는 것은 실패가 아니다** (INV-8). */
+  readonly stored: boolean;
+}

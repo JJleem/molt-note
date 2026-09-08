@@ -1292,3 +1292,17 @@ pub struct NotionTokenStatusPayload {
     /// 저장돼 있으면 `true`. **저장한 적이 없는 것은 실패가 아니다** (INV-8).
     pub stored: bool,
 }
+
+/// AI provider의 API 키가 저장돼 있는가 (INV-7 · PRODUCT-SPEC §16.1).
+///
+/// **`NotionTokenStatusPayload`와 같은 규칙이다** — 값을 돌려주는 command는 없고, 이 타입에도
+/// 값을 담을 자리가 없다. 저장하는 command의 입력으로 한 번 지나갈 뿐이다.
+///
+/// 자리를 provider별로 나누지 않은 것은, 지금 키가 필요한 provider가 하나이고 **필요해지기
+/// 전에 자리를 만들지 않기** 때문이다 (`SecretKey`가 닫힌 목록인 것과 같은 태도).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiCredentialStatusPayload {
+    /// 저장돼 있으면 `true`. **저장한 적이 없는 것은 실패가 아니다** (INV-8).
+    pub stored: bool,
+}

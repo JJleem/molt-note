@@ -5,6 +5,9 @@ import {
   deleteNotionToken,
   getSettings,
   listInputDevices,
+  aiApiKeyStatus,
+  saveAiApiKey,
+  deleteAiApiKey,
   saveNotionToken,
   updateSettings,
 } from '../ipc/commands';
@@ -25,7 +28,13 @@ import {
   NOTHING_LEAVES_THIS_DEVICE,
   aiModelNotice,
   aiModelOptions,
+  aiCredentialNotice,
+  aiCredentialState,
+  type AiCredentialState,
   aiProviderChoices,
+  needsApiKey,
+  AI_KEY_INPUT_NOTICE,
+  AI_KEY_INPUT_PLACEHOLDER,
   aiProviderLocality,
   aiSettingsChanged,
   aiSettingsSnapshot,
@@ -181,6 +190,28 @@ export function SettingsScreen() {
    */
   const tokenInput = useRef<HTMLInputElement>(null);
 
+  /** 저장된 AI API 키의 유무. **값이 아니라 유무다** (INV-7). */
+  const [aiKeyState, setAiKeyState] = useState<AiCredentialState>('notStored');
+  const [aiKeyBusy, setAiKeyBusy] = useState<'save' | 'delete' | null>(null);
+  const [aiKeyTrouble, setAiKeyTrouble] = useState<Failure | null>(null);
+  const aiKeyInput = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    let current = true;
+    // 실패해도 화면을 막지 않는다 — 키가 없는 것과 물어보지 못한 것 모두 "없음"으로 두고,
+    // 저장을 눌렀을 때 진짜 실패가 §13으로 드러난다.
+    aiApiKeyStatus().then(
+      (status) => {
+        if (current) setAiKeyState(aiCredentialState(status));
+      },
+      () => {},
+    );
+    return () => {
+      current = false;
+    };
+  }, []);
+
+
   /** 다시 읽는다. 상태를 되돌리는 것은 effect가 아니라 이 사용자 동작의 일이다. */
   const retryLoad = () => {
     setView(LOADING_SETTINGS);
@@ -295,6 +326,49 @@ export function SettingsScreen() {
    * **빈 값을 여기서 걸러 내지 않는다.** 무엇이 저장될 수 있는 값인지는 backend가 정하며
    * (`save_notion_token`), 그 답도 §13의 실패로 온다 — 같은 규칙이 두 벌이 되지 않게 한다.
    */
+  /**
+   * API 키를 넘긴다. **넘긴 뒤 입력란을 비운다** — 값이 화면 상태에 남지 않는다 (INV-7).
+   *
+   * `saveToken`이 세운 규칙 그대로다: 빈 값을 여기서 걸러 내지 않는다. 무엇이 저장될 수
+   * 있는 값인지는 backend가 정하며 그 답도 §13의 실패로 온다.
+   */
+  const saveAiKey = () => {
+    const input = aiKeyInput.current;
+    if (input === null) return;
+
+    const typed = input.value;
+    input.value = '';
+
+    setAiKeyBusy('save');
+    setAiKeyTrouble(null);
+    saveAiApiKey(typed).then(
+      (status) => {
+        setAiKeyBusy(null);
+        setAiKeyState(aiCredentialState(status));
+      },
+      (error: unknown) => {
+        setAiKeyBusy(null);
+        setAiKeyTrouble(toFailure(error));
+      },
+    );
+  };
+
+  /** 저장된 키를 지운다. **없던 것을 지우는 것도 실패가 아니다** (INV-3 · INV-8). */
+  const removeAiKey = () => {
+    setAiKeyBusy('delete');
+    setAiKeyTrouble(null);
+    deleteAiApiKey().then(
+      (status) => {
+        setAiKeyBusy(null);
+        setAiKeyState(aiCredentialState(status));
+      },
+      (error: unknown) => {
+        setAiKeyBusy(null);
+        setAiKeyTrouble(toFailure(error));
+      },
+    );
+  };
+
   const saveToken = () => {
     const input = tokenInput.current;
     if (input === null) return;
@@ -525,6 +599,59 @@ export function SettingsScreen() {
 
           {providerChosen && (
             <>
+              {/* **기기 밖에서 도는 provider만 자격증명을 요구한다** (`needsApiKey`).
+                  "기기를 떠난다"는 사실은 위 `transfer` 문단이 이미 말했으므로 여기서
+                  다시 말하지 않는다 — 같은 것을 두 번 적으면 언젠가 어긋난다. */}
+              {needsApiKey(form.aiProvider) && (
+                <>
+                  <p className="hint">{aiCredentialNotice(aiKeyState).text}</p>
+                  {aiCredentialNotice(aiKeyState).resolution !== null && (
+                    <p className="hint">{aiCredentialNotice(aiKeyState).resolution}</p>
+                  )}
+
+                  <label className="field" htmlFor="ai-api-key">
+                    <span className="field__label">API key</span>
+                    {/* **`value`가 없다.** 입력한 값은 React 상태에 들어가지 않고, 저장된
+                        값이 여기 채워지는 일도 없다 — 되읽는 command 자체가 없다 (INV-7). */}
+                    <input
+                      id="ai-api-key"
+                      type="password"
+                      className="input"
+                      placeholder={AI_KEY_INPUT_PLACEHOLDER}
+                      autoComplete="off"
+                      ref={aiKeyInput}
+                    />
+                  </label>
+                  <p className="hint">{AI_KEY_INPUT_NOTICE}</p>
+
+                  <button
+                    type="button"
+                    className="btn btn--secondary"
+                    disabled={aiKeyBusy !== null}
+                    onClick={saveAiKey}
+                  >
+                    {aiKeyBusy === 'save' ? 'Saving the key…' : 'Save the key'}
+                  </button>
+                  {/* 저장된 것을 없애는 동작이므로 다른 버튼과 같은 무게로 두지 않는다 (§19). */}
+                  <button
+                    type="button"
+                    className="btn btn--danger"
+                    disabled={aiKeyBusy !== null}
+                    onClick={removeAiKey}
+                  >
+                    {aiKeyBusy === 'delete' ? 'Removing the key…' : 'Remove the saved key'}
+                  </button>
+                  {aiKeyTrouble !== null && (
+                    <FailureNotice
+                      failure={aiKeyTrouble}
+                      headline="The API key could not be saved."
+                      // 저장 실패에는 재시도를 두지 않는다 — 넘긴 값이 이미 화면에 없다.
+                      onRetry={aiKeyBusy === null && aiKeyState === 'stored' ? removeAiKey : undefined}
+                    />
+                  )}
+                </>
+              )}
+
               <label className="field" htmlFor="ai-base-url">
                 <span className="field__label">Address (host and port)</span>
                 <input
