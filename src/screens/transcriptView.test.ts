@@ -14,6 +14,8 @@ import type { Recording, Transcript, TranscriptionStatus } from '../ipc/types';
 import {
   LOADING_TRANSCRIPT_TAB,
   NO_TRANSCRIPT_TEXT,
+  PARAGRAPH_GAP_MS,
+  PARAGRAPH_MAX_CHARS,
   TRANSCRIPTION_COLLAPSED_NOTICE,
   TRANSCRIPTION_FAILED_HEADLINE,
   TRANSCRIPTION_PRESERVED_NOTICE,
@@ -21,9 +23,13 @@ import {
   TRANSCRIPTION_STATUS_HEADLINE,
   UNKNOWN_FAILURE_NOTICE,
   formatTimestamp,
+  matchingParagraphs,
+  searchNotice,
   transcriptLines,
+  transcriptParagraphs,
   transcriptTab,
   transcriptTrouble,
+  type TranscriptLine,
 } from './transcriptView';
 
 /** 저장소가 돌려주는 모양 그대로의 레코드. */
@@ -668,5 +674,132 @@ describe('이 모듈이 하지 않는 일', () => {
     expect(view.kind === 'done' && view.lines.map((line) => line.text)).toEqual(
       stored.segments.map((segment) => segment.text),
     );
+  });
+});
+
+describe('읽을 수 있는 문단으로 묶는다 (2026-09-08)', () => {
+  const line = (startMs: number, endMs: number | null, text: string): TranscriptLine => ({
+    startLabel: '00:00:00',
+    endLabel: '',
+    rangeLabel: '00:00:00',
+    text,
+    startMs,
+    endMs,
+  });
+
+  it('사이가 짧으면 한 문단으로 이어 붙인다', () => {
+    const paragraphs = transcriptParagraphs([
+      line(0, 1_000, '그러면 이번에는'),
+      line(1_100, 2_000, 'PLY 먼저 변환하고'),
+    ]);
+
+    expect(paragraphs).toHaveLength(1);
+    expect(paragraphs[0].text).toBe('그러면 이번에는 PLY 먼저 변환하고');
+  });
+
+  it('말이 오래 비면 문단이 끊긴다', () => {
+    const paragraphs = transcriptParagraphs([
+      line(0, 1_000, '앞 문단'),
+      line(1_000 + PARAGRAPH_GAP_MS, 9_000, '뒤 문단'),
+    ]);
+
+    expect(paragraphs.map((p) => p.text)).toEqual(['앞 문단', '뒤 문단']);
+  });
+
+  it('쉼 없이 길어지면 읽을 수 있게 끊는다', () => {
+    // 쉼 없이 이어 말하는 구간에서 문단 하나가 화면을 넘기지 않게 한다.
+    const many = Array.from({ length: 40 }, (_, index) =>
+      line(index * 100, index * 100 + 90, '가나다라마바사아자차'),
+    );
+
+    const paragraphs = transcriptParagraphs(many);
+
+    expect(paragraphs.length).toBeGreaterThan(1);
+    for (const paragraph of paragraphs) {
+      // 한 조각을 더하다 넘을 수는 있으므로 한 조각만큼의 여유를 둔다.
+      expect(paragraph.text.length).toBeLessThan(PARAGRAPH_MAX_CHARS + 40);
+    }
+  });
+
+  /** **말한 것을 바꾸지 않는다.** 묶는 일은 이어 붙일 자리를 정하는 것뿐이다. */
+  it('낱말도 순서도 잃지 않는다', () => {
+    const lines = [
+      line(0, 500, '첫째'),
+      line(600, 1_000, '둘째'),
+      line(1_000 + PARAGRAPH_GAP_MS, 9_000, '셋째'),
+    ];
+
+    const joined = transcriptParagraphs(lines)
+      .map((p) => p.text)
+      .join(' ');
+
+    expect(joined).toBe('첫째 둘째 셋째');
+  });
+
+  it('빈 줄은 문단을 만들지 않는다', () => {
+    expect(transcriptParagraphs([line(0, 100, '   ')])).toEqual([]);
+    expect(transcriptParagraphs([])).toEqual([]);
+  });
+
+  it('문단은 시작 시각 하나만 갖는다 — 줄마다 시각을 달지 않는다', () => {
+    // segment마다 `00:02:14 → 00:02:21`을 다는 것 자체가 소음이다.
+    const paragraphs = transcriptParagraphs([line(0, 500, '가'), line(600, 900, '나')]);
+
+    expect(paragraphs[0].startLabel).toBe('00:00:00');
+    expect(Object.keys(paragraphs[0]).sort()).toEqual(['startLabel', 'startMs', 'text']);
+  });
+
+  /**
+   * 끝 시각을 모르는 줄(전사 중 미리보기)은 **시작 시각끼리** 비교한다. 모르는 값을
+   * 시작 시각과 같다고 치면 사이가 언제나 0이 되어 전부 한 문단이 된다.
+   */
+  it('끝 시각을 모르는 줄도 사이를 재서 끊는다', () => {
+    const paragraphs = transcriptParagraphs([
+      line(0, null, '앞'),
+      line(PARAGRAPH_GAP_MS, null, '뒤'),
+    ]);
+
+    expect(paragraphs).toHaveLength(2);
+  });
+});
+
+describe('전사 안에서 찾는다 (2026-09-08)', () => {
+  const paragraph = (text: string) => ({ startLabel: '00:00:00', startMs: 0, text });
+
+  it('찾는 말이 비어 있으면 전부 그대로다', () => {
+    const all = [paragraph('가'), paragraph('나')];
+
+    expect(matchingParagraphs(all, '')).toEqual(all);
+    expect(matchingParagraphs(all, '   ')).toEqual(all);
+  });
+
+  it('찾는 말이 든 문단만 남는다', () => {
+    const all = [paragraph('캣마크 이야기'), paragraph('프리헌팅 이야기')];
+
+    expect(matchingParagraphs(all, '캣마크')).toEqual([all[0]]);
+  });
+
+  it('영어는 대소문자를 가리지 않는다', () => {
+    // 전사에는 영어 낱말이 섞인다 (제품 이름 · 모델 이름). 철자를 정확히 맞출 이유가 없다.
+    const all = [paragraph('Notion으로 보낸다')];
+
+    expect(matchingParagraphs(all, 'notion')).toEqual(all);
+  });
+
+  it('찾는 중이 아니면 아무 말도 하지 않는다', () => {
+    expect(searchNotice('', 0, 10)).toBeNull();
+  });
+
+  it('없으면 없다고 말하고, 전체가 몇인지 함께 말한다', () => {
+    // 아무것도 없는 화면만 남기면 사용자는 전사가 사라진 줄 안다.
+    const notice = searchNotice('없는말', 0, 120);
+
+    expect(notice).toContain('없다');
+    expect(notice).toContain('120');
+  });
+
+  it('찾았으면 몇 개 중 몇 개인지 말한다', () => {
+    expect(searchNotice('가', 3, 120)).toContain('3');
+    expect(searchNotice('가', 3, 120)).toContain('120');
   });
 });

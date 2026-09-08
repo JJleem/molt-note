@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   aiNoteStatus,
   aiProviderStatus,
@@ -105,6 +105,9 @@ import {
   type TranscriptLine,
   type TranscriptTabView,
   type TranscriptTrouble,
+  transcriptParagraphs,
+  matchingParagraphs,
+  searchNotice,
 } from './transcriptView';
 import type { ScreenProps } from './types';
 
@@ -1658,19 +1661,51 @@ function NoteSectionBlock({ section }: { section: NoteSection }) {
 }
 
 /** segment 목록. 시작·종료 timestamp가 문장과 함께 보인다 (요구 6). */
+/**
+ * 전사를 **읽을 수 있는 형태로** 그린다 (2026-09-08).
+ *
+ * 2시간 회의가 segment 2,825개로 나왔고, 그것을 한 줄씩 쌓으면 로그이지 글이 아니다.
+ * 묶는 규칙은 여기 없다 — `transcriptParagraphs`가 값으로 판정하고, 이 컴포넌트는 그린다.
+ *
+ * 찾는 칸은 문단이 여러 개일 때만 나온다. 미리보기처럼 짧은 자리에 검색을 두면 소음이다.
+ */
 function TranscriptLines({ lines }: { lines: readonly TranscriptLine[] }) {
-  if (lines.length === 0) {
+  const [query, setQuery] = useState('');
+
+  const paragraphs = useMemo(() => transcriptParagraphs(lines), [lines]);
+  const shown = useMemo(() => matchingParagraphs(paragraphs, query), [paragraphs, query]);
+  const notice = searchNotice(query, shown.length, paragraphs.length);
+
+  if (paragraphs.length === 0) {
     return null;
   }
 
   return (
-    <ol className="transcript__lines">
-      {lines.map((line) => (
-        <li key={`${line.startLabel}-${line.endLabel}-${line.text}`} className="transcript__line">
-          <span className="transcript__time">{line.rangeLabel}</span>
-          <span className="transcript__text">{line.text}</span>
-        </li>
-      ))}
-    </ol>
+    <>
+      {paragraphs.length > 1 && (
+        <label className="field transcript__search" htmlFor="transcript-search">
+          <span className="field__label">전사에서 찾기</span>
+          <input
+            id="transcript-search"
+            type="search"
+            className="input"
+            placeholder="낱말을 입력한다"
+            value={query}
+            onChange={(event) => setQuery(event.currentTarget.value)}
+          />
+        </label>
+      )}
+      {/* 없으면 없다고 말한다 — 빈 화면만 남으면 전사가 사라진 줄 안다. */}
+      {notice !== null && <p className="hint">{notice}</p>}
+
+      <ol className="transcript__lines">
+        {shown.map((paragraph) => (
+          <li key={`${paragraph.startMs}-${paragraph.text.slice(0, 24)}`} className="transcript__line">
+            <span className="transcript__time">{paragraph.startLabel}</span>
+            <span className="transcript__text">{paragraph.text}</span>
+          </li>
+        ))}
+      </ol>
+    </>
   );
 }

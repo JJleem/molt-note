@@ -92,6 +92,15 @@ export interface TranscriptLine {
   /** `00:02:14 → 00:02:21`. 시작과 끝이 **함께** 보인다 (요구 6). */
   readonly rangeLabel: string;
   readonly text: string;
+  /**
+   * 시작 시각(밀리초). **문단으로 묶을 때만 쓴다** — 화면에 그대로 그리는 값이 아니다.
+   *
+   * 라벨과 나란히 두는 이유는, 묶는 규칙이 "몇 초가 비었는가"를 물어야 하는데 그것을
+   * `00:02:14` 같은 문자열에서 되돌려 읽는 것은 규칙을 두 번 정의하는 일이기 때문이다.
+   */
+  readonly startMs: number;
+  /** 끝 시각(밀리초). 엔진이 아직 말하지 않았으면 `null`이다 (전사 중 미리보기). */
+  readonly endMs: number | null;
 }
 
 /**
@@ -105,6 +114,8 @@ export function transcriptLines(transcript: Transcript): readonly TranscriptLine
     endLabel: formatTimestamp(segment.endMs),
     rangeLabel: `${formatTimestamp(segment.startMs)} ${RANGE_SEPARATOR} ${formatTimestamp(segment.endMs)}`,
     text: segment.text,
+    startMs: segment.startMs,
+    endMs: segment.endMs,
   }));
 }
 
@@ -118,7 +129,14 @@ export function transcriptLines(transcript: Transcript): readonly TranscriptLine
 export function partialLines(status: TranscriptionStatus): readonly TranscriptLine[] {
   return status.partialLines.map((line) => {
     const startLabel = formatTimestamp(line.startMs);
-    return { startLabel, endLabel: '', rangeLabel: startLabel, text: line.text };
+    return {
+      startLabel,
+      endLabel: '',
+      rangeLabel: startLabel,
+      text: line.text,
+      startMs: line.startMs,
+      endMs: null,
+    };
   });
 }
 
@@ -523,4 +541,133 @@ function startTranscript(recordingId: string): TranscriptAction {
  */
 function redoTranscript(recordingId: string): TranscriptAction {
   return { kind: 'redo', label: '다시 전사', recordingId };
+}
+
+// --- 읽을 수 있는 덩어리로 묶는다 (2026-09-08) --------------------------------------------
+
+/**
+ * 이만큼 말이 비면 문단을 끊는다.
+ *
+ * 전사 segment는 whisper가 나눈 단위이지 사람이 읽는 단위가 아니다. 2시간 회의가
+ * **2,825개**로 나왔고, 그것을 한 줄씩 쌓으면 읽을 수 있는 형태가 아니다 — 로그지 글이 아니다.
+ *
+ * **[미검증]** 1.2초가 옳은 값인지는 재본 적이 없다. 말 사이의 숨(0.2~0.5초)보다 크고,
+ * 화자가 바뀌거나 화제가 넘어갈 때의 사이보다 작게 잡은 값이다.
+ */
+export const PARAGRAPH_GAP_MS = 1_200;
+
+/**
+ * 한 문단이 이보다 길어지면 끊는다.
+ *
+ * 쉼 없이 이어 말하는 구간에서 문단 하나가 화면을 넘기지 않게 한다. **글자 수다** —
+ * 한글은 글자 하나가 한 음절이므로 이 수가 읽는 부담과 거의 비례한다.
+ */
+export const PARAGRAPH_MAX_CHARS = 320;
+
+/**
+ * 화면에 놓이는 문단 하나.
+ *
+ * **시각은 하나뿐이다.** segment마다 `00:02:14 → 00:02:21`을 다는 것은 그 자체가 소음이며,
+ * 문단이 시작한 자리 하나면 되짚기에 충분하다.
+ */
+export interface TranscriptParagraph {
+  /** 이 문단이 시작한 시각. `00:02:14`. */
+  readonly startLabel: string;
+  /** 되짚을 때 쓰는 값. 화면에 그대로 그리지 않는다. */
+  readonly startMs: number;
+  readonly text: string;
+}
+
+/**
+ * 줄들을 읽을 수 있는 문단으로 묶는다.
+ *
+ * **말한 것을 바꾸지 않는다** — 순서도 낱말도 그대로이고, 하는 일은 이어 붙일 자리를 정하는
+ * 것뿐이다 (INV-2의 태도: 저장된 것은 저장된 것이다). 묶는 자리는 둘이다.
+ *
+ * ```text
+ * 앞 줄이 끝나고 PARAGRAPH_GAP_MS 이상 비었다   → 새 문단
+ * 지금 문단이 PARAGRAPH_MAX_CHARS를 넘었다      → 새 문단
+ * ```
+ *
+ * 끝 시각을 모르는 줄(전사 중 미리보기)은 **시작 시각끼리** 비교한다 — 모르는 값을
+ * 시작 시각과 같다고 치면 사이가 언제나 0이 되어 전부 한 문단이 된다.
+ */
+export function transcriptParagraphs(
+  lines: readonly TranscriptLine[],
+): readonly TranscriptParagraph[] {
+  const paragraphs: TranscriptParagraph[] = [];
+  let current: { startLabel: string; startMs: number; parts: string[]; chars: number } | null = null;
+  let previousEndMs: number | null = null;
+
+  for (const line of lines) {
+    const text = line.text.trim();
+    if (text.length === 0) {
+      continue;
+    }
+
+    const gap = previousEndMs === null ? null : line.startMs - previousEndMs;
+    const breaks =
+      current === null ||
+      (gap !== null && gap >= PARAGRAPH_GAP_MS) ||
+      current.chars >= PARAGRAPH_MAX_CHARS;
+
+    if (breaks) {
+      if (current !== null) {
+        paragraphs.push({
+          startLabel: current.startLabel,
+          startMs: current.startMs,
+          text: current.parts.join(' '),
+        });
+      }
+      current = { startLabel: line.startLabel, startMs: line.startMs, parts: [text], chars: text.length };
+    } else {
+      // `breaks`가 거짓이면 `current`는 반드시 있다 — 위 조건의 첫 항이 그것이다.
+      current!.parts.push(text);
+      current!.chars += text.length;
+    }
+
+    previousEndMs = line.endMs ?? line.startMs;
+  }
+
+  if (current !== null) {
+    paragraphs.push({
+      startLabel: current.startLabel,
+      startMs: current.startMs,
+      text: current.parts.join(' '),
+    });
+  }
+
+  return paragraphs;
+}
+
+/**
+ * 찾는 말이 든 문단만 남긴다. 찾는 말이 비어 있으면 전부 그대로다.
+ *
+ * **대소문자를 구분하지 않는다.** 한글에는 대소문자가 없지만 전사에는 영어 낱말이 섞인다
+ * (모델 이름 · 제품 이름). 그것을 찾을 때 사용자가 철자를 정확히 맞춰야 할 이유가 없다.
+ */
+export function matchingParagraphs(
+  paragraphs: readonly TranscriptParagraph[],
+  query: string,
+): readonly TranscriptParagraph[] {
+  const needle = query.trim().toLowerCase();
+  if (needle.length === 0) {
+    return paragraphs;
+  }
+  return paragraphs.filter((paragraph) => paragraph.text.toLowerCase().includes(needle));
+}
+
+/** 찾은 결과를 사람에게 말하는 한 줄. 찾는 중이 아니면 `null`이다. */
+export function searchNotice(
+  query: string,
+  found: number,
+  total: number,
+): string | null {
+  if (query.trim().length === 0) {
+    return null;
+  }
+  if (found === 0) {
+    return `찾는 말이 든 문단이 없다 (전체 ${total}문단)`;
+  }
+  return `${total}문단 중 ${found}문단`;
 }
