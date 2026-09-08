@@ -21,7 +21,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use molt_note_lib::audio::{CaptureFormat, OpenCapture, SampleSink, SampleSource};
+use molt_note_lib::audio::{CaptureMode, CaptureFormat, OpenCapture, SampleSink, SampleSource};
 use molt_note_lib::commands::{
     finish_recording, Recorder, Storage, StoppedRecordingPayload, Transcriber,
     TranscriptionStatusPayload,
@@ -205,7 +205,7 @@ impl Fixture {
     /// 소리가 들어 있는 녹음 하나를 시작해서 정지까지 마친다. **제품 경로 그대로다.**
     fn record_and_stop(&self) -> StoppedRecordingPayload {
         self.recorder
-            .start(DEVICE_KEY)
+            .start(DEVICE_KEY, CaptureMode::Microphone)
             .expect("녹음을 시작할 수 있어야 한다");
         self.microphone.speak(1_000);
         self.clock.advance(5_000);
@@ -446,7 +446,7 @@ fn a_failed_stop_does_not_start_a_transcription() {
     // 소리 없는 녹음이다 — 정지가 실패한다 (R-002).
     fixture
         .recorder
-        .start(DEVICE_KEY)
+        .start(DEVICE_KEY, CaptureMode::Microphone)
         .expect("녹음을 시작할 수 있어야 한다");
     fixture.clock.advance(1_000);
     finish_recording(&fixture.recorder, &fixture.storage, &fixture.transcriber, None)

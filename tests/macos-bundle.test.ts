@@ -37,8 +37,18 @@ describe('macOS 번들 선언', () => {
     expect(usage).toMatch(/\S/);
   });
 
+  it('회의 모드의 오디오 권한 설명이 함께 있다 (§22 · ADR-0012)', () => {
+    // 지키려는 것: **회의 모드가 권한 프롬프트 없이 조용히 실패하지 않는다.** 이 선언이
+    // 없으면 process tap 생성이 거부되고, 사용자는 왜 상대 목소리가 없는지 알 수 없다.
+    const usage = plistString(infoPlist, 'NSAudioCaptureUsageDescription') ?? '';
+    expect(usage.length).toBeGreaterThan(0);
+    // 화면 녹화 권한이 아니다 — 설명이 그것을 말하면 사용자가 잘못된 곳을 찾는다.
+    expect(usage).not.toContain('화면');
+  });
+
   it('NSMicrophoneUsageDescription을 tauri.conf.json에 잘못 넣지 않았다', () => {
     // tauri.conf.json 키가 아니다 (§14.3). 여기에 있으면 조용히 무시되고 번들에 반영되지 않는다.
     expect(tauriConfText).not.toContain('NSMicrophoneUsageDescription');
+    expect(tauriConfText).not.toContain('NSAudioCaptureUsageDescription');
   });
 });

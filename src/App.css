@@ -836,6 +836,42 @@ p.loading {
   color: var(--text);
 }
 
+/*
+ * 녹음 모드 (§22). **주 조작보다 작다** — 무엇을 녹음할지는 시작하기 전에 한 번 고르는
+ * 값이고, 화면을 지배하는 것은 여전히 상태 · 경과 시간 · 네 버튼이다 (§19).
+ *
+ * 고른 것과 고르지 않은 것은 **채운 면**으로 갈린다. 테두리 굵기로 가르지 않는다 — 굵기가
+ * 바뀌면 글자가 밀린다.
+ */
+
+.recording__modes {
+  display: flex;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.chip {
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  background: none;
+  font-size: var(--type-body);
+  line-height: var(--line-normal);
+  color: var(--text-muted);
+  cursor: default;
+}
+
+.chip--selected {
+  background-color: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+  font-weight: var(--weight-medium);
+}
+
+.chip:disabled {
+  opacity: 0.5;
+}
+
 .recording__controls {
   display: flex;
   flex-wrap: wrap;

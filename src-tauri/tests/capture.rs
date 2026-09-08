@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 
-use molt_note_lib::audio::{CaptureFormat, OpenCapture, SampleSink, SampleSource};
+use molt_note_lib::audio::{CaptureMode, CaptureFormat, OpenCapture, SampleSink, SampleSource};
 use molt_note_lib::commands::Recorder;
 use molt_note_lib::domain::{Failure, FailureKind};
 use molt_note_lib::platform::app_data_dir::AppDataDirectory;
@@ -78,6 +78,15 @@ impl FakeMicrophone {
     fn cut_short(failure: Failure) -> Self {
         Self {
             interrupted: Some(failure),
+            ..Self::speaking()
+        }
+    }
+
+    /// 이름과 채널 수를 바꾼 마이크. **회의 입력을 흉내 낸다** — 스테레오다.
+    fn meeting_input() -> Self {
+        Self {
+            label: "가짜 회의 입력".to_string(),
+            format: CaptureFormat::pcm_16bit(48_000, 2),
             ..Self::speaking()
         }
     }
@@ -167,7 +176,7 @@ fn a_capture_that_stops_reports_the_device_the_path_the_format_and_the_size() {
     let app_data_dir = temp.app_data_dir();
     let capture = Recorder::with_source(app_data_dir.clone(), microphone);
 
-    capture.start(DEVICE_KEY).expect("녹음을 시작할 수 있어야 한다");
+    capture.start(DEVICE_KEY, CaptureMode::Microphone).expect("녹음을 시작할 수 있어야 한다");
     let report = capture.stop().expect("녹음을 정지할 수 있어야 한다");
 
     assert_eq!(report.device_label, "가짜 마이크", "장치 이름");
@@ -205,7 +214,7 @@ fn the_output_file_lives_under_the_app_data_directory() {
     let app_data_dir = temp.app_data_dir();
     let capture = Recorder::with_source(app_data_dir.clone(), FakeMicrophone::speaking());
 
-    capture.start(DEVICE_KEY).expect("녹음을 시작할 수 있어야 한다");
+    capture.start(DEVICE_KEY, CaptureMode::Microphone).expect("녹음을 시작할 수 있어야 한다");
     let report = capture.stop().expect("녹음을 정지할 수 있어야 한다");
 
     let written = PathBuf::from(&report.output_path);
@@ -228,9 +237,9 @@ fn a_second_capture_does_not_overwrite_the_first() {
     let app_data_dir = temp.app_data_dir();
     let capture = Recorder::with_source(app_data_dir.clone(), FakeMicrophone::speaking());
 
-    capture.start(DEVICE_KEY).expect("첫 녹음 시작");
+    capture.start(DEVICE_KEY, CaptureMode::Microphone).expect("첫 녹음 시작");
     let first = capture.stop().expect("첫 녹음 정지");
-    capture.start(DEVICE_KEY).expect("두 번째 녹음 시작");
+    capture.start(DEVICE_KEY, CaptureMode::Microphone).expect("두 번째 녹음 시작");
     let second = capture.stop().expect("두 번째 녹음 정지");
 
     assert_ne!(first.output_path, second.output_path);
@@ -247,7 +256,7 @@ fn a_device_that_cannot_be_opened_reaches_the_user_as_the_shared_failure_contrac
     let capture = Recorder::with_source(app_data_dir.clone(), UnavailableMicrophone)
         .with_microphone(GrantedPermission);
 
-    let failure = capture.start(DEVICE_KEY).expect_err("장치를 열지 못한 것은 실패다");
+    let failure = capture.start(DEVICE_KEY, CaptureMode::Microphone).expect_err("장치를 열지 못한 것은 실패다");
 
     assert_eq!(failure.kind, FailureKind::AudioDevice, "저장소 실패와 구분된다");
     assert!(!failure.message.is_empty(), "보여줄 문장이 있어야 한다");
@@ -267,7 +276,7 @@ fn a_failure_to_open_serializes_into_the_shape_the_frontend_reads() {
     let capture = Recorder::with_source(temp.app_data_dir(), UnavailableMicrophone)
         .with_microphone(GrantedPermission);
 
-    let failure = capture.start(DEVICE_KEY).expect_err("실패해야 한다");
+    let failure = capture.start(DEVICE_KEY, CaptureMode::Microphone).expect_err("실패해야 한다");
     let json = serde_json::to_value(&failure).expect("직렬화할 수 있어야 한다");
 
     // `src/ipc/failure.ts`의 FailureKind union에 같은 문자열이 있어야 한다.
@@ -289,7 +298,7 @@ fn a_capture_that_was_cut_short_says_so_and_keeps_what_was_recorded() {
         ),
     );
 
-    capture.start(DEVICE_KEY).expect("녹음을 시작할 수 있어야 한다");
+    capture.start(DEVICE_KEY, CaptureMode::Microphone).expect("녹음을 시작할 수 있어야 한다");
     let failure = capture.stop().expect_err("끊긴 캡처는 실패로 보고된다");
 
     assert_eq!(failure.kind, FailureKind::AudioDevice);
@@ -326,8 +335,8 @@ fn starting_twice_does_not_throw_away_the_recording_already_running() {
     let app_data_dir = temp.app_data_dir();
     let capture = Recorder::with_source(app_data_dir.clone(), FakeMicrophone::speaking());
 
-    capture.start(DEVICE_KEY).expect("첫 녹음 시작");
-    let failure = capture.start(DEVICE_KEY).expect_err("이미 녹음 중이다");
+    capture.start(DEVICE_KEY, CaptureMode::Microphone).expect("첫 녹음 시작");
+    let failure = capture.start(DEVICE_KEY, CaptureMode::Microphone).expect_err("이미 녹음 중이다");
 
     assert_eq!(failure.kind, FailureKind::InvalidInput);
     assert!(failure.source_data_safe, "진행 중인 녹음을 건드리지 않는다");
@@ -348,10 +357,77 @@ fn a_place_that_cannot_hold_recordings_becomes_a_failure_the_user_can_read() {
         .expect("사전 조건: 자리를 막는다");
 
     let capture = Recorder::with_source(app_data_dir, FakeMicrophone::speaking());
-    let failure = capture.start(DEVICE_KEY).expect_err("파일 위에 녹음을 둘 수는 없다");
+    let failure = capture.start(DEVICE_KEY, CaptureMode::Microphone).expect_err("파일 위에 녹음을 둘 수는 없다");
 
     assert_eq!(failure.kind, FailureKind::Storage, "장치 실패와 구분된다");
     assert!(!failure.message.is_empty());
     assert!(failure.source_data_safe, "아무것도 쓰지 못했다");
     assert!(failure.retryable);
+}
+
+/// ADR-0012 §9 · PRODUCT-SPEC §22 — 모드가 어느 장치를 여는지 정한다.
+///
+/// **두 모드가 같은 소스를 열면 회의 녹음에 상대 목소리가 없다.** 그 사실은 파일을
+/// 열어 보기 전에는 드러나지 않으므로, 여기서 못박는다.
+#[test]
+fn the_meeting_mode_opens_the_meeting_input_and_the_microphone_mode_does_not() {
+    let temp = TempRoot::new("meeting-mode");
+    let capture = Recorder::with_source(temp.app_data_dir(), FakeMicrophone::speaking())
+        .with_meeting_source(FakeMicrophone::meeting_input());
+
+    capture
+        .start(DEVICE_KEY, CaptureMode::Meeting)
+        .expect("회의 모드로 시작할 수 있어야 한다");
+    let meeting = capture.stop().expect("정지할 수 있어야 한다");
+
+    capture
+        .start(DEVICE_KEY, CaptureMode::Microphone)
+        .expect("마이크 모드로 시작할 수 있어야 한다");
+    let microphone = capture.stop().expect("정지할 수 있어야 한다");
+
+    assert_eq!(meeting.device_label, "가짜 회의 입력", "회의 모드가 연 장치");
+    assert_eq!(microphone.device_label, "가짜 마이크", "마이크 모드가 연 장치");
+    assert_ne!(
+        meeting.format, microphone.format,
+        "회의 녹음은 두 채널이고 마이크 녹음은 한 채널이다 — 같은 형식이면 한쪽이 잘못 열렸다",
+    );
+}
+
+/// **회의 모드를 지원하지 못하는 기기에서 조용히 마이크로만 녹음하지 않는다.**
+///
+/// 그렇게 하면 사용자는 회의를 녹음했다고 믿고, 상대 목소리가 없는 파일을 나중에 발견한다.
+#[test]
+fn a_device_that_cannot_record_a_meeting_says_so_instead_of_recording_the_microphone_alone() {
+    let temp = TempRoot::new("meeting-unavailable");
+    let app_data_dir = temp.app_data_dir();
+    // 회의 소스를 넣지 않는다 — 이 플랫폼이 지원하지 않는 경우와 같은 상태다.
+    let capture = Recorder::with_source(app_data_dir.clone(), FakeMicrophone::speaking());
+
+    let failure = capture
+        .start(DEVICE_KEY, CaptureMode::Meeting)
+        .expect_err("회의 모드로 시작할 수 없어야 한다");
+
+    assert!(
+        failure.message.contains("회의"),
+        "무엇이 안 되는지 말해야 한다: {}",
+        failure.message,
+    );
+    assert!(
+        wav_files(&app_data_dir.recordings_dir()).is_empty(),
+        "시작하지 못한 녹음은 파일을 남기지 않는다",
+    );
+}
+
+/// 경계를 건너는 모드 이름은 왕복한다. **모르는 이름은 조용히 마이크가 되지 않는다.**
+#[test]
+fn a_capture_mode_survives_the_round_trip_and_an_unknown_name_is_refused() {
+    for mode in [CaptureMode::Microphone, CaptureMode::Meeting] {
+        assert_eq!(
+            CaptureMode::from_key(mode.as_key()).expect("아는 이름이어야 한다"),
+            mode,
+        );
+    }
+
+    let failure = CaptureMode::from_key("녹화").expect_err("모르는 이름은 거절해야 한다");
+    assert_eq!(failure.kind, FailureKind::InvalidInput);
 }

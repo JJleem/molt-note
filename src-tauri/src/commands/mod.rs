@@ -104,8 +104,8 @@ use tauri::{Manager, State};
 
 use crate::audio::capture::{self, ActiveCapture};
 use crate::audio::{
-    catalog, finalized, InputDeviceSource, RecordingSession, SampleSource, SystemInputDevices,
-    SystemSampleSource,
+    catalog, finalized, CaptureMode, InputDeviceSource, RecordingSession, SampleSource,
+    SystemInputDevices, SystemSampleSource,
 };
 use crate::db::{self, settings, store};
 use crate::domain::{
@@ -510,6 +510,10 @@ struct ActiveRecording {
 /// 없고, 다음 녹음은 새 session으로 시작한다 ([`Self::stop`]).
 pub struct Recorder {
     source: Box<dyn SampleSource + Send + Sync>,
+    /// 회의 모드에서 여는 자리 (§22). **없을 수 있다** — 이 플랫폼이 시스템 오디오를 함께
+    /// 잡지 못하면 여기가 비고, 회의 모드로 시작하려는 호출은 그 사실을 말하며 끝난다.
+    /// 조용히 마이크로만 녹음하지 않는다 — 상대 목소리가 빠진 파일은 회의록이 되지 못한다.
+    meeting_source: Option<Box<dyn SampleSource + Send + Sync>>,
     /// 경과 시간을 재는 자리. 상태 기계는 시각을 값으로만 받는다.
     clock: Box<dyn Clock>,
     /// 마이크 접근이 허용됐는지 묻는 자리 (`crate::platform::microphone` · INV-10).
@@ -531,6 +535,7 @@ impl Recorder {
     {
         Self {
             source: Box::new(SystemSampleSource),
+            meeting_source: meeting_source(),
             clock: Box::new(MonotonicClock::new()),
             microphone: Box::new(SystemMicrophonePermission),
             app_data_dir: AppDataDirectory::from_manager(manager).map_err(Into::into),
@@ -554,6 +559,7 @@ impl Recorder {
     ) -> Self {
         Self {
             source: Box::new(source),
+            meeting_source: None,
             clock: Box::new(clock),
             microphone: Box::new(SystemMicrophonePermission),
             app_data_dir: Ok(app_data_dir),
@@ -570,6 +576,34 @@ impl Recorder {
         self
     }
 
+    /// 회의 모드가 여는 자리를 주어진 것으로 바꾼다.
+    ///
+    /// **회의 모드를 지나는 테스트가 쓰는 자리다** — 실제 시스템 오디오 장치 없이
+    /// 두 모드가 서로 다른 소스를 연다는 사실을 그대로 확인할 수 있다 (§18).
+    pub fn with_meeting_source(
+        mut self,
+        source: impl SampleSource + Send + Sync + 'static,
+    ) -> Self {
+        self.meeting_source = Some(Box::new(source));
+        self
+    }
+
+    /// 이 모드가 열 소스. **없으면 지어내지 않는다.**
+    fn source_for(&self, mode: CaptureMode) -> Result<&(dyn SampleSource + Send + Sync), Failure> {
+        match mode {
+            CaptureMode::Microphone => Ok(self.source.as_ref()),
+            CaptureMode::Meeting => self
+                .meeting_source
+                .as_deref()
+                .ok_or_else(|| {
+                    Failure::permanent(
+                        FailureKind::AudioDevice,
+                        "이 기기에서는 회의 모드로 녹음할 수 없다. 마이크 모드로 녹음할 수 있다.",
+                    )
+                }),
+        }
+    }
+
     /// 고른 장치를 열고 녹음을 시작한다.
     ///
     /// 이미 녹음 중이면 시작하지 않는다 — **진행 중인 녹음을 조용히 버리지 않는다.**
@@ -580,7 +614,7 @@ impl Recorder {
     /// 장치도 열지 않은 채, 사용자가 무엇을 해야 하는지 담은 실패로 끝난다
     /// (`crate::platform::microphone` · §13). 어디서 무엇을 허용해야 하는지는 여기가 아니라
     /// platform 경계가 안다 (INV-10).
-    pub fn start(&self, device_key: &str) -> Result<(), Failure> {
+    pub fn start(&self, device_key: &str, mode: CaptureMode) -> Result<(), Failure> {
         let app_data_dir = self.app_data_dir.as_ref().map_err(Clone::clone)?;
         let mut active = self.active()?;
         if active.is_some() {
@@ -605,7 +639,7 @@ impl Recorder {
         // 권한을 확정하지 못한 채 장치를 열지 못했다면, 그 실패는 권한 문제로 분류해 안내한다.
         // 그것이 항상 옳다는 보증은 없으며 그 한계는 UNVERIFIED다
         // (`docs/ADR-0005-microphone-permission.md` §4·§6).
-        let capture = capture::start(self.source.as_ref(), device_key, &directory, &stem)
+        let capture = capture::start(self.source_for(mode)?, device_key, &directory, &stem)
             .map_err(|failure| microphone::explain_open_failure(access, failure))?;
 
         let mut session = RecordingSession::idle();
@@ -963,8 +997,17 @@ pub fn list_input_devices(
 }
 
 #[tauri::command]
-pub fn start_capture(recorder: State<'_, Recorder>, device_key: String) -> Result<(), Failure> {
-    recorder.start(&device_key)
+pub fn start_capture(
+    recorder: State<'_, Recorder>,
+    device_key: String,
+    mode: Option<String>,
+) -> Result<(), Failure> {
+    // 모드를 말하지 않은 호출은 마이크 모드다 — 지금까지의 동작 그대로다.
+    let mode = match mode.as_deref() {
+        Some(key) => CaptureMode::from_key(key)?,
+        None => CaptureMode::default(),
+    };
+    recorder.start(&device_key, mode)
 }
 
 #[tauri::command]
@@ -1411,4 +1454,18 @@ pub fn rename_recording(
     }
 
     storage.rename_recording(&recording_id, title)
+}
+
+/// 이 플랫폼이 마이크와 시스템 오디오를 함께 잡을 수 있는가 (INV-10).
+///
+/// **`cfg(target_os)`는 여기 한 줄과 `platform/`에만 있다.** [`Recorder`]는 이 함수가
+/// 무엇을 돌려주는지만 알고, 어느 OS인지는 모른다.
+#[cfg(target_os = "macos")]
+fn meeting_source() -> Option<Box<dyn SampleSource + Send + Sync>> {
+    Some(Box::new(crate::audio::meeting_capture::MeetingSource))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn meeting_source() -> Option<Box<dyn SampleSource + Send + Sync>> {
+    None
 }

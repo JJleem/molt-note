@@ -22,7 +22,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use molt_note_lib::audio::{CaptureFormat, OpenCapture, SampleSink, SampleSource};
+use molt_note_lib::audio::{CaptureMode, CaptureFormat, OpenCapture, SampleSink, SampleSource};
 use molt_note_lib::commands::Recorder;
 use molt_note_lib::domain::{Failure, FailureKind};
 use molt_note_lib::platform::app_data_dir::AppDataDirectory;
@@ -190,7 +190,7 @@ fn a_denied_microphone_stops_the_capture_before_anything_is_opened_or_written() 
             .with_microphone(SharedPermission::to(&permission));
 
     let failure = recorder
-        .start(DEVICE_KEY)
+        .start(DEVICE_KEY, CaptureMode::Microphone)
         .expect_err("거부된 상태에서는 시작되지 않아야 한다");
 
     assert_eq!(failure.kind, FailureKind::MicrophonePermission);
@@ -216,7 +216,7 @@ fn a_denied_microphone_tells_the_user_what_to_do_and_is_not_a_recording_setup_fa
     let recorder = Recorder::with_source(temp.app_data_dir(), SharedMicrophone::to(&FakeMicrophone::new()))
         .with_microphone(SharedPermission::to(&permission));
 
-    let failure = recorder.start(DEVICE_KEY).expect_err("거부");
+    let failure = recorder.start(DEVICE_KEY, CaptureMode::Microphone).expect_err("거부");
 
     assert_ne!(failure.kind, FailureKind::AudioDevice, "장치 실패가 아니다");
     assert_ne!(failure.kind, FailureKind::Storage, "초기화 실패가 아니다");
@@ -249,7 +249,7 @@ fn a_granted_microphone_records_exactly_as_before() {
             .with_microphone(SharedPermission::to(&permission));
 
     recorder
-        .start(DEVICE_KEY)
+        .start(DEVICE_KEY, CaptureMode::Microphone)
         .expect("허용된 상태에서는 시작돼야 한다");
     let report = recorder.stop().expect("정지할 수 있어야 한다");
 
@@ -271,9 +271,9 @@ fn allowing_access_afterwards_makes_the_next_start_work() {
         Recorder::with_source(temp.app_data_dir(), SharedMicrophone::to(&microphone))
             .with_microphone(SharedPermission::to(&permission));
 
-    recorder.start(DEVICE_KEY).expect_err("아직 거부돼 있다");
+    recorder.start(DEVICE_KEY, CaptureMode::Microphone).expect_err("아직 거부돼 있다");
     permission.allow();
-    recorder.start(DEVICE_KEY).expect("허용한 뒤에는 시작된다");
+    recorder.start(DEVICE_KEY, CaptureMode::Microphone).expect("허용한 뒤에는 시작된다");
 
     assert_eq!(permission.asked(), 2, "시작할 때마다 새로 묻는다");
     assert_eq!(microphone.opened(), 1);
@@ -292,7 +292,7 @@ fn an_undetermined_state_does_not_block_a_microphone_that_opens() {
             .with_microphone(SharedPermission::to(&permission));
 
     recorder
-        .start(DEVICE_KEY)
+        .start(DEVICE_KEY, CaptureMode::Microphone)
         .expect("미결정 상태가 시작을 막지 않는다");
 
     assert_eq!(microphone.opened(), 1);
@@ -308,7 +308,7 @@ fn an_undetermined_state_that_cannot_open_the_device_points_at_the_permission_se
     let recorder = Recorder::with_source(temp.app_data_dir(), UnavailableMicrophone)
         .with_microphone(SharedPermission::to(&permission));
 
-    let failure = recorder.start(DEVICE_KEY).expect_err("장치를 열지 못했다");
+    let failure = recorder.start(DEVICE_KEY, CaptureMode::Microphone).expect_err("장치를 열지 못했다");
 
     assert_eq!(failure.kind, FailureKind::MicrophonePermission);
     assert!(
@@ -329,7 +329,7 @@ fn a_device_that_fails_while_access_is_granted_stays_a_device_failure() {
     let recorder = Recorder::with_source(temp.app_data_dir(), UnavailableMicrophone)
         .with_microphone(SharedPermission::to(&permission));
 
-    let failure = recorder.start(DEVICE_KEY).expect_err("장치를 열지 못했다");
+    let failure = recorder.start(DEVICE_KEY, CaptureMode::Microphone).expect_err("장치를 열지 못했다");
 
     assert_eq!(failure.kind, FailureKind::AudioDevice);
     assert_eq!(failure.message, "고른 입력 장치를 열지 못했다.");

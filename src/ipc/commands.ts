@@ -25,6 +25,7 @@ import type {
   AiNote,
   AiNoteStatus,
   AiProviderStatus,
+  CaptureMode,
   ExportedAiRequest,
   ExportedFile,
   HandoffText,
@@ -53,6 +54,7 @@ export type {
   AiProviderLocality,
   AiProviderState,
   AiProviderStatus,
+  CaptureMode,
   CaptureReport,
   ExportedAiRequest,
   ExportedFile,
@@ -176,8 +178,8 @@ export function listInputDevices(): Promise<InputDevice[]> {
  * 화면이 사라져도 녹음은 계속된다 (R-001 · docs/ADR-0004-recording-session-lifecycle.md).
  * 지금 상태는 {@link captureStatus}로 물어보고, 결과는 {@link stopCapture}가 돌려준다.
  */
-export function startCapture(deviceKey: string): Promise<void> {
-  return call<void>('start_capture', { deviceKey });
+export function startCapture(deviceKey: string, mode: CaptureMode): Promise<void> {
+  return call<void>('start_capture', { deviceKey, mode });
 }
 
 /**

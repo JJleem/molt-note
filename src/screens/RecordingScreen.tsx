@@ -11,7 +11,11 @@ import {
 import { FailureNotice } from './FailureNotice';
 import {
   INITIAL_RECORDING,
+  CAPTURE_MODES,
+  canSelectMode,
   editedTitle,
+  modeHint,
+  selectedMode,
   failedAction,
   failedDevices,
   failedSession,
@@ -182,7 +186,7 @@ export function RecordingScreen({ navigate }: ScreenProps) {
     }
 
     setView((state) => requestedAction(state, 'start'));
-    startCapture(microphone.deviceKey).then(
+    startCapture(microphone.deviceKey, view.mode).then(
       refreshStatus,
       (error: unknown) => setView((state) => failedAction(state, 'start', error)),
     );
@@ -221,6 +225,7 @@ export function RecordingScreen({ navigate }: ScreenProps) {
   };
 
   const controls = recordingControls(view);
+  const modeSelectable = canSelectMode(view);
   const display = sessionDisplay(view);
   const level = inputLevelDisplay(view);
   const meter = inputLevelMeter(view);
@@ -231,16 +236,38 @@ export function RecordingScreen({ navigate }: ScreenProps) {
   return (
     <div className="screen">
       <label className="field recording__title" htmlFor="recording-title">
-        <span className="field__label">Title</span>
+        <span className="field__label">제목</span>
         <input
           id="recording-title"
           type="text"
           className="input"
-          placeholder="Untitled recording"
+          placeholder="제목 없는 녹음"
           value={view.title}
           onChange={(event) => setView((state) => editedTitle(state, event.currentTarget.value))}
         />
       </label>
+
+      {/* 무엇을 녹음할지는 **시작하기 전에** 고른다 (§22). 녹음 중에는 잠긴다 —
+          한 파일 안에서 채널 수가 달라질 수 없기 때문이다. 어느 때 고를 수 있는지
+          정하는 규칙은 여기 없고 `canSelectMode`에 있다. */}
+      <div className="recording__modes" role="radiogroup" aria-label="녹음 모드">
+        {CAPTURE_MODES.map((mode) => (
+          <button
+            key={mode.value}
+            type="button"
+            role="radio"
+            aria-checked={view.mode === mode.value}
+            className={
+              view.mode === mode.value ? 'chip chip--selected' : 'chip'
+            }
+            disabled={!modeSelectable}
+            onClick={() => setView((state) => selectedMode(state, mode.value))}
+          >
+            {mode.label}
+          </button>
+        ))}
+      </div>
+      <p className="hint">{modeHint(view.mode)}</p>
 
       {/* 녹음 상태와 경과 시간이 화면에서 가장 크고 분명하다 (§19). */}
       <section className="recording">
@@ -291,14 +318,14 @@ export function RecordingScreen({ navigate }: ScreenProps) {
       {/* 주 조작 넷이 이 화면에서 상태 다음으로 크다 (§19 · 요구 10). 지금 누를 수 있는
           것과 없는 것은 `disabled`가 가르고, 흐림으로 눈에도 갈린다 (요구 12). 어느 것을
           누를 수 있는지 정하는 규칙은 여기 없고 `recordingControls`에 있다. */}
-      <div className="recording__controls" role="group" aria-label="Recording controls">
+      <div className="recording__controls" role="group" aria-label="녹음 조작">
         <button
           type="button"
           className="btn btn--primary"
           disabled={!controls.record}
           onClick={start}
         >
-          Record
+          녹음
         </button>
         <button
           type="button"
@@ -306,7 +333,7 @@ export function RecordingScreen({ navigate }: ScreenProps) {
           disabled={!controls.pause}
           onClick={pause}
         >
-          Pause
+          일시정지
         </button>
         <button
           type="button"
@@ -314,7 +341,7 @@ export function RecordingScreen({ navigate }: ScreenProps) {
           disabled={!controls.resume}
           onClick={resume}
         >
-          Resume
+          다시 시작
         </button>
         <button
           type="button"
@@ -322,7 +349,7 @@ export function RecordingScreen({ navigate }: ScreenProps) {
           disabled={!controls.stop}
           onClick={stop}
         >
-          Stop
+          정지
         </button>
       </div>
 
@@ -330,7 +357,7 @@ export function RecordingScreen({ navigate }: ScreenProps) {
         <p className="recording__device">{microphoneLabel(view.microphone)}</p>
         {notice !== null && <p className="hint">{notice}</p>}
         <button type="button" className="btn btn--secondary" onClick={reloadDevices}>
-          Reload devices
+          장치 다시 읽기
         </button>
       </section>
 
@@ -347,7 +374,7 @@ export function RecordingScreen({ navigate }: ScreenProps) {
 
       {view.saved !== null && (
         <section className="group">
-          <h2 className="group__title">Saved</h2>
+          <h2 className="group__title">저장됨</h2>
           <p className="empty">
             {view.saved.title} · {view.saved.durationLabel}
           </p>
@@ -356,7 +383,7 @@ export function RecordingScreen({ navigate }: ScreenProps) {
             className="btn btn--secondary"
             onClick={() => navigate({ screen: 'recordings' })}
           >
-            Show in Recordings
+            녹음 목록에서 보기
           </button>
         </section>
       )}

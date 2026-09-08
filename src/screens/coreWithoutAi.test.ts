@@ -245,6 +245,7 @@ describe('녹음은 AI를 알지 않는다 (INV-8)', () => {
     expect(Object.keys(INITIAL_RECORDING).sort()).toEqual([
       'busy',
       'microphone',
+      'mode',
       'saved',
       'session',
       'title',

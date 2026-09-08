@@ -125,6 +125,21 @@ export interface MissingAudio {
 export type SessionState = 'idle' | 'recording' | 'paused' | 'stopped';
 
 /**
+ * 무엇을 녹음하는가 (§22).
+ *
+ * `src-tauri/src/audio/capture.rs`의 `CaptureMode`와 1:1이며, 이름도 그 값의 것과 같다.
+ *
+ * ```text
+ * microphone  마이크 하나            — 혼자 말하는 녹음
+ * meeting     마이크 + 시스템 오디오 — 화상회의
+ * ```
+ *
+ * **모드는 시작할 때 정해지고 녹음 중에 바뀌지 않는다** — 한 파일 안에서 채널 수가
+ * 달라질 수 없기 때문이다.
+ */
+export type CaptureMode = 'microphone' | 'meeting';
+
+/**
  * 입력 레벨 판정 하나 (docs/ADR-0003-recording-engine.md §16.4).
  *
  * `src-tauri/src/audio/level.rs`의 `LevelVerdict`와 1:1이다 — 이름도 뜻도 같다.

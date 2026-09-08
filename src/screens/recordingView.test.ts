@@ -15,7 +15,11 @@ import type {
   StoppedRecording,
 } from '../ipc/types';
 import {
+  CAPTURE_MODES,
   INITIAL_RECORDING,
+  canSelectMode,
+  modeHint,
+  selectedMode,
   UNKNOWN_ELAPSED,
   UNKNOWN_LEVEL_TEXT,
   WEAK_LEVEL_WARNING,
@@ -624,5 +628,56 @@ describe('입력 레벨 막대 (2026-09-08)', () => {
     expect(inputLevelMeter(withLevel(0.7, 'usable'))!.weak).toBe(false);
     expect(inputLevelMeter(withLevel(0.4, 'low'))!.weak).toBe(true);
     expect(inputLevelMeter(withLevel(0.1, 'silent'))!.weak).toBe(true);
+  });
+});
+
+describe('녹음 모드 (§22 · ADR-0012)', () => {
+  const at = (state: 'idle' | 'recording' | 'paused' | 'stopped') =>
+    observedSession(INITIAL_RECORDING, {
+      state,
+      elapsedMs: 0,
+      elapsedLabel: '0:00',
+      level: null,
+    });
+
+  it('처음에는 마이크 모드다', () => {
+    // 회의 모드가 기본이면, 회의가 아닌 녹음도 시스템 소리를 함께 담는다.
+    expect(INITIAL_RECORDING.mode).toBe('microphone');
+  });
+
+  it('시작하기 전에는 고를 수 있다', () => {
+    expect(canSelectMode(at('idle'))).toBe(true);
+    expect(selectedMode(at('idle'), 'meeting').mode).toBe('meeting');
+  });
+
+  it('정지한 뒤에도 다음 녹음을 위해 고를 수 있다', () => {
+    expect(canSelectMode(at('stopped'))).toBe(true);
+  });
+
+  it('녹음 중이나 일시정지 중에는 바꾸지 않는다', () => {
+    // 지키려는 것: **한 파일 안에서 채널 수가 달라지지 않는다.** WAV 헤더는 파일 하나에
+    // 하나뿐이므로, 도중에 모드가 바뀌면 헤더가 내용과 어긋난다.
+    for (const state of ['recording', 'paused'] as const) {
+      const view = { ...at(state), mode: 'microphone' as const };
+      expect(canSelectMode(view)).toBe(false);
+      expect(selectedMode(view, 'meeting').mode).toBe('microphone');
+    }
+  });
+
+  it('상태를 아직 모르거나 답을 기다리는 동안에는 고르지 않는다', () => {
+    expect(canSelectMode(INITIAL_RECORDING)).toBe(false);
+    expect(canSelectMode({ ...at('idle'), busy: true })).toBe(false);
+  });
+
+  it('두 모드가 각각 무엇을 녹음하는지 말한다', () => {
+    // 사용자가 판단하는 데 필요한 것은 모드 이름이 아니라 **무엇이 파일에 들어가는가**다.
+    expect(modeHint('meeting')).toContain('함께');
+    expect(modeHint('microphone')).toContain('마이크 하나');
+    expect(modeHint('meeting')).not.toBe(modeHint('microphone'));
+  });
+
+  it('고를 수 있는 모드가 두 가지이고 이름이 겹치지 않는다', () => {
+    expect(CAPTURE_MODES.map((mode) => mode.value)).toEqual(['microphone', 'meeting']);
+    expect(new Set(CAPTURE_MODES.map((mode) => mode.label)).size).toBe(CAPTURE_MODES.length);
   });
 });

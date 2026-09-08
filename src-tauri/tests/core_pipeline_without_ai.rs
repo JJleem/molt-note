@@ -32,7 +32,7 @@ use std::time::{Duration, Instant};
 
 use molt_note_lib::ai::testing::FakeNoteAiProvider;
 use molt_note_lib::ai::NoteAiProvider;
-use molt_note_lib::audio::{CaptureFormat, OpenCapture, SampleSink, SampleSource};
+use molt_note_lib::audio::{CaptureMode, CaptureFormat, OpenCapture, SampleSink, SampleSource};
 use molt_note_lib::commands::{
     finish_recording, AiNoteStatusPayload, NoteGenerator, Recorder, Storage,
     StoppedRecordingPayload, Transcriber, TranscriptionStatusPayload,
@@ -223,7 +223,7 @@ impl Fixture {
     /// 소리가 들어 있는 녹음 하나를 시작해서 정지까지 마친다. **제품 경로 그대로다.**
     fn record_and_stop(&self) -> StoppedRecordingPayload {
         self.recorder
-            .start(DEVICE_KEY)
+            .start(DEVICE_KEY, CaptureMode::Microphone)
             .expect("녹음을 시작할 수 있어야 한다");
         self.microphone.speak(1_000);
         self.clock.advance(5_000);

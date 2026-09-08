@@ -172,6 +172,58 @@ pub enum SinkError {
     Closed,
 }
 
+/// 무엇을 녹음하는가 (PRODUCT-SPEC §22 · ADR-0012).
+///
+/// ```text
+/// Microphone  마이크 하나            — 혼자 말하는 녹음
+/// Meeting     마이크 + 시스템 오디오 — 화상회의
+/// ```
+///
+/// **모드는 시작할 때 정해지고 녹음 중에 바뀌지 않는다.** 도중에 바뀌면 한 파일 안에서
+/// 채널 수가 달라지고, WAV 헤더는 파일 하나에 하나뿐이다.
+///
+/// 어느 장치를 여는가는 이 값이 정하지 않는다 — 부르는 쪽이 준 장치 키를 그대로 쓴다.
+/// 그래서 회의 모드에서도 AirPods를 끼면 그것이 잡힌다 (§22).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CaptureMode {
+    /// 마이크만. **기본값이다** — 모드를 말하지 않은 호출은 지금까지와 같이 동작한다.
+    #[default]
+    Microphone,
+    /// 마이크와 시스템 오디오를 함께. macOS에서만 열린다.
+    Meeting,
+}
+
+impl CaptureMode {
+    /// 경계를 건너는 이름. **모르는 이름은 조용히 기본값이 되지 않는다.**
+    pub fn from_key(key: &str) -> Result<Self, Failure> {
+        match key {
+            "microphone" => Ok(Self::Microphone),
+            "meeting" => Ok(Self::Meeting),
+            other => Err(Failure::permanent(
+                FailureKind::InvalidInput,
+                "알 수 없는 녹음 모드다.",
+            )
+            .with_detail(format!("mode={other}"))),
+        }
+    }
+
+    /// 같은 이름으로 되돌린다. [`Self::from_key`]와 짝이다.
+    pub const fn as_key(self) -> &'static str {
+        match self {
+            Self::Microphone => "microphone",
+            Self::Meeting => "meeting",
+        }
+    }
+
+    /// 사람이 읽는 이름.
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Microphone => "마이크",
+            Self::Meeting => "회의",
+        }
+    }
+}
+
 /// 샘플이 파일 쪽으로 들어가는 입구. [`SampleSource`]가 받는 값이다.
 ///
 /// 통로의 실제 모양(일시정지 표시가 함께 흐른다는 것)은 이 타입 뒤에 있다 — 장치를 여는

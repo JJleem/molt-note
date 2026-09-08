@@ -34,6 +34,7 @@
  */
 import { toFailure, type Failure } from '../ipc/failure';
 import type {
+  CaptureMode,
   InputDevice,
   InputLevelVerdict,
   SessionState,
@@ -112,6 +113,8 @@ export interface RecordingTrouble {
 export interface RecordingView {
   /** 사용자가 입력한 제목. 비어 있으면 Rust가 저장 시각에서 만든다 (`stop_capture`). */
   readonly title: string;
+  /** 무엇을 녹음할 것인가 (§22). **시작할 때 정해지고 녹음 중에는 바뀌지 않는다.** */
+  readonly mode: CaptureMode;
   /** backend가 마지막으로 알려준 session 상태. 아직 물어보지 못했으면 `null`이다. */
   readonly session: SessionStatus | null;
   readonly microphone: SelectedMicrophone;
@@ -125,6 +128,7 @@ export interface RecordingView {
 /** 화면을 열었을 때의 상태. 아직 아무것도 물어보지 않았다. */
 export const INITIAL_RECORDING: RecordingView = {
   title: '',
+  mode: 'microphone',
   session: null,
   microphone: { kind: 'unknown', failure: null },
   busy: false,
@@ -481,6 +485,41 @@ export function observedDevices(
  */
 export function failedDevices(view: RecordingView, error: unknown): RecordingView {
   return { ...view, microphone: { kind: 'unknown', failure: toFailure(error) } };
+}
+
+/**
+ * 고를 수 있는 녹음 모드와 그 이름.
+ *
+ * **이름은 여기 한 곳에만 있다** — 화면이 자기 문자열을 만들지 않는다.
+ */
+export const CAPTURE_MODES: readonly { readonly value: CaptureMode; readonly label: string }[] = [
+  { value: 'microphone', label: '마이크' },
+  { value: 'meeting', label: '회의' },
+];
+
+/** 이 모드가 무엇을 녹음하는지 한 줄로. **무엇이 파일에 들어가는지를 말한다.** */
+export function modeHint(mode: CaptureMode): string {
+  return mode === 'meeting'
+    ? '내 마이크와 이 Mac에서 나는 소리를 함께 녹음한다 — 화상회의용이다.'
+    : '마이크 하나만 녹음한다.';
+}
+
+/**
+ * 녹음 모드를 골랐다.
+ *
+ * **녹음 중에는 바꾸지 않는다** — 한 파일 안에서 채널 수가 달라질 수 없기 때문이다.
+ * 화면이 이미 그 버튼을 잠그지만, 판정은 여기 한 곳에 둔다.
+ */
+export function selectedMode(view: RecordingView, mode: CaptureMode): RecordingView {
+  return canSelectMode(view) ? { ...view, mode } : view;
+}
+
+/** 지금 모드를 바꿀 수 있는가. 녹음이 진행 중이 아닐 때만이다. */
+export function canSelectMode(view: RecordingView): boolean {
+  if (view.busy || view.session === null) {
+    return false;
+  }
+  return view.session.state === 'idle' || view.session.state === 'stopped';
 }
 
 /** 제목을 고쳤다. */

@@ -26,7 +26,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use molt_note_lib::audio::{CaptureFormat, OpenCapture, SampleSink, SampleSource};
+use molt_note_lib::audio::{CaptureMode, CaptureFormat, OpenCapture, SampleSink, SampleSource};
 use molt_note_lib::commands::{InputLevelPayload, Recorder};
 use molt_note_lib::domain::{format_duration_ms, Failure, FailureKind};
 use molt_note_lib::platform::app_data_dir::AppDataDirectory;
@@ -220,7 +220,7 @@ fn the_whole_path_runs_start_pause_resume_stop_and_finishes_one_file() {
     let temp = TempRoot::new("whole-path");
     let (recorder, microphone, clock, app_data_dir) = recorder_with(&temp);
 
-    recorder.start(DEVICE_KEY).expect("녹음을 시작할 수 있어야 한다");
+    recorder.start(DEVICE_KEY, CaptureMode::Microphone).expect("녹음을 시작할 수 있어야 한다");
     microphone.speak(1_000);
     clock.advance(3_000);
 
@@ -274,7 +274,7 @@ fn the_status_answer_carries_the_state_the_elapsed_ms_and_a_label_made_by_rust()
     assert_eq!(idle.elapsed_ms, 0);
     assert_eq!(idle.elapsed_label, "0:00");
 
-    recorder.start(DEVICE_KEY).expect("시작");
+    recorder.start(DEVICE_KEY, CaptureMode::Microphone).expect("시작");
     clock.advance(7_000);
 
     let recording = recorder.status().expect("상태를 물어본다");
@@ -316,7 +316,7 @@ fn the_status_answer_tells_a_low_input_level_apart_from_a_usable_one() {
     let quiet_temp = TempRoot::new("level-low");
     let (recorder, microphone, _clock, _) = recorder_with(&quiet_temp);
 
-    recorder.start(DEVICE_KEY).expect("시작");
+    recorder.start(DEVICE_KEY, CaptureMode::Microphone).expect("시작");
     microphone.speak(256);
     let low = level_of(&recorder);
     recorder.stop().expect("정지");
@@ -333,7 +333,7 @@ fn the_status_answer_tells_a_low_input_level_apart_from_a_usable_one() {
     let loud_temp = TempRoot::new("level-usable");
     let (recorder, microphone, _clock, _) = recorder_with(&loud_temp);
 
-    recorder.start(DEVICE_KEY).expect("시작");
+    recorder.start(DEVICE_KEY, CaptureMode::Microphone).expect("시작");
     microphone.speak(1_685);
     let usable = level_of(&recorder);
     recorder.stop().expect("정지");
@@ -359,7 +359,7 @@ fn the_input_level_does_not_move_while_the_recording_is_paused() {
     let temp = TempRoot::new("level-paused");
     let (recorder, microphone, clock, app_data_dir) = recorder_with(&temp);
 
-    recorder.start(DEVICE_KEY).expect("시작");
+    recorder.start(DEVICE_KEY, CaptureMode::Microphone).expect("시작");
     microphone.speak(1_685);
     let recording = level_of(&recorder);
     assert_eq!(recording.average_dbfs, -25.8);
@@ -409,7 +409,7 @@ fn there_is_no_input_level_before_a_recording_and_none_again_after_it() {
     assert_eq!(idle.level, None, "녹음 전에는 잰 것이 없다");
 
     // 장치는 열렸지만 아직 한 샘플도 파일에 쓰이지 않았다. 여전히 없음이다.
-    recorder.start(DEVICE_KEY).expect("시작");
+    recorder.start(DEVICE_KEY, CaptureMode::Microphone).expect("시작");
     let started = recorder.status().expect("상태를 물어본다");
     assert_eq!(started.state, "recording");
     assert_eq!(started.level, None, "'소리 없음'이 아니라 값 없음이다");
@@ -430,7 +430,7 @@ fn the_status_that_reaches_the_screen_carries_numbers_and_a_sentence_but_no_audi
     let temp = TempRoot::new("level-wire");
     let (recorder, microphone, _clock, _) = recorder_with(&temp);
 
-    recorder.start(DEVICE_KEY).expect("시작");
+    recorder.start(DEVICE_KEY, CaptureMode::Microphone).expect("시작");
     microphone.speak(1_685);
     level_of(&recorder);
 
@@ -479,7 +479,7 @@ fn a_recording_stopped_while_paused_keeps_exactly_what_was_recorded() {
     let temp = TempRoot::new("stopped-while-paused");
     let (recorder, microphone, clock, app_data_dir) = recorder_with(&temp);
 
-    recorder.start(DEVICE_KEY).expect("시작");
+    recorder.start(DEVICE_KEY, CaptureMode::Microphone).expect("시작");
     microphone.speak(1_000);
     clock.advance(4_000);
     recorder.pause().expect("일시정지");
@@ -518,7 +518,7 @@ fn a_request_that_does_not_fit_the_current_state_is_refused_without_touching_the
         "거절된 요청은 파일을 만들지 않는다"
     );
 
-    recorder.start(DEVICE_KEY).expect("시작");
+    recorder.start(DEVICE_KEY, CaptureMode::Microphone).expect("시작");
     microphone.speak(1_000);
     clock.advance(1_000);
 
@@ -556,12 +556,12 @@ fn the_next_recording_starts_from_a_new_session_and_a_new_file() {
     let temp = TempRoot::new("next-session");
     let (recorder, microphone, clock, app_data_dir) = recorder_with(&temp);
 
-    recorder.start(DEVICE_KEY).expect("첫 녹음 시작");
+    recorder.start(DEVICE_KEY, CaptureMode::Microphone).expect("첫 녹음 시작");
     microphone.speak(1_000);
     clock.advance(5_000);
     let first = recorder.stop().expect("첫 녹음 정지");
 
-    recorder.start(DEVICE_KEY).expect("두 번째 녹음 시작");
+    recorder.start(DEVICE_KEY, CaptureMode::Microphone).expect("두 번째 녹음 시작");
     microphone.speak(2_000);
     clock.advance(1_000);
     let second = recorder.stop().expect("두 번째 녹음 정지");
