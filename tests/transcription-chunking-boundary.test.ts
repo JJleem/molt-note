@@ -430,6 +430,27 @@ describe('(e) 새 의존성이 늘지 않았다 (phase-prompt/05.8 Constraints)'
     ]);
   });
 
+  /**
+   * **2026-09-08에 macOS 전용 섹션이 하나 생겼다** (`ADR-0012` · 온라인 회의 녹음).
+   *
+   * 여기 있는 넷은 **새로 내려받는 crate가 아니다** — `cpal 0.18` → `coreaudio-rs 0.14`와
+   * Tauri가 이미 트리에 갖고 있는 것을 이름으로 부르고 feature를 켤 뿐이며, `Cargo.lock`의
+   * checksum이 그대로 유지된다. 그럼에도 **목록은 여전히 닫혀 있어야 한다**: 무엇이 늘면
+   * 여기서 먼저 드러난다.
+   *
+   * ⚠️ 이 검사가 실제로 버그를 잡았다. 처음에 이 섹션을 `[dependencies]` **한가운데** 넣어
+   * 그 뒤의 일곱 crate(`hound` · `whisper-rs` · `ureq` …)가 전부 macOS 전용이 돼 있었고,
+   * Windows(Phase 6)에서 빌드가 깨졌을 것이다.
+   */
+  it('macOS 전용 의존성 목록도 닫혀 있다', () => {
+    expect(dependencyNames(`target.'cfg(target_os = "macos")'.dependencies`)).toEqual([
+      'objc2-core-audio',
+      'objc2',
+      'objc2-foundation',
+      'objc2-core-foundation',
+    ]);
+  });
+
   it('빌드 의존성도 그대로이고 테스트 전용 의존성은 생기지 않았다', () => {
     expect(dependencyNames('build-dependencies')).toEqual(['tauri-build']);
     // 이 Task가 더한 통합 테스트는 이미 있는 crate만 쓴다 — 검사를 위해 새 crate를 들이지 않는다.

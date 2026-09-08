@@ -31,6 +31,8 @@ rusqlite = { version = "0.40", features = ["bundled"] }
 # 입력 장치 열거. ADR-0003이 잠정 선택한 native 오디오 경로다 (PRODUCT-SPEC §14.3).
 # macOS는 CoreAudio · Windows는 WASAPI 백엔드를 쓰므로 플랫폼 분기가 이 crate 안에 있다 (INV-10).
 cpal = "0.18"
+
+
 # WAV writer. ADR-0003이 잠정 선택한 조합(`cpal` + `hound`)의 나머지 절반이며,
 # 파일을 만드는 Task가 함께 추가했다. WAV(RIFF)는 길이를 헤더에 갖는 포맷이므로
 # writer를 정상 종료해야 재생 가능한 파일이 된다 (ADR-0003 §5.5).
@@ -113,4 +115,18 @@ keyring = { version = "3", default-features = false, features = ["apple-native",
 # 이미 이 저장소의 `Cargo.lock`에 들어와 있던 crate다(전이 의존성). 지문 하나 때문에 새 코드를
 # 손으로 쓰지 않으며, 쓰는 자리는 `sync::run::content_fingerprint` 하나다.
 sha2 = "0.10"
-
+# macOS 시스템 오디오 캡처 (ADR-0012 · PRODUCT-SPEC §22).
+#
+# **새로 내려받는 crate가 아니다.** `cpal 0.18` → `coreaudio-rs 0.14` 가 이미 이것을
+# 트리에 갖고 있고, 여기서 하는 일은 그것을 직접 이름으로 부르고 필요한 feature를 켜는
+# 것뿐이다 (`Cargo.lock`의 checksum이 그대로 유지된다).
+#
+# 켜는 것:
+#   objc2            AudioHardwareCreateProcessTap 이 CATapDescription(ObjC 객체)을 받는다
+#   AudioHardware    tap · aggregate device 생성 함수들이 이 feature 뒤에 있다
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-core-audio = { version = "0.3", features = ["objc2", "objc2-foundation", "AudioHardware"] }
+# 셋 다 이미 트리에 있다 — Tauri와 cpal이 끌고 온 것과 같은 버전을 이름으로 부를 뿐이다.
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["NSArray", "NSDictionary", "NSString", "NSValue", "NSUUID"] }
+objc2-core-foundation = { version = "0.3", features = ["CFDictionary"] }

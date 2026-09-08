@@ -25,3 +25,5 @@ pub mod clock;
 pub mod file_manager;
 pub mod microphone;
 pub mod secret_store;
+#[cfg(target_os = "macos")]
+pub mod system_audio;
