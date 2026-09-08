@@ -538,6 +538,8 @@ p.loading {
 }
 
 .sidebar {
+  display: flex;
+  flex-direction: column;
   background-color: var(--surface-sidebar);
   border-right: 1px solid var(--hairline);
   padding: var(--space-4) var(--space-3);
@@ -1376,4 +1378,30 @@ p.loading {
 
 .meter--silent::-moz-meter-bar {
   background: var(--danger);
+}
+
+/*
+ * 배경에서 도는 일 (2026-09-08).
+ *
+ * 사이드바 **아래쪽**에 앉는다 — 화면을 옮기는 목록이 위에 있고, 이것은 알림이지
+ * 갈 곳이 아니다. 누를 수 없는 것이 그 뜻이다.
+ *
+ * **도는 것이 없으면 이 자리 자체가 없다.** 그래서 늘 있는 줄이 되지 않는다.
+ */
+
+.sidebar__working {
+  margin-top: auto;
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--hairline);
+}
+
+.sidebar__working-line {
+  margin: 0;
+  font-size: var(--type-caption);
+  color: var(--text-muted);
+  line-height: var(--line-normal);
+}
+
+.sidebar__working-line + .sidebar__working-line {
+  margin-top: var(--space-1);
 }
