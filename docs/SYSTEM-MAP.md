@@ -957,18 +957,43 @@ VAD                효과를 본 적이 없다 (§22.2)
                    돌리지 않아** 증폭의 효과라고 단정할 수 없다
 ```
 
-### 2026-09-08 — 온라인 회의 녹음이 **범위에 들어왔다** (구현 없음)
+### 2026-09-08 — 온라인 회의 녹음이 **범위에 들어왔고 코드가 붙었다** · **사람이 확인하지 않음**
 
-PRODUCT-SPEC rev 12 · §22. 마이크와 macOS 시스템 오디오를 함께 녹음하고 **스테레오**로
-저장한다 (L = 내 마이크 · R = 시스템).
+PRODUCT-SPEC rev 12 · §22 · `ADR-0012`. 마이크와 macOS 시스템 오디오를 함께 녹음하고
+**스테레오**로 저장한다 (L = 내 마이크 · R = 시스템).
 
-**구현은 한 줄도 없다.** 저장소 밖 Swift spike가 잰 것과 아직 재지 않은 것은
-`ADR-0012`에 있다.
+spike가 잰 것과 아직 재지 않은 것:
 
 ```text
 [A✓] Core Audio process tap + aggregate device → 마이크·시스템이 한 IOProc으로 온다
 [A✓] cpal로는 그 장치를 읽을 수 없다 (config가 전부 1채널) → 기존 경로 재사용 불가
 [U]  AirPods HFP · Zoom 점유 · 번들 권한 · tap 중 소리가 들리는지
+```
+
+**실제 회의에서 한 번도 돌아간 적이 없다.** 아래는 코드가 놓인 자리이지 동작의 증거가
+아니다.
+
+```text
+platform/system_audio.rs   tap + aggregate device를 만들고 지운다. 그것뿐이다 (INV-10)
+audio/meeting_mix.rs       채널 접기 규칙만 담은 순수 모듈 — L=채널 0, R=나머지 평균
+audio/meeting_capture.rs   AudioDeviceIOProc → 접기 → try_send. SampleSource의 두 번째 구현
+audio/capture.rs           CaptureMode { Microphone, Meeting } — 시작 시 정해지고 안 바뀐다
+commands/mod.rs            meeting_source() — 이 저장소에서 cfg(target_os)가 있는 유일한 자리
+Info.plist                 NSAudioCaptureUsageDescription (**화면 녹화 권한이 아니다**)
+```
+
+**`capture.rs`는 한 줄도 바뀌지 않았다.** `SampleSource`가 Phase 2B에 이미 있었기 때문이며,
+그래서 파일 쓰기 · 일시정지 · 정지 · 레벨 측정 · 확정이 마이크 녹음과 **같은 경로**다
+(ADR-0012 §9). 스테레오 WAV 쓰기와 전사 쪽 대응은 **새로 쓸 것이 없었다** — `WavFile`이
+이미 `format.channels`를 헤더에 적고, `transcription/audio_input.rs`가 이미 다채널을
+mono로 평균낸다.
+
+정직하게 실패하도록 만든 자리 셋 (전부 전용 테스트가 있다):
+
+```text
+회의 소스가 없는 플랫폼   조용히 마이크로만 녹음하지 않는다 — 회의가 끝난 뒤에야 발견되므로
+IOProc이 큐를 못 넘김     버린 프레임을 세어 두고 **정지할 때** 실패로 올린다
+모르는 모드 이름          기본값이 되지 않고 거절된다
 ```
 
 ---
@@ -1003,8 +1028,13 @@ PRODUCT-SPEC rev 12 · §22. 마이크와 macOS 시스템 오디오를 함께 �
 - **화면이 왜 죽었는지 모른다.** 방어(ErrorBoundary)를 넣었을 뿐 원인을 고치지 않았다
   (`ADR-0007` §23.5)
 - **`live.rs`는 아무 데도 연결되지 않았다.** 녹음 중 전사의 창 규칙만 있고 실행 경로가 없다
-- **온라인 회의 녹음은 구현이 없다.** 결정과 spike 실측만 있다 (`ADR-0012` §7의 네 항목이
-  `[미검증]`이며, 그중 *회의 중에 녹음이 시작되지 않는 실패*는 알아챌 때 이미 늦다)
+- **회의 모드가 실제 회의에서 돌아간 적이 없다.** 코드는 끝에서 끝까지 이어졌고 Gate 셋을
+  지났지만, Meet도 Zoom도 열어 본 적이 없다. `ADR-0012` §7의 네 항목이 여전히 `[미검증]`이며,
+  그중 *회의 중에 녹음이 시작되지 않는 실패*는 알아챌 때 이미 늦다
+- **번들된 앱에서 오디오 권한 프롬프트가 뜨는지 모른다.** `NSAudioCaptureUsageDescription`을
+  선언했을 뿐이다. 뜨지 않으면 tap 생성이 거부되고 회의 모드는 시작 시점에 실패한다
+- **48 kHz는 관측 한 번에 근거한 고정값이다** (`audio/meeting_capture.rs`). 다른 기기나
+  AirPods에서 다른 값이 나오면 WAV 헤더가 내용과 어긋난다
 - **제목 고치기는 스펙에 적히지 않았다.** §5의 화면 스케치는 제목을 보여주는 것으로만
   적고 있다. 운영자 결정 한 줄이 필요하다
 
