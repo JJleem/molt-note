@@ -86,6 +86,26 @@ pub const SILENT_BELOW_DBFS: f64 = -60.0;
 /// 이 값에 닿은 것은 *잰 값*이 아니라 *바닥*이므로, 문장은 그때 **"이하"** 를 함께 적는다.
 pub const FLOOR_DBFS: f64 = -90.3;
 
+/// 레벨을 눈으로 볼 수 있게 그릴 때의 아래 끝 (2026-09-08).
+///
+/// [`FLOOR_DBFS`](-90.3)까지 그리면 사람이 실제로 구분해야 하는 구간이 막대 끝에 몰린다.
+/// 구분해야 하는 것은 **소리 없음([`SILENT_BELOW_DBFS`])과 쓸 만함([`USABLE_AT_OR_ABOVE_DBFS`])
+/// 사이**이므로, 그 아래로 조금 더 내려간 자리에서 시작한다.
+pub const METER_FLOOR_DBFS: f64 = -70.0;
+
+/// 막대의 위 끝. 0 dBFS는 풀스케일이다.
+pub const METER_CEILING_DBFS: f64 = 0.0;
+
+/// dBFS 하나를 막대 위의 비율(`0.0..=1.0`)로 옮긴다.
+///
+/// **화면이 이 계산을 하지 않는다.** 판정 구간을 아는 자리가 이 모듈 하나이므로
+/// (§16.4 · INV-9), 그 구간을 길이로 옮기는 일도 여기 있어야 한다 — 화면이 dBFS를 알게
+/// 되는 순간 임계값이 두 곳에 살게 된다.
+pub fn meter_fill(dbfs: f64) -> f64 {
+    let span = METER_CEILING_DBFS - METER_FLOOR_DBFS;
+    ((dbfs - METER_FLOOR_DBFS) / span).clamp(0.0, 1.0)
+}
+
 /// 판정 하나 (ADR-0003 §16.4).
 ///
 /// **"값 없음"은 이 열거에 없다.** 재지 않은 것은 판정이 아니라 [`Option::None`]이며,

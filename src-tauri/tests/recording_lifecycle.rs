@@ -456,8 +456,11 @@ fn the_status_that_reaches_the_screen_carries_numbers_and_a_sentence_but_no_audi
     level_keys.sort();
     assert_eq!(
         level_keys,
-        ["averageDbfs", "message", "peakDbfs", "verdict"],
-        "나가는 것은 수치 둘 · 판정 하나 · 문장 하나뿐이다"
+        ["averageDbfs", "message", "meterFill", "peakDbfs", "verdict"],
+        // 2026-09-08에 `meterFill`이 늘었다. **샘플이 아니라 이미 판정된 수치를 길이로
+        // 옮긴 값**이다 — 판정 구간을 아는 자리를 하나로 두려고 backend가 낸다 (INV-9).
+        // 아래 검사가 오디오 샘플이 여전히 오지 않는다는 것을 따로 본다.
+        "나가는 것은 수치 셋 · 판정 하나 · 문장 하나뿐이다"
     );
 
     // 파형도 스펙트럼도 샘플 배열도 없다. 배열이 하나도 없다는 것으로 그 자리를 막는다.

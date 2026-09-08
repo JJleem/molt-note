@@ -16,6 +16,7 @@ import {
   failedDevices,
   failedSession,
   inputLevelDisplay,
+  inputLevelMeter,
   inputLevelWarning,
   microphoneLabel,
   microphoneNotice,
@@ -222,6 +223,7 @@ export function RecordingScreen({ navigate }: ScreenProps) {
   const controls = recordingControls(view);
   const display = sessionDisplay(view);
   const level = inputLevelDisplay(view);
+  const meter = inputLevelMeter(view);
   const levelWarning = inputLevelWarning(view);
   const notice = microphoneNotice(view.microphone);
   const deviceFailure = view.microphone.kind === 'unknown' ? view.microphone.failure : null;
@@ -255,7 +257,26 @@ export function RecordingScreen({ navigate }: ScreenProps) {
             화면에서 가장 크고 분명하다. 문장도 갈래도 backend가 만든 것 그대로이며,
             무엇을 보일지 정하는 규칙은 `inputLevelDisplay`에 있다. */}
         {level.shown && (
-          <p className={`recording__level recording__level--${level.kind}`}>{level.text}</p>
+          <>
+            {/* 막대는 문장 **위**에 온다 — 눈으로 먼저 잡히고, 문장이 그것을 설명한다.
+                채우는 길이도 갈래도 backend가 낸 값 그대로이며, 이 화면은 dBFS도 판정
+                구간도 모른다 (INV-9).
+
+                `<meter>` 를 쓰는 것은 이것이 **측정값**이기 때문이고, 그래서 길이를
+                inline style이 아니라 속성으로 말한다 — 스타일이 있는 자리는 App.css 하나다.
+
+                **눈금을 따로 두지 않는다.** 색이 갈래에서 바뀌므로 경계는 색이 말한다. */}
+            {meter !== null && (
+              <meter
+                className={`meter meter--${level.kind}`}
+                min={0}
+                max={1}
+                value={meter.fill}
+                aria-label={level.text}
+              />
+            )}
+            <p className={`recording__level recording__level--${level.kind}`}>{level.text}</p>
+          </>
         )}
       </section>
 

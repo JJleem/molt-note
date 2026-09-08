@@ -530,3 +530,44 @@ export function savedRecording(view: RecordingView, stopped: StoppedRecording): 
     },
   };
 }
+
+// --- 레벨을 눈으로 볼 수 있게 (2026-09-08) ------------------------------------------------
+
+/**
+ * 막대 하나가 화면에 놓이는 모습.
+ *
+ * **이 모듈은 dBFS도 판정 구간도 모른다** (§16.4 · INV-9). 채우는 길이는 backend가 이미
+ * 계산해 보낸 값(`meterFill`)이고, 갈래도 backend가 판정한 것이다 — 여기서 하는 일은
+ * *언제 이 자리를 두는가* 하나뿐이며, 그것은 문장을 두는 규칙과 같다.
+ *
+ * ## 왜 막대가 필요한가
+ *
+ * 이 자리에는 문장 한 줄만 있었다. 2026-09-08에 녹음된 2시간 회의가 판정 경계 **바로
+ * 아래**였고, 문장만으로는 그것이 얼마나 낮은지 — 조금만 올리면 되는지 — 알 수 없었다.
+ */
+export interface InputLevelMeter {
+  /** 채우는 길이 (`0..=1`). **backend가 준 값 그대로다.** */
+  readonly fill: number;
+  /** 쓸 수 없을 만큼 낮은가. 색을 정하는 것은 화면이 아니라 이 값이다. */
+  readonly weak: boolean;
+}
+
+/**
+ * 레벨 하나를 막대로 옮긴다. 둘 자리가 아니면 `null`이다.
+ *
+ * 조건은 {@link inputLevelDisplay}와 같다 — 진행 중인 녹음이 없거나 아직 잰 값이 없으면
+ * 막대도 없다. **재지 않은 것을 0으로 그리지 않는다.**
+ */
+export function inputLevelMeter(view: RecordingView): InputLevelMeter | null {
+  const session = view.session;
+  if (session === null || !inProgress(session.state)) {
+    return null;
+  }
+
+  const level = session.level;
+  if (level === null) {
+    return null;
+  }
+
+  return { fill: level.meterFill, weak: isWeak(level.verdict) };
+}

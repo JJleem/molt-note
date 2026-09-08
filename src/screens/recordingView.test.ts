@@ -25,6 +25,7 @@ import {
   failedDevices,
   failedSession,
   inputLevelDisplay,
+  inputLevelMeter,
   inputLevelWarning,
   microphoneLabel,
   microphoneNotice,
@@ -67,6 +68,7 @@ const USABLE_LEVEL: InputLevel = {
   averageDbfs: -25.8,
   peakDbfs: -6.1,
   verdict: 'usable',
+  meterFill: 0.42,
   message: '입력 레벨이 쓸 만하다 (평균 -25.8 dBFS)',
 };
 
@@ -74,6 +76,7 @@ const LOW_LEVEL: InputLevel = {
   averageDbfs: -42.2,
   peakDbfs: -19.4,
   verdict: 'low',
+  meterFill: 0.42,
   message: '입력 레벨이 낮다 — 마이크와 자리를 확인한다 (평균 -42.2 dBFS)',
 };
 
@@ -81,6 +84,7 @@ const SILENT_LEVEL: InputLevel = {
   averageDbfs: -90.3,
   peakDbfs: -90.3,
   verdict: 'silent',
+  meterFill: 0.42,
   message: '소리가 들어오지 않는다 — 마이크를 확인한다 (평균 -90.3 dBFS 이하)',
 };
 
@@ -571,5 +575,54 @@ describe('제목과 저장된 녹음', () => {
     expect(requestedAction(saved, 'start').saved).toBeNull();
     // 일시정지·정지는 지금 녹음의 일이므로 지난 결과를 치우지 않는다.
     expect(requestedAction(saved, 'stop').saved).not.toBeNull();
+  });
+});
+
+describe('입력 레벨 막대 (2026-09-08)', () => {
+  const withLevel = (meterFill: number, verdict: 'usable' | 'low' | 'silent') =>
+    observedSession(INITIAL_RECORDING, {
+      state: 'recording',
+      elapsedMs: 1_000,
+      elapsedLabel: '0:01',
+      level: {
+        averageDbfs: -30,
+        peakDbfs: -12,
+        verdict,
+        meterFill,
+        message: 'backend가 만든 문장',
+      },
+    });
+
+  it('녹음 중이 아니면 막대가 없다', () => {
+    // 끝난 녹음의 레벨을 계속 붙들고 있지 않는다.
+    expect(inputLevelMeter(INITIAL_RECORDING)).toBeNull();
+  });
+
+  it('아직 잰 값이 없으면 막대가 없다 — 0으로 그리지 않는다', () => {
+    const view = observedSession(INITIAL_RECORDING, {
+      state: 'recording',
+      elapsedMs: 1_000,
+      elapsedLabel: '0:01',
+      level: null,
+    });
+
+    expect(inputLevelMeter(view)).toBeNull();
+  });
+
+  /**
+   * **화면이 dBFS에서 길이를 만들지 않는다** (INV-9). 판정 구간을 아는 자리가
+   * `audio/level.rs` 하나이므로 길이도 거기서 온다 — 여기서 계산하면 임계값이 두 곳에
+   * 살게 되고, 막대와 문장이 언젠가 어긋난다.
+   */
+  it('채우는 길이는 backend가 준 값 그대로다', () => {
+    expect(inputLevelMeter(withLevel(0.42, 'low'))!.fill).toBe(0.42);
+    expect(inputLevelMeter(withLevel(1, 'usable'))!.fill).toBe(1);
+    expect(inputLevelMeter(withLevel(0, 'silent'))!.fill).toBe(0);
+  });
+
+  it('색을 화면이 정하지 않는다 — 갈래가 값으로 온다', () => {
+    expect(inputLevelMeter(withLevel(0.7, 'usable'))!.weak).toBe(false);
+    expect(inputLevelMeter(withLevel(0.4, 'low'))!.weak).toBe(true);
+    expect(inputLevelMeter(withLevel(0.1, 'silent'))!.weak).toBe(true);
   });
 });

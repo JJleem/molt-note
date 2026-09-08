@@ -1299,3 +1299,81 @@ p.loading {
 .field--inline .field__label {
   margin: 0;
 }
+
+/*
+ * 입력 레벨 막대 (2026-09-08 · ADR-0003 §16).
+ *
+ * **상태와 경과 시간을 밀어내지 않는다** (§19). 높이가 4px인 것이 그 규칙이고, 이 화면에서
+ * 가장 큰 것은 여전히 `● REC`와 경과 시간이다.
+ *
+ * `<meter>` 요소다 — 이것이 측정값이기 때문이며, 그래서 길이가 inline style이 아니라
+ * 속성으로 온다. 브라우저 기본 모양을 지우고 여기서 다시 그린다.
+ *
+ * **눈금을 따로 두지 않는다.** 판정이 바뀌는 자리에서 색이 바뀌므로 경계는 색이 말하며,
+ * 그 판정은 backend가 한다. 그리고 색으로만 말하지 않는다 — 바로 아래 문장이 언제나
+ * 함께 있다 (요구 12).
+ */
+
+.meter {
+  margin-top: var(--space-3);
+  inline-size: 100%;
+  max-inline-size: 320px;
+  block-size: 4px;
+  appearance: none;
+  border: none;
+  border-radius: var(--radius);
+  background: var(--hairline);
+}
+
+/* 채워지지 않은 바탕. WebKit은 이 가상 요소로 배경을 그린다. */
+
+.meter::-webkit-meter-bar {
+  background: var(--hairline);
+  border: none;
+  border-radius: var(--radius);
+  block-size: 4px;
+}
+
+.meter::-webkit-meter-optimum-value,
+.meter::-webkit-meter-suboptimum-value,
+.meter::-webkit-meter-even-less-good-value {
+  border-radius: var(--radius);
+  background: var(--text-muted);
+}
+
+.meter::-moz-meter-bar {
+  border-radius: var(--radius);
+  background: var(--text-muted);
+}
+
+/* 색은 갈래에서 온다 — 화면이 dBFS를 보고 고르지 않는다. */
+
+.meter--usable::-webkit-meter-optimum-value,
+.meter--usable::-webkit-meter-suboptimum-value,
+.meter--usable::-webkit-meter-even-less-good-value {
+  background: var(--success);
+}
+
+.meter--usable::-moz-meter-bar {
+  background: var(--success);
+}
+
+.meter--low::-webkit-meter-optimum-value,
+.meter--low::-webkit-meter-suboptimum-value,
+.meter--low::-webkit-meter-even-less-good-value {
+  background: var(--warning);
+}
+
+.meter--low::-moz-meter-bar {
+  background: var(--warning);
+}
+
+.meter--silent::-webkit-meter-optimum-value,
+.meter--silent::-webkit-meter-suboptimum-value,
+.meter--silent::-webkit-meter-even-less-good-value {
+  background: var(--danger);
+}
+
+.meter--silent::-moz-meter-bar {
+  background: var(--danger);
+}

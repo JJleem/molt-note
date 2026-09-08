@@ -307,6 +307,15 @@ pub struct InputLevelPayload {
     pub peak_dbfs: f64,
     /// `usable · low · silent` 중 하나. 사람이 읽는 이름은 `message` 안에 있다.
     pub verdict: String,
+    /// 막대가 채우는 길이 (`0.0..=1.0`).
+    ///
+    /// **화면이 dBFS에서 이 값을 만들지 않는다** (2026-09-08 · INV-9). 판정 구간을 아는
+    /// 자리가 `audio::level` 하나이므로 그 구간을 길이로 옮기는 일도 거기서 끝난다 —
+    /// 화면이 계산하면 임계값이 두 곳에 살게 되고, 막대와 문장이 언젠가 어긋난다.
+    ///
+    /// **샘플이 아니다.** 이 값은 이미 판정된 수치 하나를 길이로 옮긴 것이며, 오디오는
+    /// 여전히 이 경계를 지나지 않는다 (INV-6).
+    pub meter_fill: f64,
     /// 사람이 읽는 짧은 문장. **화면이 이 문장을 다시 만들지 않는다.**
     pub message: String,
 }
@@ -317,6 +326,7 @@ impl From<LevelReading> for InputLevelPayload {
             average_dbfs: reading.average_dbfs,
             peak_dbfs: reading.peak_dbfs,
             verdict: verdict_name(reading.verdict).to_string(),
+            meter_fill: crate::audio::level::meter_fill(reading.average_dbfs),
             message: reading.message,
         }
     }

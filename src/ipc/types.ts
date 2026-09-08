@@ -150,6 +150,13 @@ export interface InputLevel {
   /** 전체 피크의 dBFS. 소수 한 자리. **판정에 쓰이지 않는다** — 함께 보는 값이다. */
   readonly peakDbfs: number;
   readonly verdict: InputLevelVerdict;
+  /**
+   * 막대가 채우는 길이 (`0..=1`). **backend가 계산한다.**
+   *
+   * 판정 구간을 아는 자리가 `audio/level.rs` 하나이므로, 그 구간을 길이로 옮기는 일도
+   * 거기서 끝난다 (INV-9). 화면이 dBFS에서 이 값을 만들면 임계값이 두 곳에 살게 된다.
+   */
+  readonly meterFill: number;
   /** 사람이 읽는 짧은 문장. **화면이 이 문장을 다시 만들지 않는다.** */
   readonly message: string;
 }

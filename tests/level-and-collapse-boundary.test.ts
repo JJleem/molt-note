@@ -184,11 +184,15 @@ describe('(a) 레벨을 알리는 경로에 오디오 샘플이 실리지 않는
     ]);
   });
 
-  it('레벨 payload에 실리는 것은 수치 둘 · 판정 하나 · 문장 하나뿐이다', () => {
+  it('레벨 payload에 실리는 것은 수치 셋 · 판정 하나 · 문장 하나뿐이다', () => {
+    // 2026-09-08에 `meter_fill`이 늘었다. **샘플이 아니라 이미 판정된 수치를 길이로 옮긴
+    // 값**이며, 그것을 backend가 내는 이유는 판정 구간을 아는 자리가 하나여야 하기
+    // 때문이다 (INV-9). 오디오는 여전히 이 경계를 지나지 않는다 — 아래 검사가 그것을 본다.
     expect(rustStructFields(payloadProduction, 'InputLevelPayload')).toEqual([
       'average_dbfs: f64',
       'peak_dbfs: f64',
       'verdict: String',
+      'meter_fill: f64',
       'message: String',
     ]);
   });
@@ -217,6 +221,7 @@ describe('(a) 레벨을 알리는 경로에 오디오 샘플이 실리지 않는
       'averageDbfs: number',
       'peakDbfs: number',
       'verdict: InputLevelVerdict',
+      'meterFill: number',
       'message: string',
     ]);
     expect(tsInterfaceFields(typesSource, 'SessionStatus')).toEqual([
