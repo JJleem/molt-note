@@ -125,7 +125,9 @@ sha2 = "0.10"
 #   objc2            AudioHardwareCreateProcessTap 이 CATapDescription(ObjC 객체)을 받는다
 #   AudioHardware    tap · aggregate device 생성 함수들이 이 feature 뒤에 있다
 [target.'cfg(target_os = "macos")'.dependencies]
-objc2-core-audio = { version = "0.3", features = ["objc2", "objc2-foundation", "AudioHardware"] }
+objc2-core-audio = { version = "0.3", features = ["objc2", "objc2-foundation", "objc2-core-audio-types", "AudioHardware"] }
+# IOProc 콜백의 인자 타입(AudioBufferList · AudioTimeStamp)이 이 크레이트에 있다.
+objc2-core-audio-types = { version = "0.3", features = ["CoreAudioBaseTypes"] }
 # 셋 다 이미 트리에 있다 — Tauri와 cpal이 끌고 온 것과 같은 버전을 이름으로 부를 뿐이다.
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", features = ["NSArray", "NSDictionary", "NSString", "NSValue", "NSUUID"] }

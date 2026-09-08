@@ -445,6 +445,7 @@ describe('(e) 새 의존성이 늘지 않았다 (phase-prompt/05.8 Constraints)'
   it('macOS 전용 의존성 목록도 닫혀 있다', () => {
     expect(dependencyNames(`target.'cfg(target_os = "macos")'.dependencies`)).toEqual([
       'objc2-core-audio',
+      'objc2-core-audio-types',
       'objc2',
       'objc2-foundation',
       'objc2-core-foundation',

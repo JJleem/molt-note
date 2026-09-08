@@ -2139,6 +2139,7 @@ dependencies = [
  "keyring",
  "objc2",
  "objc2-core-audio",
+ "objc2-core-audio-types",
  "objc2-core-foundation",
  "objc2-foundation",
  "rubato",
