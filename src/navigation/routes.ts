@@ -31,10 +31,10 @@ export interface RouteDefinition {
 
 // Record<ScreenId, ...>이므로 화면을 추가하면 정의 누락이 컴파일 시점에 드러난다.
 export const ROUTES: Record<ScreenId, RouteDefinition> = {
-  recordings: { screen: 'recordings', title: 'Recordings' },
-  recording: { screen: 'recording', title: 'Recording' },
-  'recording-detail': { screen: 'recording-detail', title: 'Recording Detail' },
-  settings: { screen: 'settings', title: 'Settings' },
+  recordings: { screen: 'recordings', title: '녹음 목록' },
+  recording: { screen: 'recording', title: '녹음' },
+  'recording-detail': { screen: 'recording-detail', title: '녹음 상세' },
+  settings: { screen: 'settings', title: '설정' },
 };
 
 /** 앱을 열었을 때 보이는 화면 (§5.A — Recordings가 기본 화면이다). */

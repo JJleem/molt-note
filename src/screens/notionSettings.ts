@@ -77,19 +77,19 @@ export interface NotionTokenNotice {
   readonly resolution: string | null;
 }
 
-export const TOKEN_STATE_UNKNOWN_TEXT = 'Whether a token is saved has not been checked yet.';
+export const TOKEN_STATE_UNKNOWN_TEXT = 'token이 저장돼 있는지 아직 확인하지 않았다.';
 
-export const TOKEN_STORED_TEXT = 'An integration token is saved on this device.';
+export const TOKEN_STORED_TEXT = '이 기기에 integration token이 저장돼 있다.';
 
 /** 저장된 값을 되읽어 보여 줄 수 없다는 사실을 숨기지 않는다 (INV-7). */
 export const TOKEN_STORED_RESOLUTION =
-  'The token itself is never shown again — this app can only tell whether one is saved. Paste a new one to replace it, or remove it below.';
+  'token 자체는 다시 보이지 않는다 — 이 앱이 말할 수 있는 것은 저장돼 있는지 여부뿐이다. 새 값을 붙여 넣어 바꾸거나 아래에서 지운다.';
 
 /** 저장된 token이 없다. **오류가 아니라 정상 상태다** (INV-8). */
-export const TOKEN_NOT_STORED_TEXT = 'No integration token is saved, so nothing is sent to Notion.';
+export const TOKEN_NOT_STORED_TEXT = '저장된 integration token이 없어서 Notion으로 아무것도 보내지 않는다.';
 
 export const TOKEN_NOT_STORED_RESOLUTION =
-  'Create an internal integration in Notion, then paste its token here and save it.';
+  'Notion에서 internal integration을 만든 뒤 그 token을 여기 붙여 넣고 저장한다.';
 
 const TOKEN_NOTICE: Record<NotionTokenState, NotionTokenNotice> = {
   unknown: { text: TOKEN_STATE_UNKNOWN_TEXT, resolution: null },
@@ -103,11 +103,11 @@ export function notionTokenNotice(state: NotionTokenState): NotionTokenNotice {
 }
 
 /** 입력란에 적히는 안내. **저장된 값이 여기 채워지는 일은 없다** (INV-7). */
-export const TOKEN_INPUT_PLACEHOLDER = 'Paste the integration token';
+export const TOKEN_INPUT_PLACEHOLDER = 'integration token을 붙여 넣는다';
 
 /** 넘긴 뒤 입력란이 비워진다는 사실을 먼저 알린다 — 사라진 것처럼 보이지 않게 한다. */
 export const TOKEN_INPUT_NOTICE =
-  'The token is handed to this app once and kept in the operating system credential store. It is cleared from this box as soon as it is saved, and it is never written to the app database or the browser.';
+  'token은 이 앱에 한 번 넘겨져 운영체제의 자격증명 저장소에 보관된다. 저장되는 즉시 이 칸에서 지워지며, 앱 데이터베이스에도 브라우저에도 쓰이지 않는다.';
 
 /**
  * 보낼 부모 페이지에 대해 화면이 할 말. 고르지 않은 것도 정상 상태다 (INV-8 · ADR-0009 §8.4).
@@ -116,10 +116,10 @@ export const TOKEN_INPUT_NOTICE =
  * Save 하나가 한다 (`settingsView.ts`).
  */
 export const NO_DESTINATION_TEXT =
-  'No parent page is set yet, so there is nowhere to create pages in Notion.';
+  '부모 페이지가 아직 지정되지 않아서 Notion에 페이지를 만들 자리가 없다.';
 
 export const HOW_TO_SET_A_DESTINATION =
-  'Open the Notion page you want new pages to be created under, share it with your integration, and paste its page identifier here.';
+  '새 페이지가 만들어질 Notion 페이지를 열어 integration과 공유한 뒤, 그 페이지 식별자를 여기 붙여 넣는다.';
 
 /** 고른 destination에 대해 할 말. 할 말이 없으면 `null`이다. */
 export function notionDestinationNotice(parentPageId: string): string | null {
@@ -185,21 +185,21 @@ export type NotionCheckCause = 'auth' | 'destination' | 'offline' | 'rateLimited
 
 /** 무엇이 확인되지 않았는가. 갈래마다 다른 문장이다 — "연결 실패" 하나로 접지 않는다. */
 const CHECK_FAILED_TEXT: Record<NotionCheckCause, string> = {
-  auth: 'Notion did not accept the saved integration token.',
-  destination: 'Notion answered, but it could not use the parent page that is saved.',
-  offline: 'This app could not reach Notion.',
-  rateLimited: 'Notion asked this app to slow down, so the connection was not confirmed.',
-  other: 'The connection to Notion could not be confirmed.',
+  auth: 'Notion이 저장된 integration token을 받아들이지 않았다.',
+  destination: 'Notion이 답했지만 저장된 부모 페이지를 쓸 수 없었다.',
+  offline: '이 앱이 Notion에 닿지 못했다.',
+  rateLimited: 'Notion이 속도를 늦추라고 해서 연결을 확인하지 못했다.',
+  other: 'Notion 연결을 확인하지 못했다.',
 };
 
 /** 그래서 무엇을 하면 되는가 (§13의 세 번째 질문). */
 const CHECK_FAILED_RESOLUTION: Record<NotionCheckCause, string> = {
-  auth: 'Paste a working integration token above and save it, then check again.',
+  auth: '위에 동작하는 integration token을 붙여 넣어 저장한 뒤 다시 확인한다.',
   destination:
-    'Open that page in Notion, share it with your integration, or set another parent page below — then check again.',
-  offline: 'Check that this device is online, then check again.',
-  rateLimited: 'Check again in a little while. Nothing was changed in Notion.',
-  other: 'Read what failed below, then check again.',
+    'Notion에서 그 페이지를 열어 integration과 공유하거나 아래에서 다른 부모 페이지를 지정한 뒤 다시 확인한다.',
+  offline: '이 기기가 온라인인지 확인한 뒤 다시 확인한다.',
+  rateLimited: '잠시 뒤에 다시 확인한다. Notion에서 바뀐 것은 없다.',
+  other: '아래에서 무엇이 실패했는지 읽은 뒤 다시 확인한다.',
 };
 
 /** 실패의 종류를 사용자가 할 일로 옮긴다. **backend가 나눈 구분을 그대로 쓴다.** */
@@ -222,16 +222,16 @@ export function notionCheckCause(failure: Failure | null): NotionCheckCause {
 }
 
 /** 아직 물어보지 않았다. **화면을 열자마자 Notion으로 나가지 않는다.** */
-export const NOTION_NOT_CHECKED_TEXT = 'The Notion connection has not been checked yet.';
+export const NOTION_NOT_CHECKED_TEXT = 'Notion 연결을 아직 확인하지 않았다.';
 
-export const CHECKING_NOTION_TEXT = 'Checking the Notion connection…';
+export const CHECKING_NOTION_TEXT = 'Notion 연결 확인 중…';
 
 /** 저장된 token이 없어 확인할 것이 없다. **요청도 나가지 않았다** (INV-8). */
 export const NO_TOKEN_TO_CHECK_TEXT =
-  'No integration token is saved, so there is nothing to check and no request was sent.';
+  '저장된 integration token이 없어서 확인할 것이 없고 요청도 보내지 않았다.';
 
 /** 연결됐지만 Notion이 워크스페이스 이름을 말하지 않았다. **이름을 지어내지 않는다.** */
-export const CONNECTED_TEXT = 'Notion answered, and the saved token works.';
+export const CONNECTED_TEXT = 'Notion이 답했고 저장된 token이 동작한다.';
 
 /** 어느 워크스페이스인지까지 말해 줬다. */
 export function connectedToWorkspaceText(workspaceName: string): string {
@@ -239,15 +239,15 @@ export function connectedToWorkspaceText(workspaceName: string): string {
 }
 
 /** 확인 요청 자체가 거절됐다. Notion이 답하는지는 여전히 알지 못한다. */
-export const NOTION_CHECK_FAILED_TEXT = 'The Notion connection could not be checked.';
+export const NOTION_CHECK_FAILED_TEXT = 'Notion 연결을 확인하지 못했다.';
 
 /** 확인은 **저장된** 값에게 물어본다 — token은 자격증명 저장소에서, destination은 설정에서 온다. */
 export const NOTION_CHECK_USES_SAVED_SETTINGS =
-  'The check uses the token and the parent page that are already saved. Save first to check a new parent page.';
+  '확인은 이미 저장된 token과 부모 페이지를 쓴다. 새 부모 페이지를 확인하려면 먼저 저장한다.';
 
 /** Notion 쪽이 어떻게 끝나도 이 화면의 나머지는 그대로다 (INV-8). */
 export const NOTION_SETTINGS_UNAFFECTED_NOTICE =
-  'Every other setting on this screen still saves normally, whether or not Notion answers.';
+  '이 화면의 다른 설정은 Notion이 답하든 안 하든 그대로 저장된다.';
 
 /**
  * backend가 답한 연결 상태를 화면 상태로 옮긴다.
@@ -315,8 +315,8 @@ export interface NotionTokenTrouble {
 }
 
 const TOKEN_TROUBLE_TEXT = {
-  save: 'The integration token could not be saved.',
-  delete: 'The saved integration token could not be removed.',
+  save: 'integration token을 저장하지 못했다.',
+  delete: '저장된 integration token을 지우지 못했다.',
 } as const;
 
 /** 무엇을 하려다 실패했는가. 값 자체는 어느 쪽에도 실리지 않는다 (INV-7). */

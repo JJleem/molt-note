@@ -153,7 +153,7 @@ describe('레코드는 있는데 파일이 없는 상태 (INV-3 · INV-4)', () =
   });
 
   it('사용자에게 하는 말이 지웠다고 말하지 않는다', () => {
-    expect(MISSING_AUDIO_NOTICE).toMatch(/nothing was deleted/i);
+    expect(MISSING_AUDIO_NOTICE).toMatch(/지워진 것은 없|지워진 것도 바뀐 것도 없/);
     expect(MISSING_AUDIO_NOTICE).not.toMatch(/\b(removed|cleaned up|recreated|restored)\b/i);
   });
 

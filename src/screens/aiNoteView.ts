@@ -59,10 +59,10 @@ const MODE_LABEL: Record<NoteMode, string> = {
  * 고르기 전에 무엇이 나오는지 알 수 있어야 Meeting과 Study를 구분해 고를 수 있다.
  */
 const MODE_SECTIONS: Record<NoteMode, string> = {
-  meeting: 'Overview · Key Discussions · Decisions · Action Items · Open Questions',
+  meeting: '개요 · 논의한 것 · 정해진 것 · 할 일 · 남은 질문',
   study:
-    'Overview · Key Concepts · Important Details · Questions · Things to Study · References Mentioned',
-  summary: 'Short Summary · Key Points',
+    '개요 · 핵심 개념 · 중요한 세부 · 질문 · 더 공부할 것 · 언급된 자료',
+  summary: '짧은 요약 · 핵심',
 };
 
 /** 고를 수 있는 mode 하나 (`phase-prompt/04` 요구 4). */
@@ -111,7 +111,7 @@ export interface NoteSection {
 }
 
 /** 섹션이 비었을 때. 지어내지 않고 비었다고 말한다. */
-export const EMPTY_SECTION_TEXT = 'Nothing was recorded in this section.';
+export const EMPTY_SECTION_TEXT = '이 항목에 적힌 것이 없다.';
 
 function textSection(title: string, value: string): NoteSection {
   const text = value.trim();
@@ -146,25 +146,25 @@ export function noteSections(note: StructuredNote): readonly NoteSection[] {
   switch (note.mode) {
     case 'meeting':
       return [
-        textSection('Overview', note.overview),
-        listSection('Key Discussions', note.keyDiscussions),
-        listSection('Decisions', note.decisions),
-        listSection('Action Items', note.actionItems),
-        listSection('Open Questions', note.openQuestions),
+        textSection('개요', note.overview),
+        listSection('논의한 것', note.keyDiscussions),
+        listSection('정해진 것', note.decisions),
+        listSection('할 일', note.actionItems),
+        listSection('남은 질문', note.openQuestions),
       ];
     case 'study':
       return [
-        textSection('Overview', note.overview),
-        listSection('Key Concepts', note.keyConcepts),
-        listSection('Important Details', note.importantDetails),
-        listSection('Questions', note.questions),
-        listSection('Things to Study', note.thingsToStudy),
-        listSection('References Mentioned', note.referencesMentioned),
+        textSection('개요', note.overview),
+        listSection('핵심 개념', note.keyConcepts),
+        listSection('중요한 세부', note.importantDetails),
+        listSection('질문', note.questions),
+        listSection('더 공부할 것', note.thingsToStudy),
+        listSection('언급된 자료', note.referencesMentioned),
       ];
     case 'summary':
       return [
-        textSection('Short Summary', note.shortSummary),
-        listSection('Key Points', note.keyPoints),
+        textSection('짧은 요약', note.shortSummary),
+        listSection('핵심', note.keyPoints),
       ];
   }
 }
@@ -335,22 +335,22 @@ export interface AiRecheck {
 
 /** AI 기능이 꺼져 있어도 나머지는 그대로다 (INV-8 · `phase-prompt/04` 성공 기준 2). */
 export const AI_UNAFFECTED_NOTICE =
-  'Recording, playback, and the transcript are not affected by this.';
+  '녹음 · 재생 · 전사는 이것에 영향받지 않는다.';
 
 /** 담담한 한 줄. 이 문장이 이 상태의 전부이며, 경고 문구를 덧붙이지 않는다. */
 export const AI_DISABLED_HEADLINE = 'AI notes are off.';
 
 const DISABLED_TEXT: Record<AiDisabledState, string> = {
-  notConfigured: 'No AI provider is set up yet.',
-  unavailable: 'The AI provider is not answering right now.',
-  noModels: 'The AI provider has no models installed.',
+  notConfigured: 'AI provider가 아직 준비되지 않았다.',
+  unavailable: 'AI provider가 지금 답하지 않는다.',
+  noModels: 'AI provider에 설치된 모델이 없다.',
 };
 
 const DISABLED_RESOLUTION: Record<AiDisabledState, string> = {
-  notConfigured: 'Choose an AI provider in Settings to turn AI notes on.',
+  notConfigured: '설정에서 AI provider를 고르면 AI 노트가 켜진다.',
   unavailable:
-    'Start the AI provider (or check its address in Settings), then check again from here.',
-  noModels: 'Install a model for the AI provider, then check again from here.',
+    'AI provider를 켜거나 설정에서 주소를 확인한 뒤 여기서 다시 확인한다.',
+  noModels: 'AI provider에 모델을 설치한 뒤 여기서 다시 확인한다.',
 };
 
 function disabledNotice(state: AiDisabledState, providerName: string | null): AiDisabledNotice {
@@ -362,7 +362,7 @@ function disabledNotice(state: AiDisabledState, providerName: string | null): Ai
     providerName,
     unaffectedNotice: AI_UNAFFECTED_NOTICE,
     // 고른 provider가 없으면 다시 물어볼 대상도 없다.
-    recheck: state === 'notConfigured' ? null : { label: 'Check the AI provider again' },
+    recheck: state === 'notConfigured' ? null : { label: 'AI provider 다시 확인' },
   };
 }
 
@@ -392,7 +392,7 @@ export type AiNoteFailureCause =
   | 'unknown';
 
 /** 무엇을 하다 실패했는가 (§13). 원인은 {@link Failure}가 말한다. */
-export const AI_NOTE_FAILED_HEADLINE = 'This AI note could not be generated.';
+export const AI_NOTE_FAILED_HEADLINE = '이 AI 노트를 만들지 못했다.';
 
 /**
  * 실패가 무엇을 남겼는지 (§13 · INV-1 · INV-2 · INV-3).
@@ -401,21 +401,21 @@ export const AI_NOTE_FAILED_HEADLINE = 'This AI note could not be generated.';
  * 실패했을 때 바뀌는 것은 녹음 하나의 AI 상태뿐이다 (ADR-0008 §9.4 · §13.2).
  */
 export const AI_NOTE_PRESERVED_NOTICE =
-  'The recording, its audio file, and the transcript are untouched, and any note you already had is kept as it is. Nothing was deleted.';
+  '녹음도 오디오 파일도 전사도 그대로이고, 이미 있던 노트도 그대로 남아 있다. 지워진 것은 없다.';
 
 /** 이유를 모를 때 그 사실을 그대로 말한다. **무엇이 실패했는지 지어내지 않는다.** */
 export const UNKNOWN_AI_NOTE_NOTICE =
-  'The stored state says the last AI note failed. The reason is not known in this session — generate it again to see what happens.';
+  '저장된 상태가 지난 AI 노트의 실패를 말한다. 이 세션에서는 그 이유를 알 수 없다 — 다시 만들어 보면 무엇이 일어나는지 알 수 있다.';
 
 /** 갈래마다 사용자가 **먼저** 해야 하는 일 (§13). 없으면 `null`이다. */
 const FAILURE_RESOLUTION: Record<AiNoteFailureCause, string | null> = {
-  unreachable: 'The AI provider did not answer. Start it, then try again.',
+  unreachable: 'AI provider가 답하지 않았다. 켠 뒤 다시 시도한다.',
   modelUnavailable:
-    'The chosen model is not installed on the AI provider. Install it or choose another model in Settings, then try again.',
+    '고른 모델이 AI provider에 설치돼 있지 않다. 설치하거나 설정에서 다른 모델을 고른 뒤 다시 시도한다.',
   responseUnusable:
-    'The model answered in a shape this app could not read. Generating again often gives a usable answer.',
+    '모델이 이 앱이 읽을 수 없는 형태로 답했다. 다시 만들면 쓸 수 있는 답이 나오는 경우가 많다.',
   inputTooLarge:
-    'This transcript is longer than the model can take in one request, so nothing was sent. A model with a larger context window, or a shorter recording, is needed.',
+    '이 전사가 모델이 한 번에 받을 수 있는 길이보다 길어서 아무것도 보내지 않았다. 더 큰 컨텍스트를 가진 모델이거나 더 짧은 녹음이 필요하다.',
   requestFailed: null,
   other: null,
   unknown: UNKNOWN_AI_NOTE_NOTICE,
@@ -443,14 +443,14 @@ function failureCause(failure: Failure | null): AiNoteFailureCause {
 }
 
 /** 아직 노트가 없다. **오류가 아니라 정상 상태다** (§7 · INV-8). */
-export const NO_AI_NOTE_TEXT = 'No AI note yet.';
+export const NO_AI_NOTE_TEXT = '아직 AI 노트가 없다.';
 
 /** 만들 재료가 아직 없다. **실패가 아니다** (§7.2 · ipc `AiNoteState.noTranscript`). */
-export const NO_TRANSCRIPT_INPUT_TEXT = 'There is no transcript to make a note from yet.';
+export const NO_TRANSCRIPT_INPUT_TEXT = '노트를 만들 전사가 아직 없다.';
 
 /** 그래서 무엇을 하면 되는가. 이 탭이 전사를 시작하지 않는다 — 그 자리는 Transcript 탭이다. */
 export const NO_TRANSCRIPT_INPUT_HINT =
-  'Transcribe this recording in the Transcript tab first, then come back.';
+  '전사 탭에서 이 녹음을 먼저 전사한 뒤에 돌아온다.';
 
 /**
  * 지금 노트를 만들고 있다.
@@ -459,7 +459,7 @@ export const NO_TRANSCRIPT_INPUT_HINT =
  * 생성은 계속되고, 도는 동안에도 화면과 재생이 멎지 않는다 (ADR-0008 §5).
  */
 export const GENERATING_AI_NOTE_TEXT =
-  'Writing the note… This keeps running in the background, so you can leave this screen.';
+  '노트 만드는 중… 화면을 떠나도 배경에서 계속 돈다.';
 
 /**
  * AI Note 탭의 본문이 놓일 수 있는 상태의 전부.
@@ -700,10 +700,10 @@ export interface AiNoteTrouble {
 export type AiNoteRequest = 'provider' | 'status' | 'notes' | 'start';
 
 const TROUBLE_HEADLINE: Record<AiNoteRequest, string> = {
-  provider: 'The AI provider status could not be read.',
-  status: 'The AI note status could not be read.',
-  notes: 'The saved AI notes could not be read.',
-  start: 'The AI note could not be started.',
+  provider: 'AI provider 상태를 읽지 못했다.',
+  status: 'AI 노트 상태를 읽지 못했다.',
+  notes: '저장된 AI 노트를 읽지 못했다.',
+  start: 'AI 노트 만들기를 시작하지 못했다.',
 };
 
 /** 거절된 요청 하나를 화면에 놓을 값으로 옮긴다 (§13). */

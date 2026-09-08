@@ -136,8 +136,8 @@ describe('연결 확인의 결과가 갈래마다 다르게 보인다 (§5-D · 
     const offline = rejected('notionRequestFailed');
 
     expect(auth.kind === 'failed' && auth.resolution).toMatch(/token/i);
-    expect(destination.kind === 'failed' && destination.resolution).toMatch(/share|parent page/i);
-    expect(offline.kind === 'failed' && offline.resolution).toMatch(/online/i);
+    expect(destination.kind === 'failed' && destination.resolution).toMatch(/공유|부모 페이지/);
+    expect(offline.kind === 'failed' && offline.resolution).toMatch(/온라인/);
   });
 
   it('속도 제한과 그 밖의 실패도 인증 실패로 읽히지 않는다', () => {
@@ -171,7 +171,7 @@ describe('연결 확인의 결과가 갈래마다 다르게 보인다 (§5-D · 
       resolution: TOKEN_NOT_STORED_RESOLUTION,
     });
     // 요청이 나가지 않았다는 사실까지 문장에 있다 — 사용자는 "연결 실패"를 보지 않는다.
-    expect(NO_TOKEN_TO_CHECK_TEXT).toMatch(/no request was sent/i);
+    expect(NO_TOKEN_TO_CHECK_TEXT).toMatch(/요청도 보내지 않았다/);
     expect(view.kind).not.toBe('failed');
   });
 
@@ -197,7 +197,7 @@ describe('연결 확인의 결과가 갈래마다 다르게 보인다 (§5-D · 
     // 화면을 열자마자 Notion으로 나가지 않는다. 그 사실이 담담한 문장으로 있다.
     expect(NOTION_NOT_CHECKED_TEXT).not.toBe(CHECKING_NOTION_TEXT);
     expect(NOTION_NOT_CHECKED_TEXT).not.toBe(CONNECTED_TEXT);
-    expect(NOTION_CHECK_USES_SAVED_SETTINGS).toMatch(/already saved/i);
+    expect(NOTION_CHECK_USES_SAVED_SETTINGS).toMatch(/이미 저장된/);
   });
 });
 
@@ -223,9 +223,9 @@ describe('token은 사실로만 다뤄진다 (INV-7)', () => {
     const notice = notionTokenNotice('stored');
 
     expect(notice.text).toBe(TOKEN_STORED_TEXT);
-    expect(notice.resolution).toMatch(/never shown again/i);
+    expect(notice.resolution).toMatch(/다시 보이지 않는다/);
     // 입력란이 비워진다는 것도 누르기 전에 적혀 있다.
-    expect(TOKEN_INPUT_NOTICE).toMatch(/cleared from this box/i);
+    expect(TOKEN_INPUT_NOTICE).toMatch(/이 칸에서 지워지며/);
   });
 
   it('아직 물어보지 않은 것과 저장돼 있지 않은 것이 다른 상태다', () => {
@@ -272,7 +272,7 @@ describe('보낼 부모 페이지', () => {
     expect(notionDestinationNotice('')).toBe(NO_DESTINATION_TEXT);
     expect(notionDestinationNotice('   ')).toBe(NO_DESTINATION_TEXT);
     expect(notionDestinationNotice('parent-page-identifier')).toBeNull();
-    expect(HOW_TO_SET_A_DESTINATION).toMatch(/share it with your integration/i);
+    expect(HOW_TO_SET_A_DESTINATION).toMatch(/integration과 공유/);
   });
 
   it('마지막 저장 뒤에 destination이 바뀌었으면 확인 결과가 그 값에 대한 답이 아니라고 말할 수 있다', () => {
@@ -283,6 +283,6 @@ describe('보낼 부모 페이지', () => {
   });
 
   it('Notion 쪽이 어떻게 끝나도 나머지 설정 저장이 막히지 않는다는 것을 화면이 말한다 (INV-8)', () => {
-    expect(NOTION_SETTINGS_UNAFFECTED_NOTICE).toMatch(/still saves normally/i);
+    expect(NOTION_SETTINGS_UNAFFECTED_NOTICE).toMatch(/그대로 저장된다/);
   });
 });

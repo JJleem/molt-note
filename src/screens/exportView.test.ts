@@ -145,7 +145,7 @@ describe('내보내기 자리가 놓이는 상태', () => {
     expect(view.body.hint).toBe(NOTHING_TO_EXPORT_HINT);
     // 화면이 실패로 그릴 재료가 없다.
     expect(view.body).not.toHaveProperty('failure');
-    expect(view.body.text).not.toMatch(/fail|error/i);
+    expect(view.body.text).not.toMatch(/실패|오류/);
   });
 
   it('전사가 있으면 그 자리에서 내보낼 수 있다', () => {
@@ -183,7 +183,7 @@ describe('내보내기 자리가 놓이는 상태', () => {
     expect(view.body.file.fileName).toBe('2026-09-01-3dgs-study-04-2.md');
     // 또 내보낼 수 있고, 그것이 있던 파일을 덮어쓰지 않는다는 사실도 함께 있다.
     expect(view.body.again.kind).toBe('again');
-    expect(view.body.text).toMatch(/never overwrites/i);
+    expect(view.body.text).toMatch(/덮어쓰지 않는다/);
   });
 
   it('다른 녹음의 결과가 이 자리에 보이지 않는다', () => {
@@ -321,8 +321,8 @@ describe('무엇이 파일에 들어가는지 말한다', () => {
 
     expect(view.contents.items.length).toBeGreaterThan(0);
     expect(view.contents.audioNotice).toBe(EXPORT_AUDIO_NOTICE);
-    expect(view.contents.audioNotice).toMatch(/audio file is not copied/i);
-    expect(view.contents.audioNotice).toMatch(/nothing is sent anywhere/i);
+    expect(view.contents.audioNotice).toMatch(/오디오 파일은 복사되지 않/);
+    expect(view.contents.audioNotice).toMatch(/어디로도 보내지 않는다/);
   });
 
   it('노트가 들어가는지를 있는 그대로 말한다', () => {
@@ -401,8 +401,8 @@ describe('P-3 (2) AI Note 없이 Markdown export가 된다 (INV-8 · §17.1)', (
   it('노트가 없는 것이 결함처럼 적히지 않는다 — 그것도 완결된 문서다', () => {
     const notice = exportPanel(input({ notes: [] })).contents;
 
-    expect(notice.noteText).toMatch(/complete document/i);
-    expect(notice.noteText).not.toMatch(/fail|error|cannot/i);
+    expect(notice.noteText).toMatch(/온전한 문서/);
+    expect(notice.noteText).not.toMatch(/실패|오류|못한다|없다/);
   });
 
   it('노트도 전사도 없는 녹음은 실패가 아니라 "아직 없다"로 남는다', () => {
@@ -440,8 +440,8 @@ describe('P-3 (3) export 실패가 원본 데이터를 훼손하지 않는다 (I
 
       // 2. 원본은 안전한가 — 지워진 것도 바뀐 것도 없다.
       expect(view.body.preservedNotice, label).toBe(EXPORT_PRESERVED_NOTICE);
-      expect(view.body.preservedNotice, label).toMatch(/untouched/i);
-      expect(view.body.preservedNotice, label).toMatch(/Nothing was deleted or changed/i);
+      expect(view.body.preservedNotice, label).toMatch(/그대로/);
+      expect(view.body.preservedNotice, label).toMatch(/지워진 것도 바뀐 것도 없다/);
       expect(view.body.failure.sourceDataSafe, label).toBe(true);
 
       // 3. 다시 시도할 수 있는가.
@@ -493,7 +493,7 @@ describe('P-3 (3) export 실패가 원본 데이터를 훼손하지 않는다 (I
     if (view.body.kind !== 'failed') {
       throw new Error('실패 상태여야 한다');
     }
-    expect(view.body.preservedNotice).toMatch(/audio file/i);
+    expect(view.body.preservedNotice).toMatch(/오디오 파일/);
     // "복구했다"거나 "정리했다"고 말하지 않는다.
     expect(view.body.preservedNotice).not.toMatch(/recovered|cleaned/i);
   });

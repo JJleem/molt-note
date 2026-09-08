@@ -25,7 +25,7 @@ import type { InputDevice } from '../ipc/types';
 export const NO_DEFAULT_MICROPHONE = '';
 
 /** 아무것도 고르지 않은 항목의 이름. */
-export const NO_DEFAULT_MICROPHONE_LABEL = 'No default microphone';
+export const NO_DEFAULT_MICROPHONE_LABEL = '기본 마이크 없음';
 
 /**
  * 저장돼 있지만 지금 없는 장치의 이름.
@@ -33,7 +33,7 @@ export const NO_DEFAULT_MICROPHONE_LABEL = 'No default microphone';
  * 장치의 진짜 이름은 알 수 없다 — 저장된 것은 불투명한 선택 키뿐이고, 이름은 그 장치를
  * 열거할 수 있을 때만 나온다. 없는 이름을 지어내지 않고 **없다는 사실을 보여 준다.**
  */
-export const MISSING_DEFAULT_MICROPHONE_LABEL = 'Saved microphone (not available)';
+export const MISSING_DEFAULT_MICROPHONE_LABEL = '저장된 마이크 (지금 없음)';
 
 /**
  * `<select>`가 들고 있는 값을 저장할 값으로 옮긴다. "고르지 않음"은 `null`이다.
@@ -119,9 +119,9 @@ export function microphoneOptions(
 export function defaultMicrophoneNotice(resolved: DefaultMicrophone): string | null {
   switch (resolved.kind) {
     case 'notChosen':
-      return 'No default microphone chosen yet.';
+      return '기본 마이크를 아직 고르지 않았다.';
     case 'missing':
-      return 'The saved microphone is not available right now. It stays chosen until you pick another one.';
+      return '저장된 마이크를 지금 쓸 수 없다. 다른 것을 고를 때까지 그대로 남는다.';
     case 'available':
       return null;
   }

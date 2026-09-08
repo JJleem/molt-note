@@ -136,22 +136,22 @@ export const INITIAL_RECORDING: RecordingView = {
 export const UNKNOWN_ELAPSED = '—';
 
 const STATE_TEXT: Record<SessionState, string> = {
-  idle: 'Ready',
+  idle: '준비됨',
   // §5 B의 화면 스케치 그대로다. 깜빡이지 않는다 (§19 — 장식적 시각 효과를 넣지 않는다).
   recording: '● REC',
-  paused: 'Paused',
-  stopped: 'Stopped',
+  paused: '일시정지',
+  stopped: '정지됨',
 };
 
 /** 아직 상태를 물어보지 못했을 때의 표현. */
-const UNKNOWN_STATE_TEXT = 'Checking…';
+const UNKNOWN_STATE_TEXT = '확인 중…';
 
 const TROUBLE_HEADLINE: Record<RecordingTroubleKind, string> = {
-  microphonePermission: 'Microphone access is not available.',
-  recordingStart: 'The recording could not be started.',
-  recordingControl: 'The recording could not be paused or resumed.',
-  recordingStop: 'The recording could not be stopped.',
-  sessionStatus: 'The recording status could not be read.',
+  microphonePermission: '마이크를 쓸 수 없다.',
+  recordingStart: '녹음을 시작하지 못했다.',
+  recordingControl: '녹음을 멈추거나 이어 가지 못했다.',
+  recordingStop: '녹음을 정지하지 못했다.',
+  sessionStatus: '녹음 상태를 읽지 못했다.',
 };
 
 /**
@@ -208,9 +208,9 @@ export function microphoneLabel(microphone: SelectedMicrophone): string {
       // 저장된 것은 불투명한 키뿐이라 진짜 이름은 알 수 없다 (`defaultMicrophone.ts`).
       return MISSING_DEFAULT_MICROPHONE_LABEL;
     case 'none':
-      return 'No microphone available';
+      return '쓸 수 있는 마이크 없음';
     case 'unknown':
-      return microphone.failure === null ? 'Checking microphone…' : 'Microphone unknown';
+      return microphone.failure === null ? '마이크 확인 중…' : '마이크를 알 수 없음';
   }
 }
 
@@ -219,15 +219,15 @@ export function microphoneNotice(microphone: SelectedMicrophone): string | null 
   switch (microphone.kind) {
     case 'selected':
       return microphone.fromSystemDefault
-        ? 'No default microphone is set, so the system default is used. Choose one in Settings to pin it.'
+        ? '기본 마이크가 지정되지 않아서 시스템 기본값을 쓴다. 고정하려면 설정에서 고른다.'
         : null;
     case 'missing':
       // 사실을 말하고, 그것 때문에 지금 무엇을 할 수 없는지도 말한다 (§13).
-      return 'The saved microphone is not available right now. It stays chosen — pick another one in Settings to record.';
+      return '저장된 마이크를 지금 쓸 수 없다. 선택은 그대로 남는다 — 녹음하려면 설정에서 다른 것을 고른다.';
     case 'none':
-      return 'No input device is available. Connect a microphone, then reload.';
+      return '쓸 수 있는 입력 장치가 없다. 마이크를 연결한 뒤 다시 불러온다.';
     case 'unknown':
-      return microphone.failure === null ? null : 'The microphone could not be determined.';
+      return microphone.failure === null ? null : '어떤 마이크인지 확인하지 못했다.';
   }
 }
 
@@ -302,7 +302,7 @@ export function sessionDisplay(view: RecordingView): SessionDisplay {
  * 레벨이 낮다고 말하면 화면이 사용자에게 거짓말을 하게 된다 (ADR-0003 §16.3). 모르는 것은
  * 모른다고 적는다 — `UNKNOWN_ELAPSED`가 시간에 대해 하는 일과 같다.
  */
-export const UNKNOWN_LEVEL_TEXT = 'Input level not measured yet';
+export const UNKNOWN_LEVEL_TEXT = '입력 레벨을 아직 재지 않았다';
 
 /**
  * 쓸 수 없을 만큼 낮을 때 **정지 전에** 보이는 경고 (ADR-0003 §16.1의 관측).
@@ -316,7 +316,7 @@ export const UNKNOWN_LEVEL_TEXT = 'Input level not measured yet';
  * 녹음을 막지도, 멈추지도 않는다 (§16.5) — 이미 녹음된 것은 그대로 남고, 사람이 정한다.
  */
 export const WEAK_LEVEL_WARNING =
-  'This recording may not be usable. Check the microphone before you stop — everything recorded so far stays as it is.';
+  '이 녹음은 쓸 수 없을 수 있다. 정지하기 전에 마이크를 확인한다 — 지금까지 녹음된 것은 그대로 남는다.';
 
 /**
  * 입력 레벨이 화면에 놓이는 모습.

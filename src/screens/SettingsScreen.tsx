@@ -447,10 +447,10 @@ export function SettingsScreen() {
   return (
     <div className="screen">
       <section className="group">
-        <h2 className="group__title">Recording</h2>
+        <h2 className="group__title">녹음</h2>
 
         <label className="field" htmlFor="recordings-directory">
-          <span className="field__label">Recordings directory</span>
+          <span className="field__label">녹음 저장 위치</span>
           <input
             id="recordings-directory"
             type="text"
@@ -460,10 +460,10 @@ export function SettingsScreen() {
             onChange={(event) => edit({ recordingsDirectory: event.currentTarget.value })}
           />
         </label>
-        {form.recordingsDirectory === '' && <p className="hint">No recordings directory set yet.</p>}
+        {form.recordingsDirectory === '' && <p className="hint">녹음 저장 위치를 아직 지정하지 않았다.</p>}
 
         <label className="field" htmlFor="default-microphone">
-          <span className="field__label">Default microphone</span>
+          <span className="field__label">기본 마이크</span>
           <select
             id="default-microphone"
             className="select"
@@ -492,15 +492,15 @@ export function SettingsScreen() {
             checked={form.automaticProcessing}
             onChange={(event) => edit({ automaticProcessing: event.currentTarget.checked })}
           />
-          <span className="field__label">Automatic processing after a recording ends</span>
+          <span className="field__label">녹음이 끝나면 자동으로 처리한다</span>
         </label>
       </section>
 
       <section className="group">
-        <h2 className="group__title">Transcription</h2>
+        <h2 className="group__title">전사</h2>
 
         <label className="field" htmlFor="transcription-model">
-          <span className="field__label">Whisper model</span>
+          <span className="field__label">Whisper 모델</span>
           <input
             id="transcription-model"
             type="text"
@@ -512,7 +512,7 @@ export function SettingsScreen() {
         </label>
 
         <label className="field" htmlFor="transcription-language">
-          <span className="field__label">Language</span>
+          <span className="field__label">언어</span>
           {/* 모델과 **다른 값이다** — 어떤 모델로 듣는가와 무슨 언어로 듣는가는 서로 다른
               질문이다 (ADR-0007 §17.1). 비어 있는 것이 자동 감지라는 사실은 placeholder와
               아래 문장이 말하며, 그 문구를 정하는 것은 순수 모듈이다. */}
@@ -544,7 +544,7 @@ export function SettingsScreen() {
             onChange={(event) => edit({ automaticTranscription: event.currentTarget.checked })}
           />
           {/* 후처리 토글과 **다른 값이다.** 하나를 켜는 것이 다른 하나를 켜지 않는다. */}
-          <span className="field__label">Transcribe automatically after a recording is saved</span>
+          <span className="field__label">녹음이 저장되면 자동으로 전사한다</span>
         </label>
 
         {/* 모델이 없다는 사실과 그것을 푸는 방법이 여기 나온다. 토글 값은 건드리지 않는다 —
@@ -569,7 +569,7 @@ export function SettingsScreen() {
           <p className="hint">{CONNECTED_PROVIDER_TEXT}</p>
 
           <label className="field" htmlFor="ai-provider">
-            <span className="field__label">Provider</span>
+            <span className="field__label">AI 제공자</span>
             <select
               id="ai-provider"
               className="select"
@@ -610,7 +610,7 @@ export function SettingsScreen() {
                   )}
 
                   <label className="field" htmlFor="ai-api-key">
-                    <span className="field__label">API key</span>
+                    <span className="field__label">API 키</span>
                     {/* **`value`가 없다.** 입력한 값은 React 상태에 들어가지 않고, 저장된
                         값이 여기 채워지는 일도 없다 — 되읽는 command 자체가 없다 (INV-7). */}
                     <input
@@ -630,7 +630,7 @@ export function SettingsScreen() {
                     disabled={aiKeyBusy !== null}
                     onClick={saveAiKey}
                   >
-                    {aiKeyBusy === 'save' ? 'Saving the key…' : 'Save the key'}
+                    {aiKeyBusy === 'save' ? '키 저장 중…' : '키 저장'}
                   </button>
                   {/* 저장된 것을 없애는 동작이므로 다른 버튼과 같은 무게로 두지 않는다 (§19). */}
                   <button
@@ -639,7 +639,7 @@ export function SettingsScreen() {
                     disabled={aiKeyBusy !== null}
                     onClick={removeAiKey}
                   >
-                    {aiKeyBusy === 'delete' ? 'Removing the key…' : 'Remove the saved key'}
+                    {aiKeyBusy === 'delete' ? '키 지우는 중…' : '저장된 키 지우기'}
                   </button>
                   {aiKeyTrouble !== null && (
                     <FailureNotice
@@ -671,7 +671,7 @@ export function SettingsScreen() {
                 disabled={connection.kind === 'checking'}
                 onClick={checkProvider}
               >
-                {connection.kind === 'checking' ? 'Checking…' : 'Check the AI provider'}
+                {connection.kind === 'checking' ? '확인 중…' : 'AI provider 확인'}
               </button>
               <p className="hint">{AI_CHECK_USES_SAVED_SETTINGS}</p>
               {staleCheck && (
@@ -706,7 +706,7 @@ export function SettingsScreen() {
               )}
 
               <label className="field" htmlFor="ai-model">
-                <span className="field__label">Model</span>
+                <span className="field__label">모델</span>
                 <select
                   id="ai-model"
                   className="select"
@@ -763,7 +763,7 @@ export function SettingsScreen() {
         )}
 
         <label className="field" htmlFor="notion-token">
-          <span className="field__label">Integration token</span>
+          <span className="field__label">연동 토큰</span>
           {/* **`value`가 없다.** 입력한 값은 React 상태에 들어가지 않고, 저장된 값이 여기
               채워지는 일도 없다 — 되읽는 command 자체가 없다 (INV-7). */}
           <input
@@ -783,7 +783,7 @@ export function SettingsScreen() {
           disabled={tokenBusy !== null}
           onClick={saveToken}
         >
-          {tokenBusy === 'save' ? 'Saving the token…' : 'Save the token'}
+          {tokenBusy === 'save' ? 'token 저장 중…' : 'token 저장'}
         </button>
         {/* 저장된 것을 없애는 동작이므로 다른 버튼과 같은 무게로 두지 않는다 (§19). */}
         <button
@@ -792,7 +792,7 @@ export function SettingsScreen() {
           disabled={tokenBusy !== null}
           onClick={removeToken}
         >
-          {tokenBusy === 'delete' ? 'Removing the token…' : 'Remove the saved token'}
+          {tokenBusy === 'delete' ? 'token 지우는 중…' : '저장된 token 지우기'}
         </button>
         {tokenTrouble !== null && (
           <FailureNotice
@@ -826,7 +826,7 @@ export function SettingsScreen() {
           disabled={notion.kind === 'checking'}
           onClick={checkNotion}
         >
-          {notion.kind === 'checking' ? 'Checking…' : 'Check the Notion connection'}
+          {notion.kind === 'checking' ? '확인 중…' : 'Notion 연결 확인'}
         </button>
         <p className="hint">{NOTION_CHECK_USES_SAVED_SETTINGS}</p>
         {staleDestination && (
@@ -873,7 +873,7 @@ export function SettingsScreen() {
         >
           {saving ? 'Saving…' : 'Save'}
         </button>
-        <p className="hint">Saves every setting on this screen.</p>
+        <p className="hint">이 화면의 모든 설정을 저장한다.</p>
         {/* 저장됐다는 사실도 글자로 말한다 — 색만으로 말하는 자리를 두지 않는다 (요구 12). */}
         {saved && (
           <p className="hint" role="status">

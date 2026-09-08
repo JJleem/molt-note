@@ -56,7 +56,7 @@ export interface ExportAction {
 }
 
 /** 화면에 처음 보이는 이름. Task와 Phase Goal이 부르는 이름 그대로다. */
-export const EXPORT_LABEL = 'Export Markdown';
+export const EXPORT_LABEL = '마크다운 내보내기';
 
 function exportAction(recordingId: string): ExportAction {
   return { kind: 'export', label: EXPORT_LABEL, recordingId };
@@ -64,11 +64,11 @@ function exportAction(recordingId: string): ExportAction {
 
 function againAction(recordingId: string): ExportAction {
   // 다시 내보내면 파일이 하나 더 생긴다 — 있던 파일을 덮어쓰지 않는다 (§4.3).
-  return { kind: 'again', label: 'Export another Markdown file', recordingId };
+  return { kind: 'again', label: '마크다운 하나 더 내보내기', recordingId };
 }
 
 function retryAction(recordingId: string): ExportAction {
-  return { kind: 'retry', label: 'Try the export again', recordingId };
+  return { kind: 'retry', label: '내보내기 다시 시도', recordingId };
 }
 
 /**
@@ -92,11 +92,11 @@ export interface ExportedFileView {
 }
 
 /** 파일이 만들어졌다는 사실 한 줄. */
-export const EXPORT_DONE_HEADLINE = 'The Markdown file was written.';
+export const EXPORT_DONE_HEADLINE = '마크다운 파일을 만들었다.';
 
 /** 그 파일이 어떤 성질인가 — 여기서부터는 사용자의 문서다 (§4.3). */
 export const EXPORT_DONE_TEXT =
-  'This file is yours now. Exporting again writes another file next to it and never overwrites this one.';
+  '이 파일은 이제 사용자의 것이다. 다시 내보내면 그 옆에 새 파일이 생기며 이 파일을 덮어쓰지 않는다.';
 
 /** AI 노트가 이 문서에 들어가는가. 아직 읽지 못한 것은 없는 것과 다른 사실이다. */
 export type ExportNoteInclusion = 'included' | 'none' | 'unknown';
@@ -118,23 +118,23 @@ export interface ExportContentsNotice {
   readonly audioNotice: string;
 }
 
-export const EXPORT_CONTENTS_HEADLINE = 'What goes into the file';
+export const EXPORT_CONTENTS_HEADLINE = '파일에 들어가는 것';
 
 /** 렌더러가 언제나 넣는 것 (§11의 구조). */
 export const EXPORT_CONTENT_ITEMS: readonly string[] = [
-  'The title, date, and length of this recording',
-  'The transcript text, with a heading for each segment',
+  '이 녹음의 제목 · 날짜 · 길이',
+  '전사 텍스트 — 구간마다 제목이 붙는다',
 ];
 
 const NOTE_TEXT: Record<ExportNoteInclusion, string> = {
-  included: 'The AI note for this recording is included.',
-  none: 'There is no AI note for this recording, so the file has the details and the transcript. That is a complete document on its own.',
-  unknown: 'Whether this recording has an AI note is not known right now. If it has one, it is included.',
+  included: '이 녹음의 AI 노트가 함께 들어간다.',
+  none: '이 녹음에는 AI 노트가 없어서 파일에는 상세 정보와 전사가 들어간다. 그것만으로도 온전한 문서다.',
+  unknown: '이 녹음에 AI 노트가 있는지 지금은 알 수 없다. 있으면 함께 들어간다.',
 };
 
 /** 파일 하나를 쓰는 일이다. 어떤 바이트도 이 기기를 떠나지 않는다 (INV-6). */
 export const EXPORT_AUDIO_NOTICE =
-  'The audio file is not copied, and nothing is sent anywhere — this writes one text file on this device.';
+  '오디오 파일은 복사되지 않고, 어디로도 보내지 않는다 — 이 기기에 텍스트 파일 하나를 쓸 뿐이다.';
 
 function contentsNotice(notes: readonly AiNote[] | null): ExportContentsNotice {
   const note: ExportNoteInclusion =
@@ -149,21 +149,21 @@ function contentsNotice(notes: readonly AiNote[] | null): ExportContentsNotice {
 }
 
 /** 내보낼 재료가 아직 없다. **실패가 아니다** (§7.2 · `export::run`의 `nothing_to_export`). */
-export const NOTHING_TO_EXPORT_TEXT = 'There is nothing to export from this recording yet.';
+export const NOTHING_TO_EXPORT_TEXT = '이 녹음에서 아직 내보낼 것이 없다.';
 
 /** 그래서 무엇을 하면 되는가. 이 자리가 전사를 시작하지 않는다 — 그 자리는 Transcript 탭이다. */
 export const NOTHING_TO_EXPORT_HINT =
-  'Transcribe this recording in the Transcript tab first, then export it.';
+  '전사 탭에서 이 녹음을 먼저 전사한 뒤에 내보낸다.';
 
 /** 지금 눌러도 되는가. 파일 하나를 쓰는 일이므로 기다릴 서버도 모델도 없다. */
 export const EXPORT_READY_TEXT =
-  'Write this recording to a Markdown file you can open in Obsidian, NotebookLM, or any editor.';
+  '이 녹음을 마크다운 파일로 쓴다. Obsidian · NotebookLM 등 아무 편집기에서나 열 수 있다.';
 
 /** 쓰는 중. 전사·노트와 달리 이 일은 짧고, 화면을 떠나도 되는 종류의 일이 아니다. */
-export const EXPORTING_TEXT = 'Writing the Markdown file…';
+export const EXPORTING_TEXT = '마크다운 파일 쓰는 중…';
 
 /** 무엇을 하다 실패했는가 (§13). 원인은 {@link Failure}가 말한다. */
-export const EXPORT_FAILED_HEADLINE = 'This recording could not be exported.';
+export const EXPORT_FAILED_HEADLINE = '이 녹음을 내보내지 못했다.';
 
 /**
  * 실패가 무엇을 남겼는지 (§13 · INV-1 · INV-2 · INV-3).
@@ -172,7 +172,7 @@ export const EXPORT_FAILED_HEADLINE = 'This recording could not be exported.';
  * 실패했을 때 바뀐 것이 아무것도 없다 (`src-tauri/src/export/run.rs`).
  */
 export const EXPORT_PRESERVED_NOTICE =
-  'The recording, its audio file, the transcript, and any AI note are untouched. Nothing was deleted or changed — exporting only reads.';
+  '녹음도 오디오 파일도 전사도 AI 노트도 그대로다. 지워진 것도 바뀐 것도 없다 — 내보내기는 읽기만 한다.';
 
 /** 실패 갈래 중 사용자가 **먼저** 할 일이 달라지는 것 (§13). */
 export type ExportFailureCause = 'nothingToExport' | 'storage' | 'other';
@@ -180,7 +180,7 @@ export type ExportFailureCause = 'nothingToExport' | 'storage' | 'other';
 const FAILURE_RESOLUTION: Record<ExportFailureCause, string | null> = {
   nothingToExport: NOTHING_TO_EXPORT_HINT,
   storage:
-    'The file could not be written. Check that this device has room and that the app can write to its data folder, then try again.',
+    '파일을 쓰지 못했다. 이 기기에 남은 공간이 있는지, 앱이 자기 데이터 폴더에 쓸 수 있는지 확인한 뒤 다시 시도한다.',
   other: null,
 };
 

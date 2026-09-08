@@ -373,7 +373,7 @@ describe('AI Note 탭은 두 줄이다 (요구 6)', () => {
     expect(view.automatic.tab.body).not.toHaveProperty('failure');
     // 그리고 그것이 **선택**이라는 사실이 값으로 있다 — 재촉이 아니다.
     expect(view.automatic.optionalNotice).toBe(AUTOMATIC_OPTIONAL_NOTICE);
-    expect(view.automatic.optionalNotice).toMatch(/optional/i);
+    expect(view.automatic.optionalNotice).toMatch(/선택/);
     expect(view.automatic.optionalNotice).not.toMatch(/must|required|need to set/i);
     // 아래 줄은 provider가 없어도 된다고 말한다.
     expect(view.manual.noProviderNotice).toBe(MANUAL_NO_PROVIDER_NOTICE);
@@ -410,7 +410,7 @@ describe('AI Note 탭은 두 줄이다 (요구 6)', () => {
     for (const provider of [noProvider(), readyProvider()]) {
       const view = layout({ provider });
       expect(view.manual.localNotice).toBe(MANUAL_LOCAL_NOTICE);
-      expect(view.manual.localNotice).toMatch(/audio/i);
+      expect(view.manual.localNotice).toMatch(/오디오/);
     }
   });
 });
@@ -492,7 +492,7 @@ describe('Export for AI 자리 (요구 3)', () => {
     expect(view.aiExport.body.path).toContain('/exports/');
     // 또 내보낼 수 있고, 있던 파일은 그대로다.
     expect(view.aiExport.body.again.kind).toBe('again');
-    expect(view.aiExport.body.text).toMatch(/never overwrites/);
+    expect(view.aiExport.body.text).toMatch(/덮어쓰지 않는다/);
     // 나뉘지 않았으면 더 꺼낼 것이 없다 — 없는 조각을 가리키는 버튼을 만들지 않는다.
     expect(view.aiExport.body.next).toBeNull();
     expect(view.aiExport.body.portion.label).toBe(WHOLE_PORTION_LABEL);
@@ -573,8 +573,8 @@ describe('Export for AI 자리 (요구 3)', () => {
 
   it('실패는 §13의 세 질문에 답하고 재시도 수단을 남긴다 (MH-7)', () => {
     const cases: readonly (readonly [FailureKind, string, string | null])[] = [
-      ['invalidInput', 'nothingToExport', 'Transcribe this recording'],
-      ['storage', 'storage', 'The file could not be written'],
+      ['invalidInput', 'nothingToExport', '이 녹음을 먼저 전사'],
+      ['storage', 'storage', '파일을 쓰지 못했다'],
       ['unexpected', 'other', null],
     ];
 
@@ -664,7 +664,7 @@ describe('나뉜 문서를 완전한 것처럼 말하지 않는다', () => {
     expect(view.aiExport.body.next?.mode).toBe('meeting');
     // 같은 조각을 다시 쓰는 수단은 그대로다 — 있던 파일을 덮어쓰지 않는다.
     expect(view.aiExport.body.again.portion).toBe(2);
-    expect(view.aiExport.body.text).toMatch(/never overwrites/);
+    expect(view.aiExport.body.text).toMatch(/덮어쓰지 않는다/);
     // 이 자리는 여전히 눌린다.
     expect(view.steps[2].usable).toBe(true);
   });
@@ -677,7 +677,7 @@ describe('나뉜 문서를 완전한 것처럼 말하지 않는다', () => {
     }
     expect(view.aiExport.body.next).toBeNull();
     expect(view.aiExport.body.portion.remaining).toBe(0);
-    expect(view.aiExport.body.text).toContain('last part');
+    expect(view.aiExport.body.text).toContain('마지막 조각');
   });
 
   it('쓰려던 조각으로 다시 시도한다 — 건너뛰지 않는다', () => {

@@ -53,11 +53,11 @@ export const LOADING_RECORDINGS: RecordingsView = { kind: 'loading' };
 
 /** `none`은 아직 시도하지 않았다는 정상 상태다 — 오류처럼 읽히지 않게 적는다 (§7 · INV-8). */
 const STATUS_TEXT: Record<ProcessingStatus, string> = {
-  none: 'Not started',
-  pending: 'Pending',
-  running: 'Running',
+  none: '시작 안 함',
+  pending: '대기 중',
+  running: '진행 중',
   done: 'Done',
-  failed: 'Failed',
+  failed: '실패',
 };
 
 /** 날짜 라벨을 만들 때 쓰는 시간대. 지정하지 않으면 실행 환경의 시간대다. */
@@ -97,7 +97,7 @@ function toListItem(recording: Recording, options: RecordedAtOptions): Recording
     // Rust가 보낸 값을 그대로 쓴다. 여기서 다시 계산하지 않는다.
     durationLabel: recording.durationLabel,
     statuses: [
-      statusBadge('Transcript', recording.transcriptionStatus),
+      statusBadge('전사', recording.transcriptionStatus),
       statusBadge('AI Note', recording.aiStatus),
       statusBadge('Notion', recording.notionStatus),
     ],

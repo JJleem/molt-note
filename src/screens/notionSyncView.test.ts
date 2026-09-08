@@ -124,7 +124,7 @@ describe('이 녹음의 Notion 상태가 Detail에 보인다 (§7 · 요구 9)',
     const view = notionPanel(input());
 
     expect(view.status).toEqual(statusBadge('Notion', 'none'));
-    expect(view.status?.text).not.toMatch(/fail|error/i);
+    expect(view.status?.text).not.toMatch(/실패|오류/);
     expect(view.body.kind).toBe('ready');
     if (view.body.kind !== 'ready') {
       throw new Error('보낼 수 있어야 한다');
@@ -191,10 +191,10 @@ describe('무엇이 전송되는지 화면에 드러난다 (INV-5 · INV-6)', ()
     const view = notionPanel(input());
 
     expect(view.contents.headline).toBe(NOTION_CONTENTS_HEADLINE);
-    expect(view.contents.items.join(' · ')).toMatch(/transcript/i);
-    expect(view.contents.items.join(' · ')).toMatch(/AI note/i);
+    expect(view.contents.items.join(' · ')).toMatch(/전사/);
+    expect(view.contents.items.join(' · ')).toMatch(/AI 노트/);
     expect(view.contents.audioNotice).toBe(NOTION_AUDIO_NOTICE);
-    expect(view.contents.audioNotice).toMatch(/audio file is never sent/i);
+    expect(view.contents.audioNotice).toMatch(/오디오 파일은 보내지 않는다/);
   });
 
   it('오디오 파일 경로가 이 자리의 어떤 값에도 실리지 않는다 (INV-6)', () => {
@@ -269,8 +269,8 @@ describe('같은 Recording을 두 번 보내면 무슨 일이 일어나는가 (A
     // ADR §8.3 — 명시적 중복 생성이며, 기존 페이지는 건드리지 않는다.
     expect(view.body.again.kind).toBe('newPage');
     expect(view.body.again.confirmation).toBe('newPage');
-    expect(view.body.again.outcomeText).toMatch(/leaves that page exactly as it is/i);
-    expect(view.body.again.outcomeText).toMatch(/nothing there is changed or deleted/i);
+    expect(view.body.again.outcomeText).toMatch(/그 페이지는 그대로 남는다/);
+    expect(view.body.again.outcomeText).toMatch(/바뀌지도 지워지지도 않는다/);
     // 기존 페이지를 갈아 끼우는 갈래는 ADR-0009 §8.3이 거절했다. 그런 말이 여기 없다.
     expect(view.body.again.outcomeText).not.toMatch(/overwrit|replaces/i);
   });
@@ -289,7 +289,7 @@ describe('같은 Recording을 두 번 보내면 무슨 일이 일어나는가 (A
     expect(view.body.retry.kind).toBe('resume');
     expect(view.body.retry.confirmation).toBe('notAsked');
     expect(view.body.retry.outcomeText).toBe(RESUME_OUTCOME);
-    expect(view.body.retry.outcomeText).toMatch(/does not create a second page/i);
+    expect(view.body.retry.outcomeText).toMatch(/두 번째 페이지를 만들지 않는다/);
   });
 
   it('페이지가 만들어졌는지 모르는 실패는 그대로 다시 보내지 않고 먼저 묻는다고 말한다', () => {
@@ -305,7 +305,7 @@ describe('같은 Recording을 두 번 보내면 무슨 일이 일어나는가 (A
     }
     expect(view.body.retry.kind).toBe('retry');
     expect(view.body.retry.confirmation).toBe('notAsked');
-    expect(view.body.retry.outcomeText).toMatch(/asks you instead of making a second one/i);
+    expect(view.body.retry.outcomeText).toMatch(/두 번째를 만드는 대신 멈추고/);
   });
 
   it('확인을 물어 온 것은 실패가 아니라 고를 차례다 — 세 이유가 갈린다 (§8.5)', () => {
@@ -338,7 +338,7 @@ describe('같은 Recording을 두 번 보내면 무슨 일이 일어나는가 (A
       expect(view.status?.status, reason).toBe('none');
       // 새 페이지는 **이 버튼으로만** 만들어진다.
       expect(view.body.confirm.confirmation, reason).toBe('newPage');
-      expect(view.body.confirm.label, reason).toBe('Create a new Notion page');
+      expect(view.body.confirm.label, reason).toBe('새 Notion 페이지 만들기');
     }
   });
 
@@ -410,8 +410,8 @@ describe('전송 실패가 화면에 남는 방식 (§13 · INV-3)', () => {
 
       // 2. 원본은 안전한가.
       expect(view.body.preservedNotice, label).toBe(SEND_PRESERVED_NOTICE);
-      expect(view.body.preservedNotice, label).toMatch(/untouched/i);
-      expect(view.body.preservedNotice, label).toMatch(/already in Notion is left as it is/i);
+      expect(view.body.preservedNotice, label).toMatch(/그대로/);
+      expect(view.body.preservedNotice, label).toMatch(/이미 Notion에 있는 것도 그대로/);
 
       // 3. 다시 시도할 수 있는가.
       expect(view.body.retry.recordingId, label).toBe('r-1');
@@ -476,7 +476,7 @@ describe('전송 실패가 화면에 남는 방식 (§13 · INV-3)', () => {
   it('거절된 요청은 전송 상태를 덮지 않고 그 옆에 남는다', () => {
     const trouble = notionTrouble('start', failure('invalidInput', { message: '이미 보내는 중이다.' }));
 
-    expect(trouble.headline).toMatch(/could not be started/i);
+    expect(trouble.headline).toMatch(/시작하지 못했다/);
     expect(trouble.failure.message).toBe('이미 보내는 중이다.');
   });
 });

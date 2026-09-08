@@ -95,35 +95,35 @@ export interface NotionSendAction {
 }
 
 /** 처음 보낼 때. 화면에 처음 보이는 이름은 Phase Goal이 부르는 이름 그대로다. */
-export const SEND_LABEL = 'Send to Notion';
+export const SEND_LABEL = 'Notion으로 보내기';
 
 /** 아직 아무것도 보낸 적이 없다. 부모 페이지 밑에 페이지 하나가 생긴다 (§5.1). */
 export const NEW_PAGE_OUTCOME =
-  'This creates one new page under the parent page set in Settings. Sending the same recording again later never overwrites it.';
+  '설정에 지정한 부모 페이지 아래에 새 페이지 하나를 만든다. 같은 녹음을 나중에 다시 보내도 그 페이지를 덮어쓰지 않는다.';
 
 /** 끝나지 않은 전송을 이어 보낸다 — **중복 페이지가 생기지 않는다** (§8.2). */
 export const RESUME_OUTCOME =
-  'This continues on the page that was already created and sends only the parts that never arrived. It does not create a second page. If the note or transcript changed since then, it stops and asks first.';
+  '이미 만들어진 페이지에 이어서, 도착하지 못한 부분만 보낸다. 두 번째 페이지를 만들지 않는다. 그 뒤로 노트나 전사가 바뀌었으면 멈추고 먼저 묻는다.';
 
 /** 결과를 모르는 채로 다시 시도한다 — 그래서 조용히 페이지를 하나 더 만들지 않는다 (§8.5). */
 export const RETRY_OUTCOME =
-  'This tries the same send again. If this app cannot tell whether a page was already created, it stops and asks you instead of making a second one.';
+  '같은 전송을 다시 시도한다. 페이지가 이미 만들어졌는지 이 앱이 알 수 없으면, 두 번째를 만드는 대신 멈추고 사용자에게 묻는다.';
 
 /** 확인 뒤 새 페이지. **기존 페이지는 그대로 둔다** (§8.3). */
 const CONFIRM_OUTCOME: Record<NotionConfirmReason, string> = {
   alreadySent:
-    'This recording already has a Notion page. Creating a new page leaves that page exactly as it is — nothing there is changed or deleted.',
+    '이 녹음에는 이미 Notion 페이지가 있다. 새 페이지를 만들어도 그 페이지는 그대로 남는다 — 거기 있는 것은 바뀌지도 지워지지도 않는다.',
   documentChanged:
-    'The note or transcript changed since the last send, so the parts cannot be appended to the old page. Creating a new page leaves the old page exactly as it is.',
+    '지난 전송 뒤에 노트나 전사가 바뀌어서 옛 페이지에 이어 붙일 수 없다. 새 페이지를 만들어도 옛 페이지는 그대로 남는다.',
   outcomeUnknown:
-    'The last send never learned whether a page was created. Check Notion first — creating a new page here can leave you with two.',
+    '지난 전송은 페이지가 만들어졌는지 끝내 알지 못했다. Notion을 먼저 확인한다 — 여기서 새 페이지를 만들면 둘이 될 수 있다.',
 };
 
 /** 확인이 필요한 이유를 사용자가 읽는 한 줄로. */
 const CONFIRM_HEADLINE: Record<NotionConfirmReason, string> = {
-  alreadySent: 'This recording is already in Notion.',
-  documentChanged: 'This recording changed since it was last sent.',
-  outcomeUnknown: 'The last send did not finish, and its result is not known.',
+  alreadySent: '이 녹음은 이미 Notion에 있다.',
+  documentChanged: '지난 전송 뒤에 이 녹음이 바뀌었다.',
+  outcomeUnknown: '지난 전송이 끝나지 않았고 그 결과를 알 수 없다.',
 };
 
 function sendAction(recordingId: string): NotionSendAction {
@@ -139,7 +139,7 @@ function sendAction(recordingId: string): NotionSendAction {
 function resumeAction(recordingId: string): NotionSendAction {
   return {
     kind: 'resume',
-    label: 'Continue sending to the same page',
+    label: '같은 페이지에 이어서 보내기',
     recordingId,
     confirmation: 'notAsked',
     outcomeText: RESUME_OUTCOME,
@@ -149,7 +149,7 @@ function resumeAction(recordingId: string): NotionSendAction {
 function retryAction(recordingId: string): NotionSendAction {
   return {
     kind: 'retry',
-    label: 'Try sending again',
+    label: '전송 다시 시도',
     recordingId,
     confirmation: 'notAsked',
     outcomeText: RETRY_OUTCOME,
@@ -165,7 +165,7 @@ function retryAction(recordingId: string): NotionSendAction {
 function newPageAction(recordingId: string, reason: NotionConfirmReason): NotionSendAction {
   return {
     kind: 'newPage',
-    label: 'Create a new Notion page',
+    label: '새 Notion 페이지 만들기',
     recordingId,
     confirmation: 'newPage',
     outcomeText: CONFIRM_OUTCOME[reason],
@@ -185,17 +185,17 @@ export interface NotionSendContents {
   readonly audioNotice: string;
 }
 
-export const NOTION_CONTENTS_HEADLINE = 'What is sent to Notion';
+export const NOTION_CONTENTS_HEADLINE = 'Notion으로 보내는 것';
 
 export const NOTION_CONTENT_ITEMS: readonly string[] = [
-  'The title, date, and length of this recording',
-  'The transcript text',
-  'The AI note, when this recording has one',
+  '이 녹음의 제목 · 날짜 · 길이',
+  '전사 텍스트',
+  'AI 노트 — 이 녹음에 있을 때',
 ];
 
 /** INV-6을 사용자 문장으로. 오디오 바이트도 오디오 경로도 요청에 실리지 않는다. */
 export const NOTION_AUDIO_NOTICE =
-  'The audio file is never sent. Only this text leaves this device, and it goes to Notion only.';
+  '오디오 파일은 보내지 않는다. 이 기기를 떠나는 것은 이 텍스트뿐이며, 가는 곳은 Notion 하나다.';
 
 const SEND_CONTENTS: NotionSendContents = {
   headline: NOTION_CONTENTS_HEADLINE,
@@ -233,24 +233,24 @@ function progressOf(sync: NotionSync | null): NotionProgress | null {
 }
 
 /** 보낼 재료가 아직 없다. **실패가 아니다** (§7.2 · `sync::run`의 `nothing_to_send`). */
-export const NOTHING_TO_SEND_TEXT = 'There is nothing to send from this recording yet.';
+export const NOTHING_TO_SEND_TEXT = '이 녹음에서 아직 보낼 것이 없다.';
 
 /** 그래서 무엇을 하면 되는가. 이 자리가 전사를 시작하지 않는다 — 그 자리는 Transcript 탭이다. */
 export const NOTHING_TO_SEND_HINT =
-  'Transcribe this recording in the Transcript tab first, then send it.';
+  '전사 탭에서 이 녹음을 먼저 전사한 뒤에 보낸다.';
 
 /** 아직 보낸 적이 없다. **오류가 아니라 정상 상태다** (§7 · INV-8). */
-export const NOT_SENT_TEXT = 'This recording has not been sent to Notion.';
+export const NOT_SENT_TEXT = '이 녹음을 Notion으로 보낸 적이 없다.';
 
 /** 지금 보내는 중. 전송은 backend의 배경 스레드에서 돌고 화면은 그것을 물어볼 뿐이다. */
 export const SENDING_TEXT =
-  'Sending to Notion… This keeps running in the background, so you can leave this screen.';
+  'Notion으로 보내는 중… 화면을 떠나도 배경에서 계속 돈다.';
 
 /** 끝났다는 사실 한 줄. */
-export const SENT_HEADLINE = 'This recording is in Notion.';
+export const SENT_HEADLINE = '이 녹음은 Notion에 있다.';
 
 /** 무엇을 하다 실패했는가 (§13). 원인은 {@link Failure}가 말한다. */
-export const SEND_FAILED_HEADLINE = 'This recording could not be sent to Notion.';
+export const SEND_FAILED_HEADLINE = '이 녹음을 Notion으로 보내지 못했다.';
 
 /**
  * 실패가 무엇을 남겼는지 (§13 · INV-3).
@@ -259,11 +259,11 @@ export const SEND_FAILED_HEADLINE = 'This recording could not be sent to Notion.
  * 상태뿐이며 (`sync::run`), 이미 Notion에 있는 것도 그대로 둔다.
  */
 export const SEND_PRESERVED_NOTICE =
-  'The recording, its audio file, the transcript, and any AI note are untouched. Nothing was deleted here, and anything already in Notion is left as it is.';
+  '녹음도 오디오 파일도 전사도 AI 노트도 그대로다. 여기서 지워진 것은 없고, 이미 Notion에 있는 것도 그대로 남는다.';
 
 /** 이유를 모를 때 그 사실을 그대로 말한다. **무엇이 실패했는지 지어내지 않는다.** */
 export const UNKNOWN_SEND_NOTICE =
-  'The stored state says the last send failed. The reason is not known in this session — send again to see what happens.';
+  '저장된 상태가 지난 전송의 실패를 말한다. 이 세션에서는 그 이유를 알 수 없다 — 다시 보내 보면 무엇이 일어나는지 알 수 있다.';
 
 /**
  * 실패 갈래 중 사용자가 **먼저** 할 일이 달라지는 것 (§13 · ADR-0009 §9.3).
@@ -282,13 +282,13 @@ export type NotionFailureCause =
   | 'unknown';
 
 const FAILURE_RESOLUTION: Record<NotionFailureCause, string | null> = {
-  auth: 'Notion did not accept the integration token. Put a working token in Settings, then send again.',
+  auth: 'Notion이 integration token을 받아들이지 않았다. 설정에 동작하는 token을 넣은 뒤 다시 보낸다.',
   destination:
-    'Notion could not use the parent page. Share that page with the integration in Notion, or choose another page in Settings, then send again.',
-  rateLimited: 'Notion asked this app to slow down. Try again in a little while.',
-  requestFailed: 'Check that this device is online, then try again.',
+    'Notion이 부모 페이지를 쓸 수 없었다. Notion에서 그 페이지를 integration과 공유하거나 설정에서 다른 페이지를 고른 뒤 다시 보낸다.',
+  rateLimited: 'Notion이 속도를 늦추라고 했다. 잠시 뒤에 다시 시도한다.',
+  requestFailed: '이 기기가 온라인인지 확인한 뒤 다시 시도한다.',
   outcomeUnknown:
-    'Notion answered in a way this app could not read, so it does not know whether a page was created. Open Notion and look before sending again.',
+    'Notion이 이 앱이 읽을 수 없는 형태로 답해서 페이지가 만들어졌는지 알 수 없다. 다시 보내기 전에 Notion을 열어 확인한다.',
   nothingToSend: NOTHING_TO_SEND_HINT,
   other: null,
   unknown: UNKNOWN_SEND_NOTICE,
@@ -600,9 +600,9 @@ export interface NotionTrouble {
 export type NotionRequest = 'status' | 'sync' | 'start';
 
 const TROUBLE_HEADLINE: Record<NotionRequest, string> = {
-  status: 'The Notion send status could not be read.',
-  sync: 'The saved Notion send record could not be read.',
-  start: 'The Notion send could not be started.',
+  status: 'Notion 전송 상태를 읽지 못했다.',
+  sync: '저장된 Notion 전송 기록을 읽지 못했다.',
+  start: 'Notion 전송을 시작하지 못했다.',
 };
 
 /** 거절된 요청 하나를 화면에 놓을 값으로 옮긴다 (§13). */

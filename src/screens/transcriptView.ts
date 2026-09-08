@@ -288,15 +288,15 @@ export type TranscriptTabView =
  * 직접 건드리는 우회가 다시 생긴다.
  */
 export const TRANSCRIPTION_REDO_NOTICE =
-  'Running it again adds a new transcript and shows that one. This transcript is kept.';
+  '다시 돌리면 새 전사가 추가되고 그것이 보인다. 지금 이 전사는 그대로 남는다.';
 
 export const LOADING_TRANSCRIPT_TAB: TranscriptTabView = { kind: 'loading' };
 
 /** 아직 전사한 적이 없다. **오류가 아니라 정상 상태다** (§7 · INV-8). */
-export const NO_TRANSCRIPT_TEXT = 'No transcript yet.';
+export const NO_TRANSCRIPT_TEXT = '아직 전사가 없다.';
 
 /** 접수됐지만 아직 시작되지 않았다. */
-export const PENDING_TRANSCRIPT_TEXT = 'Transcription is queued.';
+export const PENDING_TRANSCRIPT_TEXT = '전사가 대기 중이다.';
 
 /**
  * 지금 전사하고 있다.
@@ -305,10 +305,10 @@ export const PENDING_TRANSCRIPT_TEXT = 'Transcription is queued.';
  * 떠나도 전사는 계속되고, 도는 동안에도 화면이 멎지 않는다 (요구 3).
  */
 export const RUNNING_TRANSCRIPT_TEXT =
-  'Transcribing… This keeps running in the background, so you can leave this screen.';
+  '전사 중… 화면을 떠나도 배경에서 계속 돈다.';
 
 /** 무엇을 하다 실패했는가 (§13). 원인은 {@link Failure}가 말한다. */
-export const TRANSCRIPTION_FAILED_HEADLINE = 'This recording could not be transcribed.';
+export const TRANSCRIPTION_FAILED_HEADLINE = '이 녹음을 전사하지 못했다.';
 
 /**
  * 실패가 무엇을 남겼는지 (§13 · INV-1 · INV-2 · INV-3).
@@ -318,11 +318,11 @@ export const TRANSCRIPTION_FAILED_HEADLINE = 'This recording could not be transc
  * (`src-tauri/src/transcription/run.rs`).
  */
 export const TRANSCRIPTION_PRESERVED_NOTICE =
-  'The recording and its audio file are untouched, and any transcript you already had is kept as it is. Nothing was deleted.';
+  '녹음도 오디오 파일도 그대로이고, 이미 있던 전사도 그대로 남아 있다. 지워진 것은 없다.';
 
 /** 이유를 모를 때 그 사실을 그대로 말한다. **무엇이 실패했는지 지어내지 않는다.** */
 export const UNKNOWN_FAILURE_NOTICE =
-  'The stored state says the last transcription failed. The reason is not known in this session — start it again to see what happens.';
+  '저장된 상태가 지난 전사의 실패를 말한다. 이 세션에서는 그 이유를 알 수 없다 — 다시 시작해 보면 무엇이 일어나는지 알 수 있다.';
 
 /**
  * 전사가 붕괴했을 때 사용자가 할 수 있는 일 (§13 · ADR-0007 §18.4 · `phase-prompt/05.7` 기준 2).
@@ -337,7 +337,7 @@ export const UNKNOWN_FAILURE_NOTICE =
  * `Failure.message`에 이미 들어 있고 화면은 그것을 그대로 보인다 — 여기서 다시 세지 않는다.
  */
 export const TRANSCRIPTION_COLLAPSED_NOTICE =
-  'The transcription collapsed, so the result could not be used as a transcript. Running it again unchanged gives the same result — check the recording input level and record again, or choose a different model in Settings, then start the transcription again.';
+  '전사가 무너져서 그 결과를 전사로 쓸 수 없었다. 그대로 다시 돌리면 같은 결과가 나온다 — 녹음의 입력 레벨을 확인해 다시 녹음하거나, 설정에서 다른 모델을 고른 뒤 전사를 다시 시작한다.';
 
 /**
  * 갈래마다 사용자가 **먼저** 해야 하는 일 (§13).
@@ -347,9 +347,9 @@ export const TRANSCRIPTION_COLLAPSED_NOTICE =
  */
 const RESOLUTION: Record<TranscriptFailureCause, string | null> = {
   modelMissing:
-    'No transcription model was found. Put a model file in place and choose it in Settings, then start the transcription again.',
+    '전사에 쓸 모델을 찾지 못했다. 모델 파일을 자리에 두고 설정에서 고른 뒤 전사를 다시 시작한다.',
   modelUnusable:
-    'The chosen model could not be used. Choose a different model in Settings, then start the transcription again.',
+    '고른 모델을 쓸 수 없었다. 설정에서 다른 모델을 고른 뒤 전사를 다시 시작한다.',
   outputUnusable: TRANSCRIPTION_COLLAPSED_NOTICE,
   other: null,
   unknown: null,
@@ -448,10 +448,10 @@ export interface TranscriptTrouble {
 export type TranscriptRequest = 'start' | 'status';
 
 /** 무엇을 하다 실패했는가. 원인은 {@link Failure}가 말한다. */
-export const TRANSCRIPTION_START_REJECTED_HEADLINE = 'The transcription could not be started.';
+export const TRANSCRIPTION_START_REJECTED_HEADLINE = '전사를 시작하지 못했다.';
 
 /** 상태를 물어보지 못한 것은 전사가 실패한 것과 다른 사실이다. */
-export const TRANSCRIPTION_STATUS_HEADLINE = 'The transcription status could not be read.';
+export const TRANSCRIPTION_STATUS_HEADLINE = '전사 상태를 읽지 못했다.';
 
 const TROUBLE_HEADLINE: Record<TranscriptRequest, string> = {
   start: TRANSCRIPTION_START_REJECTED_HEADLINE,
@@ -486,7 +486,7 @@ function failedTranscript(
     cause,
     preservedNotice: TRANSCRIPTION_PRESERVED_NOTICE,
     resolution: cause === 'unknown' ? UNKNOWN_FAILURE_NOTICE : RESOLUTION[cause],
-    retry: { kind: 'retry', label: 'Try transcription again', recordingId },
+    retry: { kind: 'retry', label: '전사 다시 시도', recordingId },
     kept,
   };
 }
@@ -511,7 +511,7 @@ function failureCause(failure: Failure | null): TranscriptFailureCause {
 
 /** 수동으로 전사를 시작하는 동작. 자동 전사 설정과 무관하게 언제나 할 수 있다 (요구 2). */
 function startTranscript(recordingId: string): TranscriptAction {
-  return { kind: 'start', label: 'Start transcription', recordingId };
+  return { kind: 'start', label: '전사 시작', recordingId };
 }
 
 /**
@@ -522,5 +522,5 @@ function startTranscript(recordingId: string): TranscriptAction {
  * current가 된다. 앞의 것은 그대로 남는다 (INV-2).
  */
 function redoTranscript(recordingId: string): TranscriptAction {
-  return { kind: 'redo', label: 'Transcribe again', recordingId };
+  return { kind: 'redo', label: '다시 전사', recordingId };
 }

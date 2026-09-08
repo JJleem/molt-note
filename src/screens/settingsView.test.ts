@@ -431,9 +431,9 @@ describe('언어를 고르지 않은 것은 자동 감지다', () => {
     expect(notices).toContain(HOW_TO_SET_A_TRANSCRIPTION_LANGUAGE);
     // 할 말이 없는 상태가 아니다 — 빈 목록이면 그 빈칸은 "아직 안 한 일"로 읽힌다.
     expect(notices.length).toBeGreaterThan(0);
-    expect(TRANSCRIPTION_LANGUAGE_IS_DETECTED_NOTICE).toMatch(/detected automatically/i);
+    expect(TRANSCRIPTION_LANGUAGE_IS_DETECTED_NOTICE).toMatch(/자동 감지|자동으로 감지/);
     // 빈칸 자체도 그렇게 말한다 — `Not set`이 아니다.
-    expect(TRANSCRIPTION_LANGUAGE_PLACEHOLDER).toMatch(/detected automatically/i);
+    expect(TRANSCRIPTION_LANGUAGE_PLACEHOLDER).toMatch(/자동 감지|자동으로 감지/);
   });
 
   it('언어를 골랐으면 감지하지 않는다는 사실이 그 값과 함께 나온다', () => {

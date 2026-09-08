@@ -152,7 +152,7 @@ describe('이 파일의 검사가 실제 코드를 읽는다', () => {
 
     expect(raw).toContain('INV-6');
     expect(code(raw)).not.toContain('INV-6');
-    expect(code(raw)).toContain('The audio file is never included.');
+    expect(code(raw)).toContain('오디오 파일은 절대 포함되지 않는다.');
   });
 });
 

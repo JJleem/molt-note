@@ -49,10 +49,10 @@ export interface ShowFileAction {
 }
 
 /** 화면에 처음 보이는 이름. **어느 OS의 파일 관리자인지 말하지 않는다** (INV-10). */
-export const SHOW_FILE_LABEL = 'Show this file';
+export const SHOW_FILE_LABEL = '파일 위치 열기';
 
 /** 실패한 뒤의 이름. 사용자에게 다른 상황이므로 같은 글자를 쓰지 않는다. */
-export const SHOW_FILE_RETRY_LABEL = 'Try showing it again';
+export const SHOW_FILE_RETRY_LABEL = '다시 열어 보기';
 
 /**
  * 이 자리가 무엇을 하는가.
@@ -61,13 +61,13 @@ export const SHOW_FILE_RETRY_LABEL = 'Try showing it again';
  * 것이 한 문장에 있다.
  */
 export const SHOW_FILE_TEXT =
-  'Opens the folder this file is in and points at it. Some systems keep that folder hidden, so the full path stays here as well.';
+  '이 파일이 있는 폴더를 열어 그 파일을 가리킨다. 그 폴더를 숨기는 시스템도 있어서 전체 경로는 여기에 그대로 남는다.';
 
 /** 여는 중. 창이 뜨기까지 이 자리가 멎은 것처럼 보이지 않게 한다. */
-export const SHOWING_FILE_TEXT = 'Opening the folder…';
+export const SHOWING_FILE_TEXT = '폴더 여는 중…';
 
 /** 무엇을 하다 실패했는가 (§13). 원인은 {@link Failure}가 말한다. */
-export const SHOW_FILE_FAILED_HEADLINE = 'The folder could not be opened.';
+export const SHOW_FILE_FAILED_HEADLINE = '폴더를 열지 못했다.';
 
 /**
  * 실패가 무엇을 남겼는지 (§13 · INV-3).
@@ -76,7 +76,7 @@ export const SHOW_FILE_FAILED_HEADLINE = 'The folder could not be opened.';
  * 바뀐 것이 아무것도 없다.
  */
 export const SHOW_FILE_PRESERVED_NOTICE =
-  'The file itself is untouched. Nothing was moved, renamed, or deleted — this only asks the system to open a window.';
+  '파일 자체는 그대로다. 옮기지도 이름을 바꾸지도 지우지도 않았다 — 이 동작은 시스템에 창 하나를 열어 달라고 할 뿐이다.';
 
 /**
  * 그래서 지금 무엇을 하면 되는가.
@@ -85,7 +85,7 @@ export const SHOW_FILE_PRESERVED_NOTICE =
  * 남아 있고, 그 길이 바로 위에 보이는 전체 경로다.
  */
 export const SHOW_FILE_RESOLUTION =
-  'The full path above still says where the file is, and you can open that location with it.';
+  '위의 전체 경로가 파일이 어디 있는지 그대로 말하고 있고, 그 경로로 직접 열 수 있다.';
 
 /**
  * 이 화면이 건 열기 한 번.

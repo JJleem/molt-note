@@ -203,7 +203,7 @@ describe('선택된 microphone', () => {
     const notice = microphoneNotice(selectedMicrophone('unplugged-headset', [BUILT_IN]));
 
     expect(notice).not.toBeNull();
-    expect(notice ?? '').toMatch(/not available/i);
+    expect(notice ?? '').toMatch(/지금 없음|쓸 수 없다/);
   });
 
   it('고른 적이 없으면 시스템 기본 장치를 쓰고, 그렇다고 말한다', () => {
@@ -419,10 +419,10 @@ describe('입력 레벨 (ADR-0003 §16.3 · §16.4)', () => {
   it('경고 문장이 무엇을 해야 하는지 말한다', () => {
     // 문장을 통째로 고정하면 낱말 하나를 다듬을 때마다 테스트가 깨진다. 고정하는 것은
     // 이 경고가 반드시 말해야 하는 두 가지다 — 마이크를 확인하라, 그리고 정지 전에.
-    expect(WEAK_LEVEL_WARNING).toMatch(/microphone/i);
-    expect(WEAK_LEVEL_WARNING).toMatch(/stop/i);
+    expect(WEAK_LEVEL_WARNING).toMatch(/마이크/);
+    expect(WEAK_LEVEL_WARNING).toMatch(/정지/);
     // 녹음이 사라진다고 말하지 않는다 — 어떤 실패도 이미 녹음된 것을 지우지 않는다 (INV-3).
-    expect(WEAK_LEVEL_WARNING).toMatch(/stays as it is/i);
+    expect(WEAK_LEVEL_WARNING).toMatch(/그대로 남는다/);
   });
 
   it('녹음 중이 아니면 경고하지 않는다', () => {

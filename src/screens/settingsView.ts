@@ -254,7 +254,7 @@ export function transcriptionModel(form: SettingsForm): TranscriptionModel {
 
 /** 모델이 없어서 지금 전사할 수 없다는 **사실**. */
 export const NO_TRANSCRIPTION_MODEL_NOTICE =
-  'No transcription model is set, so recordings cannot be transcribed right now.';
+  '전사 모델이 지정되지 않아서 지금은 녹음을 전사할 수 없다.';
 
 /** 그 사실을 어떻게 푸는지 (docs/ADR-0007-transcription-engine.md §8.2). */
 export const HOW_TO_SET_A_TRANSCRIPTION_MODEL =
@@ -262,7 +262,7 @@ export const HOW_TO_SET_A_TRANSCRIPTION_MODEL =
 
 /** 켜 둔 자동 전사를 **앱이 대신 끄지 않는다**는 사실 (ADR-0007 §8.2.3). */
 export const AUTOMATIC_TRANSCRIPTION_STAYS_ON_NOTICE =
-  'Automatic transcription stays on — it is not switched off for you. Until a model is set, each recording reports the missing model instead.';
+  '자동 전사는 켜진 채로 둔다 — 대신 꺼 주지 않는다. 모델이 지정되기 전까지는 녹음마다 모델이 없다는 사실을 알린다.';
 
 /**
  * 전사 설정에 대해 사용자에게 할 말. 할 말이 없으면 빈 목록이다.
@@ -319,15 +319,15 @@ export function transcriptionLanguage(form: SettingsForm): TranscriptionLanguage
  * `Not set`이 아니다 — 다른 설정에서는 그것이 맞지만, 여기서 비어 있음은 **아직 안 한 일이
  * 아니라 자동 감지**다 (ADR-0007 §17.1.4-1).
  */
-export const TRANSCRIPTION_LANGUAGE_PLACEHOLDER = 'Detected automatically';
+export const TRANSCRIPTION_LANGUAGE_PLACEHOLDER = '자동 감지';
 
 /** 고르지 않은 상태가 무엇을 뜻하는지 (ADR-0007 §17.1.4-1). **결핍이 아니라 동작이다.** */
 export const TRANSCRIPTION_LANGUAGE_IS_DETECTED_NOTICE =
-  'No language is set, so the language of each recording is detected automatically. This is a normal setting, not something left undone.';
+  '언어가 지정되지 않아서 녹음마다 언어를 자동으로 감지한다. 이것은 정상 설정이며 빠뜨린 것이 아니다.';
 
 /** 그 자리에서 무엇을 할 수 있는지. 고르는 것도, 고르지 않은 채 두는 것도 유효한 선택이다. */
 export const HOW_TO_SET_A_TRANSCRIPTION_LANGUAGE =
-  'Leave this empty to keep detecting the language, or enter a language code (for example ko or en) to transcribe every recording in that language.';
+  '비워 두면 언어를 계속 자동 감지한다. 언어 코드를 넣으면(예: ko 또는 en) 모든 녹음을 그 언어로 전사한다.';
 
 /**
  * 전사 언어에 대해 사용자에게 할 말. **언제나 한 줄 이상 있다.**

@@ -91,13 +91,13 @@ describe('열지 못했을 때 무엇이 그대로인가 (§13 · INV-3)', () =>
     expect(view.trouble.failure.kind).toBe('storage');
     // 2. 원본은 안전한가 — 여는 일은 아무것도 바꾸지 않는다.
     expect(view.trouble.preservedNotice).toBe(SHOW_FILE_PRESERVED_NOTICE);
-    expect(view.trouble.preservedNotice).toMatch(/untouched/i);
+    expect(view.trouble.preservedNotice).toMatch(/그대로/);
     // 3. 다시 시도할 수 있는가 — 그리고 그것이 처음과 다른 상황이라는 것을 이름이 말한다.
     expect(view.action.kind).toBe('retry');
     expect(view.action.label).toBe(SHOW_FILE_RETRY_LABEL);
     // 그리고 **여는 수단이 없어도 남는 길**: 위에 그대로 있는 전체 경로다.
     expect(view.trouble.resolution).toBe(SHOW_FILE_RESOLUTION);
-    expect(view.trouble.resolution).toMatch(/path/i);
+    expect(view.trouble.resolution).toMatch(/경로/);
   });
 
   it('다시 시도할 수 없는 실패에서도 경로로 가는 길은 남는다', () => {

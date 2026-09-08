@@ -91,7 +91,7 @@ export const LOADING_RECORDING_DETAIL: RecordingDetailView = { kind: 'loading' }
  * 만들지 않았다 (INV-3 · INV-4 · R-004).
  */
 export const MISSING_AUDIO_NOTICE =
-  'The audio file is not where this recording points. Nothing was deleted — the recording entry is kept as it is. Move the file back to that path to play it again.';
+  '오디오 파일이 이 녹음이 가리키는 자리에 없다. 지워진 것은 없고 녹음 기록은 그대로 남아 있다. 다시 재생하려면 파일을 그 경로로 되돌린다.';
 
 /**
  * 읽어 온 값을 화면 상태로 바꾼다.

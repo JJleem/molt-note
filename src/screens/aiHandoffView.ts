@@ -91,7 +91,7 @@ export interface AiExportAction {
 }
 
 /** 화면에 처음 보이는 이름. Phase Goal이 부르는 이름 그대로다. */
-export const AI_EXPORT_LABEL = 'Export for AI';
+export const AI_EXPORT_LABEL = 'AI용 파일 내보내기';
 
 function exportAction(recordingId: string, mode: NoteMode): AiExportAction {
   return { kind: 'export', label: AI_EXPORT_LABEL, recordingId, mode, portion: FIRST_PORTION };
@@ -99,11 +99,11 @@ function exportAction(recordingId: string, mode: NoteMode): AiExportAction {
 
 function againAction(recordingId: string, mode: NoteMode, portion: number): AiExportAction {
   // 다시 내보내면 파일이 하나 더 생긴다 — 있던 파일을 덮어쓰지 않는다 (ADR-0009 §4.3).
-  return { kind: 'again', label: 'Export another file for AI', recordingId, mode, portion };
+  return { kind: 'again', label: 'AI용 파일 하나 더 내보내기', recordingId, mode, portion };
 }
 
 function retryAction(recordingId: string, mode: NoteMode, portion: number): AiExportAction {
-  return { kind: 'retry', label: 'Try the export again', recordingId, mode, portion };
+  return { kind: 'retry', label: '내보내기 다시 시도', recordingId, mode, portion };
 }
 
 /** 나머지를 마저 꺼내는 수단. **버튼의 이름이 몇 번째를 쓰는지 말한다.** */
@@ -182,21 +182,21 @@ export function failedAiExport(
 }
 
 /** 내보낼 재료가 아직 없다. **실패가 아니다** (§7.2 · MH-5). */
-export const NOTHING_FOR_AI_TEXT = 'There is nothing to send to an AI from this recording yet.';
+export const NOTHING_FOR_AI_TEXT = '이 녹음에서 아직 AI로 보낼 것이 없다.';
 
 /** 그래서 무엇을 하면 되는가. 이 자리가 전사를 시작하지 않는다 — 그 자리는 Transcript 탭이다. */
 export const NOTHING_FOR_AI_HINT =
-  'Transcribe this recording in the Transcript tab first, then bring it to your AI.';
+  '전사 탭에서 이 녹음을 먼저 전사한 뒤에 AI로 가져간다.';
 
 /** 지금 눌러도 되는가. 파일 하나를 쓰는 일이므로 기다릴 서버도 모델도 없다. */
 export const AI_EXPORT_READY_TEXT =
-  'Write one file with the request and the transcript in it. Attach that file to your AI chat, or open it and copy from there.';
+  '요청과 전사를 담은 파일 하나를 쓴다. 그 파일을 AI 채팅에 첨부하거나 열어서 복사한다.';
 
 /** 쓰는 중. 짧은 일이며 화면을 떠나도 되는 종류의 일이 아니다. */
-export const AI_EXPORT_RUNNING_TEXT = 'Writing the file for your AI…';
+export const AI_EXPORT_RUNNING_TEXT = 'AI용 파일 쓰는 중…';
 
 /** 파일이 만들어졌다는 사실 한 줄. **색이 아니라 이 문장이 그것을 말한다** (요구 12). */
-export const AI_EXPORT_DONE_HEADLINE = 'The file for your AI is ready.';
+export const AI_EXPORT_DONE_HEADLINE = 'AI용 파일이 준비됐다.';
 
 /**
  * **조각 하나만 파일이 됐을 때의 사실 한 줄** (`phase-prompt/05.6` 성공 기준 4).
@@ -204,22 +204,22 @@ export const AI_EXPORT_DONE_HEADLINE = 'The file for your AI is ready.';
  * 이때 "파일이 준비됐다"고만 말하면 그것은 **잘린 문서를 완전한 것이라고 말하는 것이다.**
  */
 export const AI_EXPORT_DONE_PORTION_HEADLINE =
-  'One part is written as a file — not the whole document yet.';
+  '조각 하나를 파일로 썼다 — 아직 문서 전체는 아니다.';
 
 /** 그 파일이 어떤 성질인가 — 여기서부터는 사용자의 문서다 (ADR-0009 §4.3). */
 export const AI_EXPORT_DONE_TEXT =
-  'This file is yours now. Exporting again writes another file next to it and never overwrites this one.';
+  '이 파일은 이제 사용자의 것이다. 다시 내보내면 그 옆에 새 파일이 생기며 이 파일을 덮어쓰지 않는다.';
 
 /** 나뉜 문서의 조각 하나가 파일이 됐다. 나머지도 같은 자리에 **파일이 더 생긴다.** */
 export const AI_EXPORT_DONE_PORTION_TEXT =
-  'Each part is written as its own file, and the file name says which part it holds. Exporting the next one writes another file next to this and never overwrites it.';
+  '조각마다 파일 하나로 쓰이고, 파일 이름이 어느 조각인지 말한다. 다음 것을 내보내면 이 옆에 새 파일이 생기며 덮어쓰지 않는다.';
 
 /** 마지막 조각까지 왔다. **여기서만 문서 전체가 나왔다고 말한다.** */
 export const AI_EXPORT_DONE_LAST_TEXT =
-  'That was the last part. Together, the files hold the whole document — attach them in order, or open them and copy from there.';
+  '이것이 마지막 조각이다. 파일들을 합치면 문서 전체가 된다 — 순서대로 첨부하거나 열어서 복사한다.';
 
 /** 무엇을 하다 실패했는가 (§13). 원인은 {@link Failure}가 말한다. */
-export const AI_EXPORT_FAILED_HEADLINE = 'The file for your AI could not be written.';
+export const AI_EXPORT_FAILED_HEADLINE = 'AI용 파일을 쓰지 못했다.';
 
 /**
  * 실패가 무엇을 남겼는지 (§13 · INV-3 · MH-7).
@@ -228,7 +228,7 @@ export const AI_EXPORT_FAILED_HEADLINE = 'The file for your AI could not be writ
  * 뿐이므로 (`src-tauri/src/export/run.rs`), 실패했을 때 바뀐 것이 아무것도 없다.
  */
 export const AI_EXPORT_PRESERVED_NOTICE =
-  'The recording, its audio file, the transcript, any AI note, and the files you already exported are untouched. Nothing was deleted or changed.';
+  '녹음도 오디오 파일도 전사도 AI 노트도, 이미 내보낸 파일도 그대로다. 지워진 것도 바뀐 것도 없다.';
 
 /** 실패 갈래 중 사용자가 **먼저** 할 일이 달라지는 것 (§13). */
 export type AiExportFailureCause = 'nothingToExport' | 'storage' | 'other';
@@ -236,7 +236,7 @@ export type AiExportFailureCause = 'nothingToExport' | 'storage' | 'other';
 const FAILURE_RESOLUTION: Record<AiExportFailureCause, string | null> = {
   nothingToExport: NOTHING_FOR_AI_HINT,
   storage:
-    'The file could not be written. Check that this device has room and that the app can write to its data folder, then try again.',
+    '파일을 쓰지 못했다. 이 기기에 남은 공간이 있는지, 앱이 자기 데이터 폴더에 쓸 수 있는지 확인한 뒤 다시 시도한다.',
   other: null,
 };
 
@@ -436,11 +436,11 @@ function exportUsable(body: AiExportBody): boolean {
 }
 
 /** 아래 줄의 이름. 이 줄이 무엇인지 한 마디로 말한다 (요구 6). */
-export const MANUAL_HEADING = 'Use the AI you already have';
+export const MANUAL_HEADING = '쓰던 AI 그대로 쓰기';
 
 /** 이 줄이 하는 일. 벤더 이름을 부르지 않는다 (MH-6). */
 export const MANUAL_TEXT =
-  'Take this recording to the AI chat you already use — copy it, or write it to a file you can attach.';
+  '이 녹음을 쓰던 AI 채팅으로 가져간다 — 복사하거나, 첨부할 수 있는 파일로 쓴다.';
 
 /**
  * **AI provider를 하나도 설정하지 않아도 이 줄은 그대로다** (MH-1 · MH-2 · INV-8).
@@ -449,11 +449,11 @@ export const MANUAL_TEXT =
  * 같은 자리에 있다.
  */
 export const MANUAL_NO_PROVIDER_NOTICE =
-  'These three work without setting up an AI provider. Nothing has to be installed first.';
+  '이 셋은 AI provider를 준비하지 않아도 동작한다. 먼저 설치할 것이 없다.';
 
 /** 앱이 아무 데도 보내지 않는다 (MH-3 · INV-6). 나가는 행위의 주체는 사람이다. */
 export const MANUAL_LOCAL_NOTICE =
-  'Nothing is sent anywhere from here. The text goes to your clipboard or to a file on this device, and you decide where it goes next. The audio file is never included.';
+  '여기서는 어디로도 보내지 않는다. 텍스트는 클립보드나 이 기기의 파일로 갈 뿐이고, 그다음 어디로 갈지는 사용자가 정한다. 오디오 파일은 절대 포함되지 않는다.';
 
 /** 아래 줄 전체 — 세 자리와, 그 셋에 함께 해당하는 사실들. */
 export interface ManualHandoffView {
@@ -533,7 +533,7 @@ export function manualHandoff(input: ManualHandoffInput): ManualHandoffView {
 // --- 두 줄의 위계 ----------------------------------------------------------------------
 
 /** 위 줄의 이름 (요구 6). */
-export const AUTOMATIC_HEADING = 'Have it written for you';
+export const AUTOMATIC_HEADING = '앱이 대신 쓰게 하기';
 
 /** 이 줄이 하는 일. 벤더 이름을 부르지 않는다 — 이름은 provider가 말한다 (INV-9 · MH-6). */
 export const AUTOMATIC_TEXT =
@@ -547,7 +547,7 @@ export const AUTOMATIC_TEXT =
  * `resolution` 한 줄에 있고, 이 문장이 그 옆에서 **그것이 선택이라는 사실**을 말한다.
  */
 export const AUTOMATIC_OPTIONAL_NOTICE =
-  'This part is optional. You can skip it and use your own AI below — nothing here is missing or broken.';
+  '이 부분은 선택이다. 건너뛰고 아래에서 쓰던 AI를 써도 된다 — 빠진 것도 고장 난 것도 아니다.';
 
 /** 두 줄 사이. 둘 중 하나를 고르는 것이지 순서대로 해야 하는 일이 아니다. */
 export const HANDOFF_OR_TEXT = 'or';

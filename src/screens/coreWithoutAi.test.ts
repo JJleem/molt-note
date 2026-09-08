@@ -366,8 +366,8 @@ describe('열람은 AI 상태에 흔들리지 않는다 (INV-8)', () => {
       throw new Error('목록이어야 한다');
     }
 
-    expect(view.items[0].statuses[1].text).toBe('Not started');
-    expect(view.items[0].statuses[1].text).not.toMatch(/fail|error/i);
+    expect(view.items[0].statuses[1].text).toBe('시작 안 함');
+    expect(view.items[0].statuses[1].text).not.toMatch(/실패|오류/);
   });
 
   it('상세와 재생 경로는 어떤 AI 상태에서도 열린다', () => {

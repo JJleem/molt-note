@@ -75,7 +75,7 @@ describe('목록 상태', () => {
 
     const [item] = view.items;
     expect(item.statuses).toHaveLength(3);
-    expect(item.statuses.map((badge) => badge.label)).toEqual(['Transcript', 'AI Note', 'Notion']);
+    expect(item.statuses.map((badge) => badge.label)).toEqual(['전사', 'AI Note', 'Notion']);
     expect(item.statuses.map((badge) => badge.status)).toEqual(['done', 'none', 'failed']);
     // 각 상태에 사람이 읽는 표현이 있다.
     for (const badge of item.statuses) {
@@ -93,7 +93,7 @@ describe('목록 상태', () => {
       if (view.kind !== 'list') throw new Error('목록이어야 한다');
 
       const [badge] = view.items[0].statuses;
-      expect(badge.label).toBe('Transcript');
+      expect(badge.label).toBe('전사');
       // 저장된 값이 그대로 실린다 — 화면이 다른 상태로 바꾸지 않는다.
       expect(badge.status).toBe(transcriptionStatus);
       return badge.text;
@@ -114,7 +114,7 @@ describe('목록 상태', () => {
     if (view.kind !== 'list') return;
 
     for (const badge of view.items[0].statuses) {
-      expect(badge.text).toBe('Not started');
+      expect(badge.text).toBe('시작 안 함');
     }
   });
 

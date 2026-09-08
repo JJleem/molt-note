@@ -442,7 +442,7 @@ describe('크기 때문에 조용히 실패하지 않는다', () => {
     }
     expect(body.next).toBeNull();
     expect(body.portion.remaining).toBe(0);
-    expect(body.text).toContain('last part');
+    expect(body.text).toContain('마지막 조각');
   });
 
   it('처음 누르는 것은 언제나 첫 조각이고, 실패하면 그 조각으로 돌아간다', () => {

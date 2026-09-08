@@ -194,9 +194,9 @@ describe('mode 선택 (§9.5)', () => {
   it('고르기 전에 무엇이 나오는지 알 수 있다 (§9.5의 섹션)', () => {
     const [meeting, , summary] = noteModeChoices('meeting');
     expect(meeting.sections).toBe(
-      'Overview · Key Discussions · Decisions · Action Items · Open Questions',
+      '개요 · 논의한 것 · 정해진 것 · 할 일 · 남은 질문',
     );
-    expect(summary.sections).toBe('Short Summary · Key Points');
+    expect(summary.sections).toBe('짧은 요약 · 핵심');
   });
 
   it('세 mode를 골라 생성할 수 있다 — 고른 mode가 그대로 동작에 실린다', () => {
@@ -216,26 +216,26 @@ describe('mode 선택 (§9.5)', () => {
 describe('Structured Note → UI (§9.3 · §9.5)', () => {
   it('Meeting은 §9.5의 다섯 섹션을 그 순서로 만든다', () => {
     expect(noteSections(MEETING).map((section) => section.title)).toEqual([
-      'Overview',
-      'Key Discussions',
-      'Decisions',
-      'Action Items',
-      'Open Questions',
+      '개요',
+      '논의한 것',
+      '정해진 것',
+      '할 일',
+      '남은 질문',
     ]);
   });
 
   it('Study는 여섯 섹션, Summary는 두 섹션이다', () => {
     expect(noteSections(STUDY).map((section) => section.title)).toEqual([
-      'Overview',
-      'Key Concepts',
-      'Important Details',
-      'Questions',
-      'Things to Study',
-      'References Mentioned',
+      '개요',
+      '핵심 개념',
+      '중요한 세부',
+      '질문',
+      '더 공부할 것',
+      '언급된 자료',
     ]);
     expect(noteSections(SUMMARY).map((section) => section.title)).toEqual([
-      'Short Summary',
-      'Key Points',
+      '짧은 요약',
+      '핵심',
     ]);
   });
 
@@ -297,7 +297,7 @@ describe('provenance (§7.3 · 요구 11 · 13)', () => {
       throw new Error('노트를 볼 수 있는 상태여야 한다');
     }
     expect(view.body.note.provenance.model).toBe('llama3.1:8b');
-    expect(view.body.note.sections[0].title).toBe('Overview');
+    expect(view.body.note.sections[0].title).toBe('개요');
   });
 });
 
@@ -380,7 +380,7 @@ describe('AI 기능이 비활성인 상태 (INV-8 · §13)', () => {
       throw new Error('비활성 상태여야 한다');
     }
     expect(view.body.notice.state).toBe('noModels');
-    expect(view.body.notice.resolution).toContain('Install a model');
+    expect(view.body.notice.resolution).toContain('모델을 설치');
   });
 
   it('어떤 provider 상태에서도 실패로 그려지지 않는다', () => {
@@ -397,7 +397,7 @@ describe('AI 기능이 비활성인 상태 (INV-8 · §13)', () => {
       throw new Error('비활성 상태여야 한다');
     }
     expect(view.body.notice.unaffectedNotice).toBe(AI_UNAFFECTED_NOTICE);
-    expect(view.body.notice.resolution).toContain('Settings');
+    expect(view.body.notice.resolution).toContain('설정');
   });
 
   it('고른 provider가 없으면 다시 확인할 대상도 없다', () => {
@@ -413,7 +413,7 @@ describe('AI 기능이 비활성인 상태 (INV-8 · §13)', () => {
     if (view.body.kind !== 'disabled') {
       throw new Error('비활성 상태여야 한다');
     }
-    expect(view.body.notice.recheck?.label).toContain('Check');
+    expect(view.body.notice.recheck?.label).toContain('확인');
   });
 
   it('비활성 상태에서 생성을 요청했다가 받은 답도 실패로 그리지 않는다', () => {
@@ -462,7 +462,7 @@ describe('만들 재료가 없는 상태 (§7.2)', () => {
       throw new Error('재료가 없는 상태여야 한다');
     }
     expect(view.body.text).toBe(NO_TRANSCRIPT_INPUT_TEXT);
-    expect(view.body.hint).toContain('Transcript tab');
+    expect(view.body.hint).toContain('전사 탭');
     expect(view.body).not.toHaveProperty('failure');
   });
 
@@ -564,8 +564,8 @@ describe('실패한 상태 (§13)', () => {
     if (view.body.kind !== 'failed') {
       throw new Error('실패 상태여야 한다');
     }
-    expect(view.body.preservedNotice).toContain('untouched');
-    expect(view.body.preservedNotice).toContain('Nothing was deleted');
+    expect(view.body.preservedNotice).toContain('그대로');
+    expect(view.body.preservedNotice).toContain('지워진 것은 없다');
   });
 
   it('실패해도 이미 있던 노트를 잃지 않는다 (INV-2 · INV-3)', () => {
@@ -578,10 +578,10 @@ describe('실패한 상태 (§13)', () => {
 
   it('갈래마다 먼저 할 일이 다르다', () => {
     const cases = [
-      ['aiModelUnavailable', 'modelUnavailable', 'Install it or choose another model'],
-      ['aiResponseUnusable', 'responseUnusable', 'Generating again'],
-      ['aiInputTooLarge', 'inputTooLarge', 'nothing was sent'],
-      ['aiProviderUnreachable', 'unreachable', 'Start it'],
+      ['aiModelUnavailable', 'modelUnavailable', '설치하거나 설정에서 다른 모델을 고른'],
+      ['aiResponseUnusable', 'responseUnusable', '다시 만들면'],
+      ['aiInputTooLarge', 'inputTooLarge', '아무것도 보내지 않았다'],
+      ['aiProviderUnreachable', 'unreachable', '켠 뒤'],
     ] as const;
 
     for (const [kind, cause, resolution] of cases) {
@@ -629,7 +629,7 @@ describe('노트를 볼 수 있는 상태', () => {
       throw new Error('노트를 볼 수 있는 상태여야 한다');
     }
     expect(view.body.note.modeLabel).toBe('Meeting');
-    expect(view.body.note.sections.map((section) => section.title)).toContain('Action Items');
+    expect(view.body.note.sections.map((section) => section.title)).toContain('할 일');
     expect(view.body.regenerate.kind).toBe('regenerate');
     expect(view.body.regenerate.mode).toBe('meeting');
   });
@@ -641,8 +641,8 @@ describe('노트를 볼 수 있는 상태', () => {
       throw new Error('노트를 볼 수 있는 상태여야 한다');
     }
     expect(view.body.note.sections.map((section) => section.title)).toEqual([
-      'Short Summary',
-      'Key Points',
+      '짧은 요약',
+      '핵심',
     ]);
   });
 });
@@ -670,10 +670,10 @@ describe('전사가 어디로 가는가 (§12 · INV-5)', () => {
 
 describe('거절된 요청 (§13)', () => {
   it('어느 요청이 거절됐는지 구분해서 말한다', () => {
-    expect(aiNoteTrouble('provider', 'boom').headline).toContain('AI provider status');
-    expect(aiNoteTrouble('status', 'boom').headline).toContain('AI note status');
-    expect(aiNoteTrouble('notes', 'boom').headline).toContain('saved AI notes');
-    expect(aiNoteTrouble('start', 'boom').headline).toContain('could not be started');
+    expect(aiNoteTrouble('provider', 'boom').headline).toContain('AI provider 상태');
+    expect(aiNoteTrouble('status', 'boom').headline).toContain('AI 노트 상태');
+    expect(aiNoteTrouble('notes', 'boom').headline).toContain('저장된 AI 노트');
+    expect(aiNoteTrouble('start', 'boom').headline).toContain('시작하지 못했다');
   });
 
   it('구조화되지 않은 값도 화면에 보여줄 수 있는 실패가 된다', () => {

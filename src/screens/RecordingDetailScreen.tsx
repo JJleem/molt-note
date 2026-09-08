@@ -109,11 +109,21 @@ import {
 import type { ScreenProps } from './types';
 
 // §5.C의 세 탭. AI Note가 없어도 화면은 정상 동작해야 한다 (INV-8).
+//
+// **값과 표시 이름을 가른다.** 값은 `id`·`aria-controls`가 쓰는 안정적인 식별자이므로
+// 화면에 보이는 말이 바뀌어도 따라 바뀌지 않는다.
 const TABS = ['AI Note', 'Transcript', 'Recording'] as const;
 type Tab = (typeof TABS)[number];
 
+/** 탭에 보이는 이름. */
+const TAB_LABEL: Record<Tab, string> = {
+  'AI Note': 'AI 노트',
+  Transcript: '전사',
+  Recording: '녹음',
+};
+
 /** 레코드는 있는데 파일이 없을 때 Recording 탭이 말하는 것. */
-const NO_AUDIO_TEXT = 'No audio file yet.';
+const NO_AUDIO_TEXT = '아직 오디오 파일이 없다.';
 
 /**
  * 탭 하나와 그 내용을 잇는 식별자 (요구 12).
@@ -739,7 +749,7 @@ export function RecordingDetailScreen({ route, goBack }: ScreenProps) {
       ) : (
         // 파일이 없다는 사실을 보여줄 뿐 아무것도 지우지 않는다 (INV-3 · INV-4).
         <div className="detail__player detail__player--missing" role="status">
-          <p className="detail__missing">Audio file not found</p>
+          <p className="detail__missing">오디오 파일을 찾지 못함</p>
           <p className="hint">{MISSING_AUDIO_NOTICE}</p>
           <p className="detail__path">{view.audioPath}</p>
         </div>
@@ -766,7 +776,7 @@ export function RecordingDetailScreen({ route, goBack }: ScreenProps) {
             className={tab === name ? 'tabs__tab tabs__tab--active' : 'tabs__tab'}
             onClick={() => setTab(name)}
           >
-            {name}
+            {TAB_LABEL[name]}
           </button>
         ))}
       </div>
@@ -831,7 +841,7 @@ function ExportPanel({
 
   return (
     <section className="share__panel">
-      <h2 className="share__title">Markdown</h2>
+      <h2 className="share__title">마크다운</h2>
 
       {body.kind === 'loading' && <Loading text="Loading…" />}
 

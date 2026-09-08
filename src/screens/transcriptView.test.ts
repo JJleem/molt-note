@@ -192,7 +192,7 @@ describe('전사가 아직 없다', () => {
     // 자동 전사 설정과 무관하게 이 화면에서 수동으로 시작할 수 있다 (요구 2).
     expect(view.start).toEqual({
       kind: 'start',
-      label: 'Start transcription',
+      label: '전사 시작',
       recordingId: 'r-1',
     });
   });
@@ -303,9 +303,9 @@ describe('완료', () => {
     );
 
     if (view.kind !== 'done') throw new Error('done이어야 한다');
-    expect(view.redoNotice).toContain('kept');
+    expect(view.redoNotice).toContain('그대로 남는다');
     // 덮어쓴다는 인상을 주는 말을 쓰지 않는다.
-    expect(view.redo.label.toLowerCase()).not.toContain('replace');
+    expect(view.redo.label.toLowerCase()).not.toContain('바꾸거나');
     expect(view.redo.label.toLowerCase()).not.toContain('overwrite');
   });
 
@@ -372,7 +372,7 @@ describe('실패', () => {
     expect(view.preservedNotice).toBe(TRANSCRIPTION_PRESERVED_NOTICE);
     expect(view.retry).toEqual({
       kind: 'retry',
-      label: 'Try transcription again',
+      label: '전사 다시 시도',
       recordingId: 'r-1',
     });
   });
@@ -392,7 +392,7 @@ describe('실패', () => {
     if (view.kind !== 'failed') return;
     expect(view.cause).toBe('modelMissing');
     expect(view.resolution).not.toBeNull();
-    expect(view.resolution).toContain('Settings');
+    expect(view.resolution).toContain('설정');
     // 다시 시도할 수 없는 실패라도 재시도 수단은 남는다 — 모델을 둔 뒤에 다시 하면 된다.
     expect(view.failure?.retryable).toBe(false);
     expect(view.retry.kind).toBe('retry');
@@ -437,11 +437,11 @@ describe('실패', () => {
 
     // 무엇이 일어났는가 · 무엇을 하면 되는가가 한 문장 안에 있다.
     expect(view.resolution).toBe(TRANSCRIPTION_COLLAPSED_NOTICE);
-    expect(view.resolution).toContain('collapsed');
-    expect(view.resolution).toContain('input level');
-    expect(view.resolution).toContain('record again');
-    expect(view.resolution).toContain('different model');
-    expect(view.resolution).toContain('start the transcription again');
+    expect(view.resolution).toContain('무너져서');
+    expect(view.resolution).toContain('입력 레벨');
+    expect(view.resolution).toContain('다시 녹음');
+    expect(view.resolution).toContain('다른 모델');
+    expect(view.resolution).toContain('전사를 다시 시작한다');
 
     // 수치는 Rust가 만든 문장에 그대로 남고, 화면은 그것을 다시 세지 않는다.
     expect(view.failure?.message).toContain('103개');
@@ -450,11 +450,11 @@ describe('실패', () => {
     // 재시도 수단과 "아무것도 지워지지 않았다"가 함께 남는다 (요구 7 · INV-1 · INV-2 · INV-3).
     expect(view.retry).toEqual({
       kind: 'retry',
-      label: 'Try transcription again',
+      label: '전사 다시 시도',
       recordingId: 'r-1',
     });
     expect(view.preservedNotice).toBe(TRANSCRIPTION_PRESERVED_NOTICE);
-    expect(view.preservedNotice).toContain('Nothing was deleted');
+    expect(view.preservedNotice).toContain('지워진 것은 없다');
   });
 
   it('붕괴 실패에서도 이미 있던 Transcript가 그대로 남는다', () => {
@@ -561,7 +561,7 @@ describe('실패', () => {
       '그러면 이번에는 PLY 먼저 변환하고',
       '그다음 SOG 변환 확인하면 될 것 같아요.',
     ]);
-    expect(view.preservedNotice).toContain('Nothing was deleted');
+    expect(view.preservedNotice).toContain('지워진 것은 없다');
   });
 
   it('저장된 실패 상태보다 지금 성공한 재전사가 먼저다', () => {

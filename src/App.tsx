@@ -24,7 +24,7 @@ function App() {
 
   return (
     <div className="app">
-      <nav className="sidebar" aria-label="Screens">
+      <nav className="sidebar" aria-label="화면">
         <p className="sidebar__brand">Molt Note</p>
         <ul className="sidebar__list">
           {SIDEBAR_SCREENS.map((screen) => (
@@ -48,7 +48,7 @@ function App() {
         <header className="header">
           {canGoBack(nav) && (
             <button type="button" className="btn btn--ghost header__back" onClick={back}>
-              Back
+              뒤로
             </button>
           )}
           <h1 className="header__title">{definition.title}</h1>

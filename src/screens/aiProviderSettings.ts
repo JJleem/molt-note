@@ -60,12 +60,12 @@ import type { SettingsForm } from './settingsView';
 export const NO_AI_PROVIDER = '';
 
 /** 아무 provider도 고르지 않은 항목의 이름. **오류가 아니라 정상 상태다** (INV-8). */
-export const NO_AI_PROVIDER_LABEL = 'Not set — AI notes are off';
+export const NO_AI_PROVIDER_LABEL = '지정 안 함 — AI 노트를 쓰지 않는다';
 
 /** `<select>`가 "모델을 고르지 않음"을 나타낼 때 쓰는 값. */
 export const NO_AI_MODEL = '';
 
-export const NO_AI_MODEL_LABEL = 'No model chosen';
+export const NO_AI_MODEL_LABEL = '고른 모델 없음';
 
 /**
  * 이 앱이 실제로 세울 수 있는 provider 하나.
@@ -114,7 +114,7 @@ const LOCALITY_CHOICE_LABEL: Record<AiProviderLocality, string> = {
  * 진짜 이름은 알 수 없다 — 저장된 것은 식별자뿐이다. 없는 이름을 지어내지 않고 **저장된
  * 값이 그대로 남아 있다는 사실**을 보여 준다 (`defaultMicrophone.ts`와 같은 규칙).
  */
-export const UNKNOWN_AI_PROVIDER_LABEL = 'Saved provider (this version cannot use it)';
+export const UNKNOWN_AI_PROVIDER_LABEL = '저장된 provider (이 버전은 쓸 수 없음)';
 
 /** 고를 수 있는 항목 하나. */
 export interface AiProviderChoice {
@@ -188,14 +188,14 @@ export interface AiTransferNotice {
 
 /** provider가 어디서 도는가. */
 const LOCALITY_HEADLINE: Record<AiProviderLocality, string> = {
-  local: 'This provider runs on this device.',
-  external: 'This provider runs outside this device.',
+  local: '이 provider는 이 기기에서 돈다.',
+  external: '이 provider는 기기 밖에서 돈다.',
 };
 
 /** 그래서 transcript 텍스트가 어떻게 되는가. */
 const LOCALITY_TRANSCRIPT_TEXT: Record<AiProviderLocality, string> = {
-  local: 'The transcript text is sent to it and stays on this device.',
-  external: 'The transcript text is sent to it, so it leaves this device.',
+  local: '전사 텍스트가 그쪽으로 가지만 이 기기 안에 머문다.',
+  external: '전사 텍스트가 그쪽으로 가며, 그래서 이 기기를 떠난다.',
 };
 
 /**
@@ -206,10 +206,10 @@ const LOCALITY_TRANSCRIPT_TEXT: Record<AiProviderLocality, string> = {
  * locality에 따라 달라지지 않는다.
  */
 export const AUDIO_IS_NEVER_SENT =
-  'Audio is never sent. Only the transcript text is used, and the recording file stays on this device.';
+  '오디오는 보내지 않는다. 쓰이는 것은 전사 텍스트뿐이고 녹음 파일은 이 기기에 남는다.';
 
 /** 아무 provider도 고르지 않았을 때. 나가는 것이 없으므로 나가는 이야기를 하지 않는다. */
-export const NOTHING_LEAVES_THIS_DEVICE = 'No AI provider is set, so nothing is sent anywhere.';
+export const NOTHING_LEAVES_THIS_DEVICE = 'AI provider가 지정되지 않아서 어디로도 아무것도 보내지 않는다.';
 
 /**
  * 고른 provider의 전송 경계. 고르지 않았거나 이 앱이 모르는 식별자면 `null`이다.
@@ -279,41 +279,41 @@ export type AiConnection =
   | { readonly kind: 'checkFailed'; readonly text: string; readonly failure: Failure };
 
 /** 아직 물어보지 않았다. 화면을 열자마자 확인하러 나가지 않는다. */
-export const AI_NOT_CHECKED_TEXT = 'The AI provider has not been checked yet.';
+export const AI_NOT_CHECKED_TEXT = 'AI provider를 아직 확인하지 않았다.';
 
-export const CHECKING_AI_PROVIDER_TEXT = 'Checking the AI provider…';
+export const CHECKING_AI_PROVIDER_TEXT = 'AI provider 확인 중…';
 
 /** 고른 provider가 없다. **경고가 아니다** (INV-8). */
-export const NO_AI_PROVIDER_TEXT = 'No AI provider is set, so there is nothing to check.';
+export const NO_AI_PROVIDER_TEXT = 'AI provider가 지정되지 않아서 확인할 것이 없다.';
 
-export const HOW_TO_SET_AN_AI_PROVIDER = 'Choose a provider above to turn AI notes on.';
+export const HOW_TO_SET_AN_AI_PROVIDER = '위에서 provider를 고르면 AI 노트가 켜진다.';
 
 /** 응답했다. */
-export const AI_PROVIDER_RUNNING_TEXT = 'The AI provider answered.';
+export const AI_PROVIDER_RUNNING_TEXT = 'AI provider가 답했다.';
 
 /** 응답했지만 모델이 없다. **오류가 아니라 사실이다.** */
 export const AI_PROVIDER_HAS_NO_MODELS_TEXT =
-  'The AI provider answered, but no models are installed on it.';
+  'AI provider가 답했지만 설치된 모델이 없다.';
 
 export const HOW_TO_INSTALL_A_MODEL =
-  'Install a model on the provider, then check again — the list here comes from the provider itself.';
+  'provider에 모델을 설치한 뒤 다시 확인한다 — 여기 목록은 provider가 직접 말한 것이다.';
 
 /** 응답하지 않는다. **재촉하지 않고 무엇을 하면 되는지만 적는다** (§13). */
-export const AI_PROVIDER_NOT_RUNNING_TEXT = 'The AI provider did not answer.';
+export const AI_PROVIDER_NOT_RUNNING_TEXT = 'AI provider가 답하지 않았다.';
 
 export const HOW_TO_REACH_THE_AI_PROVIDER =
-  'Start the provider on this machine, or point the address below at where it is running, then check again.';
+  '이 기기에서 provider를 켜거나, 아래 주소를 그것이 도는 자리로 맞춘 뒤 다시 확인한다.';
 
 /** 확인 요청 자체가 거절됐다. provider가 응답하는지는 여전히 알지 못한다. */
-export const AI_CHECK_FAILED_TEXT = 'The AI provider could not be checked.';
+export const AI_CHECK_FAILED_TEXT = 'AI provider를 확인하지 못했다.';
 
 /** 확인은 **저장된** 설정에게 물어본다 — `ai_provider_status`는 저장소의 값을 읽는다. */
 export const AI_CHECK_USES_SAVED_SETTINGS =
-  'The check asks the settings that are already saved. Save first to check a new provider, address, or model.';
+  '확인은 이미 저장된 설정에 묻는다. 새 provider · 주소 · 모델을 확인하려면 먼저 저장한다.';
 
 /** AI 쪽이 안 되어도 이 화면의 나머지는 그대로다 (INV-8). */
 export const AI_SETTINGS_UNAFFECTED_NOTICE =
-  'Every other setting on this screen still saves normally, whether or not the AI provider answers.';
+  '이 화면의 다른 설정은 AI provider가 답하든 안 하든 그대로 저장된다.';
 
 /**
  * backend가 답한 provider 상태를 화면 상태로 옮긴다.
@@ -408,11 +408,11 @@ export function confirmedAiModels(connection: AiConnection): readonly string[] {
 
 /** 아직 모델을 고르지 않았다. 확인된 목록이 있을 때만 할 수 있는 말이다. */
 export const NO_AI_MODEL_CHOSEN_NOTICE =
-  'No model chosen yet. Pick one from the list the provider reported.';
+  '아직 모델을 고르지 않았다. provider가 말한 목록에서 고른다.';
 
 /** 고른 모델이 지금 그 서버에 없다. **그래도 고른 값은 그대로 남는다.** */
 export const MISSING_AI_MODEL_NOTICE =
-  'The chosen model is not installed on the provider right now. It stays chosen until you pick another one.';
+  '고른 모델이 지금 provider에 설치돼 있지 않다. 다른 것을 고를 때까지 그대로 남는다.';
 
 /**
  * 고른 모델에 대해 사용자에게 할 말. 할 말이 없으면 `null`이다.
@@ -469,7 +469,7 @@ export function aiSettingsChanged(form: SettingsForm, saved: AiSettingsSnapshot 
 }
 
 /** 주소 입력란에 적히는 안내. **기본 주소를 여기에 옮겨 적지 않는다.** */
-export const AI_BASE_URL_PLACEHOLDER = 'Leave empty to use the built-in address';
+export const AI_BASE_URL_PLACEHOLDER = '비워 두면 기본 주소를 쓴다';
 
 /**
  * 주소를 고르지 않아도 된다는 사실.
@@ -479,7 +479,7 @@ export const AI_BASE_URL_PLACEHOLDER = 'Leave empty to use the built-in address'
  * 때 화면이 조용히 거짓말을 하게 된다.
  */
 export const AI_BASE_URL_NOTICE =
-  'Where the provider is listening, as host and port. Leave it empty and the app connects to its built-in address for that provider.';
+  'provider가 듣고 있는 자리 — host와 port다. 비워 두면 그 provider의 기본 주소로 연결한다.';
 
 // --- 구역의 두 부분 (phase-prompt/05.5 요구 7 · 10 · docs/ADR-0010 §4.3) ------------------
 
@@ -488,7 +488,7 @@ export const AI_SECTION_TITLE = 'AI';
 
 /** 이 구역 전체가 선택이라는 사실 (INV-8). 맨 앞에 있어서 나머지를 그 아래에서 읽게 한다. */
 export const AI_IS_OPTIONAL_TEXT =
-  'AI notes are optional. Recording, transcription, Markdown export, and Notion all work with nothing set here.';
+  'AI 노트는 선택이다. 녹음 · 전사 · 마크다운 내보내기 · Notion은 여기를 비워 둬도 모두 동작한다.';
 
 /**
  * provider가 없어도 AI를 쓸 수 있다는 사실 (MH-1 · MH-2 · `aiHandoffView.ts`).
@@ -497,10 +497,10 @@ export const AI_IS_OPTIONAL_TEXT =
  * 녹음 하나에 대한 동작이므로 녹음 화면에 있고, 여기서는 그것이 있다는 사실만 말한다.
  */
 export const AI_WITHOUT_A_PROVIDER_TEXT =
-  'With nothing set here you can still take a recording to the AI chat you already use — those buttons are on the recording itself.';
+  '여기를 아무것도 지정하지 않아도, 쓰던 AI 채팅으로 녹음을 가져갈 수 있다 — 그 버튼은 녹음 자체에 있다.';
 
 /** 첫 부분의 이름 — 고르고 · 확인하고 · 모델을 고르는 자리 (Phase 4가 만든 그대로다). */
-export const CONNECTED_PROVIDER_TITLE = 'Connected provider';
+export const CONNECTED_PROVIDER_TITLE = '연결된 provider';
 
 /** 그 부분이 무엇인가. 고르지 않은 상태를 **고칠 것으로 말하지 않는다** (INV-8). */
 export const CONNECTED_PROVIDER_TEXT =
@@ -540,7 +540,7 @@ export const OPTIONAL_TITLE_SUFFIX = ' · optional';
 
 /** 이 부분이 어떤 위치에 있는가 (요구 7). */
 export const SELF_HOSTED_STANDING_TEXT =
-  'Optional and advanced. It is one way to fill the provider above, not something the app needs.';
+  '선택 사항이며 고급 설정이다. 위 provider를 채우는 한 방법일 뿐 앱이 요구하는 것이 아니다.';
 
 /**
  * 스스로 세우는 provider가 무엇인가.
@@ -549,19 +549,19 @@ export const SELF_HOSTED_STANDING_TEXT =
  * 성질이며, 그 성질이 이 문장의 내용 전부다 (MH-6 · INV-9).
  */
 export const SELF_HOSTED_PROVIDER_TEXT =
-  'You install and run it on this machine yourself. Molt Note does not install it, does not start it, and does not need it to work.';
+  '사용자가 이 기기에 직접 설치해 실행한다. Molt Note가 설치하지도 켜지도 않으며, 없어도 동작한다.';
 
 /** 켜는 방법. 위 부분을 가리키므로 같은 컨트롤이 두 벌이 되지 않는다. */
 export const HOW_TO_TURN_ON_A_LOCAL_PROVIDER =
-  'To use it: install and start it yourself, then choose it in the provider list above and save. The check above then asks the saved provider whether it answers.';
+  '쓰려면: 직접 설치해 켠 뒤 위 provider 목록에서 고르고 저장한다. 그러면 위 확인이 저장된 provider에게 답하는지 묻는다.';
 
 /** 고르지 않았다. **담담한 사실이다** (INV-8). */
 export const LOCAL_PROVIDER_NOT_CHOSEN_TEXT =
-  'It is not the provider right now. Nothing in the app is waiting for it.';
+  '지금은 이것이 provider가 아니다. 앱에서 이것을 기다리는 것은 없다.';
 
 /** 골랐다. 그래서 위 부분의 확인과 모델 목록이 이것에 대한 것이 된다. */
 export const LOCAL_PROVIDER_CHOSEN_TEXT =
-  'It is the provider right now, so the controls above check it and list its models.';
+  '지금 이것이 provider다. 그래서 위 조작이 이것을 확인하고 모델을 나열한다.';
 
 /**
  * 스스로 설치해서 쓰는 로컬 provider들에 대한 안내 (요구 7).
@@ -611,14 +611,14 @@ export interface AiCredentialNotice {
 
 const AI_CREDENTIAL_NOTICE: Record<AiCredentialState, AiCredentialNotice> = {
   stored: {
-    text: 'An API key is saved in the operating system credential store.',
+    text: '운영체제 자격증명 저장소에 API 키가 저장돼 있다.',
     resolution: null,
   },
   notStored: {
-    text: 'No API key is saved.',
+    text: '저장된 API 키가 없다.',
     // **없는 것을 실패처럼 말하지 않는다.** provider를 하나도 쓰지 않는 것이 정상 상태다.
     resolution:
-      'A provider that runs outside this device needs one. Paste a key below, or choose a provider that runs on this device.',
+      '기기 밖에서 도는 provider는 키가 필요하다. 아래에 키를 붙여 넣거나, 이 기기에서 도는 provider를 고른다.',
   },
 };
 
@@ -627,11 +627,11 @@ export function aiCredentialNotice(state: AiCredentialState): AiCredentialNotice
 }
 
 /** 입력란에 적히는 안내. **저장된 값이 여기 채워지는 일은 없다** (INV-7). */
-export const AI_KEY_INPUT_PLACEHOLDER = 'Paste the API key';
+export const AI_KEY_INPUT_PLACEHOLDER = 'API 키를 붙여 넣는다';
 
 /** 넘긴 뒤 입력란이 비워진다는 사실을 먼저 알린다 — 사라진 것처럼 보이지 않게 한다. */
 export const AI_KEY_INPUT_NOTICE =
-  'The key is handed to this app once and kept in the operating system credential store. It is cleared from this box as soon as it is saved, and it is never written to the app database or the browser.';
+  '키는 이 앱에 한 번 넘겨져 운영체제의 자격증명 저장소에 보관된다. 저장되는 즉시 이 칸에서 지워지며, 앱 데이터베이스에도 브라우저에도 쓰이지 않는다.';
 
 /**
  * 이 provider를 쓰면 **API 키가 필요한가.**

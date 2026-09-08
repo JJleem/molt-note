@@ -224,13 +224,13 @@ describe('구역의 두 부분 (요구 7 · ADR-0010 §4.3)', () => {
   it('선택이고 고급이라는 것이 자리가 아니라 문장으로 있다 (요구 7)', () => {
     const [setup] = localProviderSetups(NO_AI_PROVIDER);
 
-    expect(setup.standing).toMatch(/optional/i);
-    expect(setup.standing).toMatch(/advanced/i);
+    expect(setup.standing).toMatch(/선택/);
+    expect(setup.standing).toMatch(/고급/);
     // 설치와 실행의 주체가 사용자이고, 앱이 그것을 필요로 하지 않는다는 사실.
-    expect(setup.text).toMatch(/yourself/i);
-    expect(setup.text).toMatch(/does not need it/i);
+    expect(setup.text).toMatch(/직접 설치/);
+    expect(setup.text).toMatch(/없어도 동작한다/);
     // 켜라는 요구가 아니라 켜는 방법이다.
-    expect(setup.howToTurnOn).toMatch(/to use it/i);
+    expect(setup.howToTurnOn).toMatch(/쓰려면/);
   });
 
   it('고르지 않은 상태가 결함이 아니라 정상으로 적힌다 (INV-8)', () => {
@@ -243,7 +243,7 @@ describe('구역의 두 부분 (요구 7 · ADR-0010 §4.3)', () => {
     expect(notChosen.statusText).not.toBe(chosen.statusText);
     // 그리고 고르지 않은 쪽이 오류의 언어를 쓰지 않는다.
     expect(notChosen.statusText).not.toMatch(/error|failed|must|required|missing/i);
-    expect(notChosen.statusText).toMatch(/nothing in the app is waiting/i);
+    expect(notChosen.statusText).toMatch(/기다리는 것은 없다/);
   });
 
   it('고른 값이 무엇이든 이 부분이 값을 바꾸지 않는다', () => {
@@ -268,12 +268,12 @@ describe('구역의 두 부분 (요구 7 · ADR-0010 §4.3)', () => {
     expect(AI_SECTION_TITLE).not.toMatch(/ollama/i);
     expect(AI_SECTION_TITLE).not.toMatch(OTHER_VENDORS);
 
-    expect(AI_IS_OPTIONAL_TEXT).toMatch(/optional/i);
+    expect(AI_IS_OPTIONAL_TEXT).toMatch(/선택/);
     // 첫 부분은 '연결된 provider'이고, 고르지 않은 것이 고칠 일이 아니라고 적혀 있다.
-    expect(CONNECTED_PROVIDER_TITLE).toMatch(/connected provider/i);
+    expect(CONNECTED_PROVIDER_TITLE).toMatch(/연결된 provider/);
     expect(CONNECTED_PROVIDER_TEXT).toMatch(/normal state/i);
     // provider가 없어도 AI를 쓸 길이 있다는 사실. 벤더를 부르지 않는다 (MH-1 · MH-2 · MH-6).
-    expect(AI_WITHOUT_A_PROVIDER_TEXT).toMatch(/ai chat you already use/i);
+    expect(AI_WITHOUT_A_PROVIDER_TEXT).toMatch(/쓰던 AI 채팅/);
     expect(AI_WITHOUT_A_PROVIDER_TEXT).not.toMatch(OTHER_VENDORS);
     expect(AI_WITHOUT_A_PROVIDER_TEXT).not.toMatch(/ollama/i);
   });
@@ -288,15 +288,15 @@ describe('전송 경계 (§12 · INV-5 · INV-6)', () => {
     expect(external).not.toBeNull();
     expect(local?.headline).not.toBe(external?.headline);
     expect(local?.transcriptText).not.toBe(external?.transcriptText);
-    expect(local?.headline).toContain('on this device');
-    expect(external?.headline).toContain('outside this device');
+    expect(local?.headline).toContain('이 기기');
+    expect(external?.headline).toContain('기기 밖');
   });
 
   it('오디오가 전송되지 않는다는 사실이 양쪽 모두에 있다', () => {
     // 계약에 오디오를 가리킬 필드가 없다 (ADR-0008 §4.2). locality에 따라 달라지지 않는다.
     expect(aiTransferNotice('local')?.audioText).toBe(AUDIO_IS_NEVER_SENT);
     expect(aiTransferNotice('external')?.audioText).toBe(AUDIO_IS_NEVER_SENT);
-    expect(AUDIO_IS_NEVER_SENT).toMatch(/audio is never sent/i);
+    expect(AUDIO_IS_NEVER_SENT).toMatch(/오디오는 보내지 않는다/);
   });
 
   it('고르지 않았거나 모르는 provider에 대해 "나가지 않는다"고 말하지 않는다', () => {
@@ -338,7 +338,7 @@ describe('연결 확인 (요구 8 · ADR-0008 §4.2)', () => {
     // 이 값에는 실패를 그릴 재료가 아예 없다.
     expect(noModels).not.toHaveProperty('failure');
     expect(noModels.text).not.toMatch(/error|failed|problem/i);
-    expect(noModels.resolution).toMatch(/install a model/i);
+    expect(noModels.resolution).toMatch(/모델을 설치/);
   });
 
   it('닿지 못한 것은 이유와 함께 오고, 무엇을 하면 되는지가 붙는다', () => {
@@ -350,7 +350,7 @@ describe('연결 확인 (요구 8 · ADR-0008 §4.2)', () => {
     if (notRunning.kind !== 'notRunning') return;
     expect(notRunning.failure).toEqual(unreachable);
     // §13 — 재촉이 아니라 안내다.
-    expect(notRunning.resolution).toMatch(/start the provider/i);
+    expect(notRunning.resolution).toMatch(/provider를 켜/);
     expect(notRunning.resolution).not.toMatch(/must|warning|immediately/i);
   });
 
@@ -521,7 +521,7 @@ describe('AI가 안 되는 것이 나머지를 막지 않는다 (INV-8)', () => 
   });
 
   it('그 사실이 화면에 적을 수 있는 문장으로 있다', () => {
-    expect(AI_SETTINGS_UNAFFECTED_NOTICE).toMatch(/every other setting/i);
+    expect(AI_SETTINGS_UNAFFECTED_NOTICE).toMatch(/다른 설정은/);
   });
 });
 
@@ -562,10 +562,10 @@ describe('AI provider 자격증명 (2026-09-08 · PRODUCT-SPEC §16.1)', () => {
 
   it('입력란 안내가 값이 어디 저장되고 어떻게 사라지는지 말한다', () => {
     // 넘긴 뒤 입력란이 비워지므로, 그 사실을 먼저 알리지 않으면 사라진 것처럼 보인다.
-    expect(AI_KEY_INPUT_NOTICE).toContain('credential store');
-    expect(AI_KEY_INPUT_NOTICE).toContain('cleared');
+    expect(AI_KEY_INPUT_NOTICE).toContain('자격증명 저장소');
+    expect(AI_KEY_INPUT_NOTICE).toContain('지워지며');
     // 앱 DB에 쓰이지 않는다는 사실 (INV-7).
-    expect(AI_KEY_INPUT_NOTICE).toContain('never written to the app database');
+    expect(AI_KEY_INPUT_NOTICE).toContain('앱 데이터베이스에도 브라우저에도 쓰이지 않는다');
   });
 
   /**

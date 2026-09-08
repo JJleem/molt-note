@@ -29,10 +29,10 @@ export interface CrashView {
   readonly detail: string | null;
 }
 
-export const CRASH_HEADLINE = 'This screen stopped working.';
+export const CRASH_HEADLINE = '이 화면이 멈췄다.';
 
 export const CRASH_MESSAGE =
-  'The app hit an error it did not expect while drawing this screen. Reloading rebuilds the screen from what the app already has.';
+  '이 화면을 그리다 예상하지 못한 오류가 났다. 다시 불러오면 앱이 이미 가진 것으로 화면을 다시 만든다.';
 
 /**
  * **가장 중요한 문장이다.** 오늘의 사고가 이 한 줄이 없어서 일어났다.

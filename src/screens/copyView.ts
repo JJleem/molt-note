@@ -58,7 +58,7 @@ function counted(value: number): string {
 
 /** 한 번에 들어가지 않을 수 있다는 사실. **실패가 아니라 크기에 대한 안내다.** */
 export const TOO_LONG_NOTICE =
-  'This is long enough that a chat may not take it in one paste, so it comes in parts. Take them in order — nothing is left out.';
+  '한 번에 붙여 넣기에는 길어서 조각으로 나뉜다. 순서대로 가져간다 — 빠지는 것은 없다.';
 
 /** 산출물 하나가 **얼마나 큰가**. 화면이 사용자에게 그대로 말할 수 있는 모양이다. */
 export interface HandoffSizeView {
@@ -107,7 +107,7 @@ export interface PortionView {
 }
 
 /** 나뉘지 않았을 때의 문장. **"1/1"이라고 말하지 않는다.** */
-export const WHOLE_PORTION_LABEL = 'This is all of it.';
+export const WHOLE_PORTION_LABEL = '이것이 전부다.';
 
 /** 돌아온 값의 자리를 화면이 말할 수 있는 모양으로 옮긴다. */
 export function portionTaken(of: PortionOf): PortionView {
@@ -159,10 +159,10 @@ export interface CopyAction {
 }
 
 /** 화면에 처음 보이는 이름. Phase Goal이 부르는 이름 그대로다. */
-export const COPY_PROMPT_LABEL = 'Copy AI Prompt';
+export const COPY_PROMPT_LABEL = 'AI 프롬프트 복사';
 
 /** 화면에 처음 보이는 이름. Phase Goal이 부르는 이름 그대로다. */
-export const COPY_TRANSCRIPT_LABEL = 'Copy Transcript';
+export const COPY_TRANSCRIPT_LABEL = '전사 복사';
 
 const START_LABEL: Record<CopyTarget, string> = {
   prompt: COPY_PROMPT_LABEL,
@@ -170,13 +170,13 @@ const START_LABEL: Record<CopyTarget, string> = {
 };
 
 const AGAIN_LABEL: Record<CopyTarget, string> = {
-  prompt: 'Copy the prompt again',
-  transcript: 'Copy the transcript again',
+  prompt: '프롬프트 다시 복사',
+  transcript: '전사 다시 복사',
 };
 
 const RETRY_LABEL: Record<CopyTarget, string> = {
-  prompt: 'Try copying the prompt again',
-  transcript: 'Try copying the transcript again',
+  prompt: '프롬프트 복사 다시 시도',
+  transcript: '전사 복사 다시 시도',
 };
 
 const FIXED_LABEL: Record<Exclude<CopyAction['kind'], 'next'>, Record<CopyTarget, string>> = {
@@ -226,10 +226,10 @@ export interface CopyAlternative {
 }
 
 /** Export for AI 자리의 이름. 이 모듈이 그 동작을 수행하지 않는다 — 가리키기만 한다. */
-export const COPY_ALTERNATIVE_LABEL = 'Export for AI';
+export const COPY_ALTERNATIVE_LABEL = 'AI용 파일 내보내기';
 
 export const COPY_ALTERNATIVE_TEXT =
-  'Export for AI writes the same text to a file on this device without using the clipboard. You can attach that file to your AI chat, or open it and copy from there.';
+  'AI용 파일 내보내기는 클립보드를 쓰지 않고 같은 텍스트를 이 기기의 파일로 쓴다. 그 파일을 AI 채팅에 첨부하거나 열어서 복사할 수 있다.';
 
 const ALTERNATIVE: CopyAlternative = {
   label: COPY_ALTERNATIVE_LABEL,
@@ -237,27 +237,27 @@ const ALTERNATIVE: CopyAlternative = {
 };
 
 /** 복사할 재료가 아직 없다. **실패가 아니다** (§7.2 · ADR-0010 §5.5). */
-export const NOTHING_TO_COPY_TEXT = 'There is nothing to copy from this recording yet.';
+export const NOTHING_TO_COPY_TEXT = '이 녹음에서 아직 복사할 것이 없다.';
 
 /** 그래서 무엇을 하면 되는가. 이 자리가 전사를 시작하지 않는다 — 그 자리는 Transcript 탭이다. */
 export const NOTHING_TO_COPY_HINT =
-  'Transcribe this recording in the Transcript tab first, then copy it.';
+  '전사 탭에서 이 녹음을 먼저 전사한 뒤에 복사한다.';
 
 /** 지금 눌러도 되는가. provider가 하나도 없어도 이 동작은 그대로 가능하다 (MH-1 · MH-2). */
 const READY_TEXT: Record<CopyTarget, string> = {
   prompt:
-    'Copy a ready-to-paste prompt for this recording, then paste it into the AI chat you already use.',
-  transcript: 'Copy the transcript text of this recording so you can paste it anywhere.',
+    '이 녹음에 대해 바로 붙여 넣을 수 있는 프롬프트를 복사한 뒤, 쓰던 AI 채팅에 붙여 넣는다.',
+  transcript: '이 녹음의 전사 텍스트를 복사해 어디든 붙여 넣는다.',
 };
 
 /** 복사 중. 프롬프트·전사 텍스트를 만드는 일과 clipboard에 쓰는 일이 둘 다 여기에 든다. */
 const COPYING_TEXT: Record<CopyTarget, string> = {
-  prompt: 'Copying the prompt…',
-  transcript: 'Copying the transcript…',
+  prompt: '프롬프트 복사 중…',
+  transcript: '전사 복사 중…',
 };
 
 /** 복사됐다는 사실 한 줄. **색이 아니라 이 문장이 그것을 말한다** (§7.5). */
-export const COPIED_HEADLINE = 'Copied to the clipboard.';
+export const COPIED_HEADLINE = '클립보드에 복사했다.';
 
 /**
  * **조각 하나만 올라갔을 때의 사실 한 줄** (`phase-prompt/05.6` 성공 기준 4).
@@ -265,30 +265,30 @@ export const COPIED_HEADLINE = 'Copied to the clipboard.';
  * 이때 "Copied to the clipboard."라고만 말하면 그것은 **잘린 결과를 온전한 것이라고 말하는
  * 것이다.** 그래서 머리글부터 다르다 — 무엇이 올라갔는지는 바로 아래 자리 문장이 말한다.
  */
-export const COPIED_PORTION_HEADLINE = 'One part is on your clipboard — not the whole thing yet.';
+export const COPIED_PORTION_HEADLINE = '조각 하나가 클립보드에 있다 — 아직 전체는 아니다.';
 
 const COPIED_TEXT: Record<CopyTarget, string> = {
-  prompt: 'The prompt is on your clipboard. Paste it into your AI chat.',
-  transcript: 'The transcript is on your clipboard. Paste it wherever you need it.',
+  prompt: '프롬프트가 클립보드에 있다. AI 채팅에 붙여 넣는다.',
+  transcript: '전사가 클립보드에 있다. 필요한 곳에 붙여 넣는다.',
 };
 
 const COPIED_PORTION_TEXT: Record<CopyTarget, string> = {
   prompt:
-    'Paste this part into your AI chat, then come back for the next one and paste it after this.',
+    '이 조각을 AI 채팅에 붙여 넣은 뒤, 돌아와 다음 조각을 그 뒤에 이어 붙인다.',
   transcript:
-    'Paste this part where you need it, then come back for the next one and paste it after this.',
+    '이 조각을 필요한 곳에 붙여 넣은 뒤, 돌아와 다음 조각을 그 뒤에 이어 붙인다.',
 };
 
 /** 마지막 조각까지 왔다. **여기서만 "다 가져갔다"고 말한다.** */
 const LAST_PORTION_TEXT: Record<CopyTarget, string> = {
-  prompt: 'That was the last part. Pasted in order, the parts make the whole prompt.',
-  transcript: 'That was the last part. Pasted in order, the parts make the whole transcript.',
+  prompt: '이것이 마지막 조각이다. 순서대로 붙여 넣으면 프롬프트 전체가 된다.',
+  transcript: '이것이 마지막 조각이다. 순서대로 붙여 넣으면 전사 전체가 된다.',
 };
 
 /** 무엇을 하다 실패했는가 (§13). 원인은 {@link Failure}가 말한다. */
 const FAILED_HEADLINE: Record<CopyTarget, string> = {
-  prompt: 'The prompt could not be copied.',
-  transcript: 'The transcript could not be copied.',
+  prompt: '프롬프트를 복사하지 못했다.',
+  transcript: '전사를 복사하지 못했다.',
 };
 
 /**
@@ -298,7 +298,7 @@ const FAILED_HEADLINE: Record<CopyTarget, string> = {
  * 쓰기가 거절됐다면 clipboard에 이미 있던 것도 그대로다.
  */
 export const COPY_PRESERVED_NOTICE =
-  'The recording, its audio file, the transcript, and any AI note are untouched. Copying only reads, and a copy that failed left whatever was already on your clipboard as it was.';
+  '녹음도 오디오 파일도 전사도 AI 노트도 그대로다. 복사는 읽기만 하며, 실패한 복사는 클립보드에 이미 있던 것을 그대로 두었다.';
 
 /**
  * 실패 갈래 중 사용자가 **먼저** 할 일이 달라지는 것 (§13 · ADR-0010 §7.5).
@@ -320,12 +320,12 @@ export type CopyFailureCause =
 
 const FAILURE_RESOLUTION: Record<CopyFailureCause, string | null> = {
   clipboardUnavailable:
-    'This window cannot write to the clipboard, so pressing the button again gives the same result. Use Export for AI instead — it writes the same text to a file.',
+    '이 창은 클립보드에 쓸 수 없어서 버튼을 다시 눌러도 같은 결과가 나온다. 대신 AI용 파일 내보내기를 쓴다 — 같은 텍스트를 파일로 쓴다.',
   clipboardRejected:
-    'The clipboard did not take the text this time. Press the button again, and if it keeps failing use Export for AI instead.',
+    '이번에는 클립보드가 텍스트를 받지 못했다. 버튼을 다시 누르고, 계속 실패하면 AI용 파일 내보내기를 쓴다.',
   nothingToCopy: NOTHING_TO_COPY_HINT,
   storage:
-    'The text could not be read from this device. Check that the app can read its data folder, then try again.',
+    '이 기기에서 텍스트를 읽지 못했다. 앱이 자기 데이터 폴더를 읽을 수 있는지 확인한 뒤 다시 시도한다.',
   other: null,
 };
 
