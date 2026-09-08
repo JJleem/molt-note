@@ -16,7 +16,9 @@ import {
   editedSettings,
   failedSave,
   failedSettings,
+  hasUnsavedChanges,
   loadedSettings,
+  saveNotice,
   savedSettings,
   savingSettings,
   toForm,
@@ -512,5 +514,63 @@ describe('모델이 없는 상태는 화면 상태다', () => {
     transcriptionModel(before);
 
     expect(before).toEqual(form({ automaticTranscription: true }));
+  });
+});
+
+describe('저장하지 않은 변경 (2026-09-08)', () => {
+  const form = (over: Partial<SettingsForm> = {}): SettingsForm => ({
+    recordingsDirectory: '',
+    automaticProcessing: false,
+    automaticTranscription: false,
+    transcriptionModel: '',
+    transcriptionLanguage: '',
+    defaultMicrophone: '',
+    aiProvider: '',
+    aiBaseUrl: '',
+    aiModel: '',
+    notionParentPageId: '',
+    ...over,
+  });
+
+  it('아직 아무것도 읽지 못했으면 바뀌었다고 말하지 않는다', () => {
+    // 모르는 것을 "바뀌었다"고 말하지 않는다.
+    expect(hasUnsavedChanges(form(), null)).toBe(false);
+  });
+
+  it('같으면 바뀌지 않은 것이다', () => {
+    expect(hasUnsavedChanges(form(), form())).toBe(false);
+  });
+
+  it('값 하나만 달라도 바뀐 것이다', () => {
+    expect(hasUnsavedChanges(form({ aiModel: 'x' }), form())).toBe(true);
+    expect(hasUnsavedChanges(form({ automaticTranscription: true }), form())).toBe(true);
+  });
+
+  /**
+   * 바꿨다가 원래대로 돌려놓은 것은 **바뀌지 않은 것**이다. 화면이 "무언가 만졌다"를
+   * 자기 상태로 기억하면 이것을 구분하지 못한다.
+   */
+  it('되돌린 변경은 바뀐 것으로 남지 않는다', () => {
+    const saved = form({ aiModel: 'a' });
+    const touchedThenReverted = form({ aiModel: 'a' });
+
+    expect(hasUnsavedChanges(touchedThenReverted, saved)).toBe(false);
+  });
+
+  it('저장하는 중에는 아무 말도 하지 않는다', () => {
+    expect(saveNotice(true, true, false)).toBeNull();
+  });
+
+  it('저장하지 않은 변경을 먼저 말한다', () => {
+    // 방금 저장했더라도, 그 뒤에 또 바꿨다면 지금 알아야 하는 것은 그쪽이다.
+    expect(saveNotice(true, false, true)).toContain('저장하지 않은');
+  });
+
+  it('바뀐 것이 없고 방금 저장했으면 그 사실을 말한다', () => {
+    expect(saveNotice(false, false, true)).toContain('저장했다');
+  });
+
+  it('할 말이 없으면 아무 말도 하지 않는다', () => {
+    expect(saveNotice(false, false, false)).toBeNull();
   });
 });

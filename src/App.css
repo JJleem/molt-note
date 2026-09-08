@@ -1430,3 +1430,34 @@ p.loading {
   flex: 1 1 240px;
   margin: 0;
 }
+
+/*
+ * 설정 저장 자리 (2026-09-08).
+ *
+ * **화면 아래에 붙는다.** 설정이 한 화면에 전부 있어서 길고, 값을 바꾼 뒤 저장까지
+ * 스크롤해 내려가는 사이에 자기가 무언가 바꿨다는 사실을 잊는다. 그 상태로 화면을
+ * 떠나면 변경은 조용히 사라진다.
+ *
+ * 위에 hairline 하나를 두어 본문과 갈린다 — 그림자를 쓰지 않는다 (§19).
+ */
+
+.settings__save {
+  position: sticky;
+  bottom: 0;
+  background-color: var(--surface);
+  border-top: 1px solid var(--hairline);
+  padding-top: var(--space-4);
+}
+
+.settings__save-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+/* 줄 안에서는 위아래 여백을 두지 않는다 — 버튼과 같은 줄에 앉는다. */
+
+.settings__save-row .hint {
+  margin: 0;
+}

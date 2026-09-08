@@ -83,6 +83,8 @@ import {
   failedSettings,
   loadedSettings,
   savedSettings,
+  hasUnsavedChanges,
+  saveNotice,
   savingSettings,
   toForm,
   toSettings,
@@ -181,6 +183,14 @@ export function SettingsScreen() {
   const [tokenTrouble, setTokenTrouble] = useState<NotionTokenTrouble | null>(null);
   /** 확인이 실제로 물어본 destination — 마지막으로 저장소에서 온 부모 페이지 값. */
   const [savedDestination, setSavedDestination] = useState<string | null>(null);
+
+  /**
+   * 마지막으로 저장된 폼 (2026-09-08).
+   *
+   * **화면이 "무언가 만졌다"를 자기 상태로 기억하지 않는다** — 저장된 값과 지금 폼을
+   * 값으로 비교해야 되돌린 변경이 "바뀜"으로 남지 않는다 (`hasUnsavedChanges`).
+   */
+  const [savedForm, setSavedForm] = useState<SettingsForm | null>(null);
   /**
    * token 입력란 그 자체.
    *
@@ -234,6 +244,7 @@ export function SettingsScreen() {
         setSavedAi(aiSettingsSnapshot(toForm(settings)));
         // Notion 확인도 **저장된** destination에게 물어본다. 그 대상이 무엇인지 여기서 안다.
         setSavedDestination(toForm(settings).notionParentPageId);
+        setSavedForm(toForm(settings));
       },
       (error: unknown) => {
         // 실패를 console에만 남기지 않는다. 화면 상태가 된다 (§13).
@@ -297,6 +308,7 @@ export function SettingsScreen() {
         // 확인이 물어보는 대상은 저장된 값이다. 방금 저장한 것이 그 대상이 됐다.
         setSavedAi(aiSettingsSnapshot(toForm(settings)));
         setSavedDestination(toForm(settings).notionParentPageId);
+        setSavedForm(toForm(settings));
       },
       (error: unknown) => setView((state) => failedSave(state, error)),
     );
@@ -428,6 +440,8 @@ export function SettingsScreen() {
   };
 
   const { form, saving, saved, failure } = view;
+  const unsaved = hasUnsavedChanges(form, savedForm);
+  const notice = saveNotice(unsaved, saving, saved);
   // 저장된 값과 지금 있는 장치를 맞춰 본다. 판단은 순수 모듈이 하고 화면은 그리기만 한다.
   const chosen = chosenMicrophone(form.defaultMicrophone);
   const microphoneNotice = defaultMicrophoneNotice(resolveDefaultMicrophone(chosen, devices));
@@ -676,8 +690,7 @@ export function SettingsScreen() {
               <p className="hint">{AI_CHECK_USES_SAVED_SETTINGS}</p>
               {staleCheck && (
                 <p className="hint">
-                  The AI settings above have changed since the last save, so this result is about
-                  the saved ones.
+                  위 AI 설정이 마지막 저장 뒤에 바뀌었다. 이 결과는 저장된 설정에 대한 것이다.
                 </p>
               )}
 
@@ -831,8 +844,7 @@ export function SettingsScreen() {
         <p className="hint">{NOTION_CHECK_USES_SAVED_SETTINGS}</p>
         {staleDestination && (
           <p className="hint">
-            The parent page above has changed since the last save, so this result is about the
-            saved one.
+            위 부모 페이지가 마지막 저장 뒤에 바뀌었다. 이 결과는 저장된 것에 대한 것이다.
           </p>
         )}
 
@@ -863,23 +875,30 @@ export function SettingsScreen() {
         <p className="hint">{NOTION_SETTINGS_UNAFFECTED_NOTICE}</p>
       </section>
 
-      {/* 설정은 한 벌이므로 저장도 한 번이다. 이 화면의 primary는 이것 하나다 (§19). */}
-      <section className="group">
-        <button
-          type="button"
-          className="btn btn--primary"
-          disabled={saving}
-          onClick={() => save(form)}
-        >
-          {saving ? 'Saving…' : 'Save'}
-        </button>
+      {/* 설정은 한 벌이므로 저장도 한 번이다. 이 화면의 primary는 이것 하나다 (§19).
+
+          **화면 아래에 붙는다** (2026-09-08). 설정이 한 화면에 전부 있어서 길고, 값을
+          바꾼 뒤 저장까지 스크롤해 내려가는 사이에 자기가 무언가 바꿨다는 사실을 잊는다.
+          그 상태로 화면을 떠나면 변경은 조용히 사라진다. */}
+      <section className="group settings__save">
+        <div className="settings__save-row">
+          <button
+            type="button"
+            className="btn btn--primary"
+            disabled={saving}
+            onClick={() => save(form)}
+          >
+            {saving ? '저장하는 중…' : '설정 저장'}
+          </button>
+          {/* 저장하지 않은 변경이 있다는 사실을 먼저 말한다 — 그것이 지금 알아야 하는
+              것이고, "저장했다"는 이미 지난 사실이다. 색만으로 말하지 않는다 (요구 12). */}
+          {notice !== null && (
+            <p className="hint" role="status">
+              {notice}
+            </p>
+          )}
+        </div>
         <p className="hint">이 화면의 모든 설정을 저장한다.</p>
-        {/* 저장됐다는 사실도 글자로 말한다 — 색만으로 말하는 자리를 두지 않는다 (요구 12). */}
-        {saved && (
-          <p className="hint" role="status">
-            Saved.
-          </p>
-        )}
         {failure !== null && <FailureNotice failure={failure} onRetry={() => save(form)} />}
       </section>
     </div>

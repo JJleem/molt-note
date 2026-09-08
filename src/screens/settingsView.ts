@@ -353,3 +353,49 @@ export function transcriptionLanguageNotices(form: SettingsForm): string[] {
 function ready(form: SettingsForm): SettingsView {
   return { kind: 'ready', form, saving: false, saved: false, failure: null };
 }
+
+// --- 저장하지 않은 변경 (2026-09-08) -----------------------------------------------------
+
+/**
+ * 지금 폼이 저장된 것과 다른가.
+ *
+ * ## 왜 필요한가
+ *
+ * 설정이 한 화면에 전부 있어서 길다. 값을 바꾸고 아래로 내려가 저장 버튼을 눌러야 하는데,
+ * 그 사이에 다른 구역을 지나며 **자기가 무언가 바꿨다는 사실을 잊는다.** 화면을 떠나면
+ * 그 변경은 조용히 사라진다.
+ *
+ * **저장 여부를 화면이 자기 상태로 추측하지 않는다** — 저장된 값과 지금 폼을 값으로
+ * 비교한다. 그래야 되돌린 변경(바꿨다가 원래대로 돌려놓은 것)이 "바뀜"으로 남지 않는다.
+ *
+ * 아직 아무것도 읽지 못했으면 `false`다. **모르는 것을 "바뀌었다"고 말하지 않는다.**
+ */
+export function hasUnsavedChanges(form: SettingsForm, saved: SettingsForm | null): boolean {
+  if (saved === null) {
+    return false;
+  }
+
+  // 키를 하나씩 세지 않는다 — 필드가 늘 때마다 이 함수를 함께 고쳐야 하는 자리를
+  // 만들지 않기 위해서다. 값은 전부 문자열·불리언이므로 얕은 비교로 충분하다.
+  const keys = Object.keys(form) as (keyof SettingsForm)[];
+  return keys.some((key) => form[key] !== saved[key]);
+}
+
+/**
+ * 저장 자리에 적히는 말.
+ *
+ * **저장하지 않은 변경이 있다는 사실을 먼저 말한다.** 그것이 지금 사람이 알아야 하는 것이고,
+ * "저장했다"는 이미 지난 사실이다.
+ */
+export function saveNotice(unsaved: boolean, saving: boolean, savedJustNow: boolean): string | null {
+  if (saving) {
+    return null;
+  }
+  if (unsaved) {
+    return '저장하지 않은 변경이 있다.';
+  }
+  if (savedJustNow) {
+    return '저장했다.';
+  }
+  return null;
+}
