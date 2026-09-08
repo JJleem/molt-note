@@ -161,6 +161,36 @@ fn rejected(message: &str, detail: String) -> Failure {
     response_unusable(message).with_detail(detail)
 }
 
+/// OAuth access token을 쓸 때 함께 보내야 하는 beta 헤더.
+///
+/// **API 키와 OAuth token은 다른 헤더로 간다.** 키는 `x-api-key`, token은
+/// `Authorization: Bearer`이며 token 쪽은 이 헤더가 함께 있어야 받아들여진다.
+pub const OAUTH_BETA_HEADER: &str = "anthropic-beta";
+pub const OAUTH_BETA_VALUE: &str = "oauth-2025-04-20";
+
+/// 저장된 자격증명이 어느 방식인가.
+///
+/// 사용자에게 "어느 종류를 넣는지" 묻지 않는다 — **값의 모양이 이미 말하고 있다.**
+/// Anthropic API 키는 `sk-ant-` 로 시작하고, OAuth access token은 그렇지 않다.
+///
+/// **[미검증]** 이 접두사가 앞으로도 유지되는지는 이 저장소가 보장할 수 없다. 다만 틀려도
+/// 잃는 것이 크지 않다 — 잘못 고르면 401이 오고, 그 갈래는 이미 §13의 실패로 있다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Credential {
+    /// `x-api-key` 로 보낸다.
+    ApiKey,
+    /// `Authorization: Bearer` + beta 헤더로 보낸다.
+    OauthToken,
+}
+
+pub fn credential_kind(secret: &str) -> Credential {
+    if secret.trim_start().starts_with("sk-ant-") {
+        Credential::ApiKey
+    } else {
+        Credential::OauthToken
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -250,6 +280,15 @@ mod tests {
     }
 
     /// 확인 없이 바꾸면 응답 형태가 달라질 수 있는 값들. 바뀌면 이 테스트가 알린다.
+    #[test]
+    fn an_api_key_and_an_oauth_token_are_told_apart_by_shape() {
+        // 사용자에게 종류를 묻지 않는다 — 값의 모양이 이미 말하고 있다.
+        assert_eq!(credential_kind("sk-ant-api03-abc"), Credential::ApiKey);
+        assert_eq!(credential_kind("  sk-ant-oat01-abc"), Credential::ApiKey);
+        assert_eq!(credential_kind("eyJhbGciOi..."), Credential::OauthToken);
+        assert_eq!(credential_kind(""), Credential::OauthToken);
+    }
+
     #[test]
     fn the_wire_constants_are_the_documented_ones() {
         assert_eq!(ENDPOINT, "https://api.anthropic.com/v1/messages");

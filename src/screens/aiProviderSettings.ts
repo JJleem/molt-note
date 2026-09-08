@@ -618,7 +618,7 @@ const AI_CREDENTIAL_NOTICE: Record<AiCredentialState, AiCredentialNotice> = {
     text: '저장된 API 키가 없다.',
     // **없는 것을 실패처럼 말하지 않는다.** provider를 하나도 쓰지 않는 것이 정상 상태다.
     resolution:
-      '기기 밖에서 도는 provider는 키가 필요하다. 아래에 키를 붙여 넣거나, 이 기기에서 도는 provider를 고른다.',
+      '기기 밖에서 도는 provider는 자격증명이 필요하다. API 키든 access token이든 아래에 붙여 넣으면 되며, 어느 쪽인지는 앱이 값의 모양으로 안다. 또는 이 기기에서 도는 provider를 고른다.',
   },
 };
 
@@ -627,7 +627,7 @@ export function aiCredentialNotice(state: AiCredentialState): AiCredentialNotice
 }
 
 /** 입력란에 적히는 안내. **저장된 값이 여기 채워지는 일은 없다** (INV-7). */
-export const AI_KEY_INPUT_PLACEHOLDER = 'API 키를 붙여 넣는다';
+export const AI_KEY_INPUT_PLACEHOLDER = 'API 키 또는 access token을 붙여 넣는다';
 
 /** 넘긴 뒤 입력란이 비워진다는 사실을 먼저 알린다 — 사라진 것처럼 보이지 않게 한다. */
 export const AI_KEY_INPUT_NOTICE =

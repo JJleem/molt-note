@@ -121,11 +121,25 @@ impl NoteAiProvider for AnthropicProvider {
         let prompt = build_prompt(request.mode, request.transcript_text());
         let body = wire::request_body(&prompt, &model);
 
-        let headers: [HttpHeader<'_>; 3] = [
-            ("x-api-key", key.as_str()),
-            ("anthropic-version", wire::API_VERSION),
-            ("content-type", "application/json"),
-        ];
+        // **두 방식을 다 받는다** (2026-09-08). API 키와 OAuth access token은 서로 다른
+        // 헤더로 가며, 어느 쪽인지는 값의 모양이 말한다 — 사용자에게 묻지 않는다.
+        let bearer;
+        let headers: Vec<HttpHeader<'_>> = match wire::credential_kind(&key) {
+            wire::Credential::ApiKey => vec![
+                ("x-api-key", key.as_str()),
+                ("anthropic-version", wire::API_VERSION),
+                ("content-type", "application/json"),
+            ],
+            wire::Credential::OauthToken => {
+                bearer = format!("Bearer {key}");
+                vec![
+                    ("authorization", bearer.as_str()),
+                    (wire::OAUTH_BETA_HEADER, wire::OAUTH_BETA_VALUE),
+                    ("anthropic-version", wire::API_VERSION),
+                    ("content-type", "application/json"),
+                ]
+            }
+        };
 
         let response = self
             .transport
