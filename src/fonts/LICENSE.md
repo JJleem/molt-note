@@ -6,10 +6,16 @@
 
 | 파일 | 글꼴 | 출처 | 라이선스 |
 | --- | --- | --- | --- |
-| `PretendardVariable.woff2` | Pretendard Variable | npm `pretendard@1.3.9` | SIL Open Font License 1.1 |
-| `GowunBatang-Regular.woff2` | Gowun Batang | npm `@fontsource/gowun-batang@5.3.0` | SIL Open Font License 1.1 |
+| `WantedSansVariable.woff2` | Wanted Sans Variable | npm `wanted-sans@1.0.3` | SIL Open Font License 1.1 |
 
-둘 다 OFL 1.1이며 재배포와 임베딩이 허용된다.
+한글 제품 UI용 지오메트릭 산세리프다. 가변 글꼴 하나가 400~1000 굵기를 전부
+덮으므로 파일이 하나뿐이다 (1.2MB).
 
-**[미검증]** 각 프로젝트의 저작권 표기 전문은 이 저장소에 옮겨 적지 않았다. 배포
-빌드를 만들기 전에 원본 라이선스 파일을 함께 담을지 정해야 한다.
+**[미검증]** 저작권 표기 전문은 이 저장소에 옮겨 적지 않았다. 배포 빌드를 만들기
+전에 원본 라이선스 파일을 함께 담을지 정해야 한다.
+
+## 지나간 선택
+
+2026-09-09에 Pretendard(본문) + Gowun Batang(제목 명조)을 잠깐 썼다가 뺐다.
+한글 명조는 UI 크기에서 낡아 보이고, **굵기로 위계를 만드는** 지금 화법과 섞이지
+않았다. 두 글꼴이 하나가 되면서 2.4MB에서 1.2MB로 줄기도 했다.

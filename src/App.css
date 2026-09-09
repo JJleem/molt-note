@@ -1,17 +1,19 @@
 /*
  * Molt Note — **편집실 문서** (2026-09-09 운영자 결정).
  *
- * 이 앱이 하는 일은 거친 전사를 다듬어 회의록으로 만드는 것이다. 그래서 화면의 성격도
- * 편집실이다 — 종이빛 바탕, 잉크 글자, 그리고 **교정 빨강**.
+ * 한국 제품 앱의 화법이다 — **굵은 제목, 좁은 자간, 넉넉한 모서리, 강조색 하나.**
  *
  * ```text
- * 바탕   따뜻한 종이 (차가운 흰색이 아니다)
- * 글자   잉크 — 순수 검정이 아니라 갈색이 도는 검정
- * 강조   보라 하나뿐. 종이빛 위에서 잉크와 부딪히지 않고 또렷하다
- * 제목   명조 (Gowun Batang) — 문서라는 것을 글꼴이 먼저 말한다
- * 본문   Pretendard — 한글 UI에서 자간과 굵기가 제품 것으로 읽힌다
+ * 글꼴   Wanted Sans 하나. 한글 제품 UI용 지오메트릭 산세리프다
+ * 제목   굵게(700) · 자간 좁게 — 크기가 아니라 굵기가 위계를 만든다
+ * 본문   400. 제목과의 굵기 차이가 크기 차이보다 많은 일을 한다
  * 숫자   등폭 + tabular-nums — 타임코드와 dBFS는 자리가 흔들리면 안 된다
+ * 바탕   거의 흰색. 면과 면은 그림자와 모서리로 갈린다
+ * 강조   보라 하나뿐
  * ```
+ *
+ * **명조를 쓰지 않는다** (2026-09-09). 잠깐 제목에 두었다가 뺐다 — 한글 명조는 UI 크기에서
+ * 낡아 보이고, 굵기로 위계를 만드는 이 화법과 섞이지 않는다.
  *
  * ## 이 파일은 한글을 조판한다 (2026-09-08)
  *
@@ -26,16 +28,9 @@
  */
 
 @font-face {
-  font-family: 'Pretendard Variable';
-  src: url('./fonts/PretendardVariable.woff2') format('woff2-variations');
-  font-weight: 100 900;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: 'Gowun Batang';
-  src: url('./fonts/GowunBatang-Regular.woff2') format('woff2');
-  font-weight: 400;
+  font-family: 'Wanted Sans Variable';
+  src: url('./fonts/WantedSansVariable.woff2') format('woff2-variations');
+  font-weight: 400 1000;
   font-display: swap;
 }
 
@@ -46,10 +41,8 @@
    */
 
   --font-sans:
-    'Pretendard Variable', -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo',
+    'Wanted Sans Variable', -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo',
     'Segoe UI', 'Malgun Gothic', system-ui, sans-serif;
-  /* 제목과 읽는 면. **문서라는 것을 글꼴이 먼저 말한다.** */
-  --font-serif: 'Gowun Batang', 'Apple SD Gothic Neo', 'Nanum Myeongjo', serif;
   /* 재는 값 — 타임코드 · dBFS · 크기. 자리가 흔들리면 눈이 매번 다시 찾는다. */
   --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
 
@@ -68,7 +61,7 @@
   word-break: keep-all;
   overflow-wrap: anywhere;
 
-  --text: #22201c;
+  --text: #17171a;
   /*
    * 거드는 글자. **읽을 수 있는 회색이어야 한다** (요구 12의 합리적 대비).
    *
@@ -77,12 +70,12 @@
    * 분명히 조용하되 읽히지 않는 자리가 생기지 않게 한다. dark 쪽은 이미 5:1을 넘으므로
    * 그대로 둔다.
    */
-  --text-muted: #6d665d;
-  /* 종이. 차가운 흰색이 아니라 아주 옅게 따뜻하다 — 오래 읽어도 눈이 덜 시리다. */
-  --surface: #fdfcf9;
-  --surface-sidebar: #f4f1ea;
-  --hairline: #e3ded3;
-  --selected: #ebe6da;
+  --text-muted: #6b6b73;
+  /* 거의 흰색. 아주 옅게만 따뜻하다 — 순수 흰색은 오래 보면 눈이 시리다. */
+  --surface: #ffffff;
+  --surface-sidebar: #f7f7f8;
+  --hairline: #e8e8ea;
+  --selected: #f0eff2;
 
   /*
    * 타이포그래피 스케일 — 다섯 위계뿐이다 (§19 typography first).
@@ -107,9 +100,11 @@
 
   --type-display: 56px;
 
+  /* **굵기가 위계를 만든다.** 크기 차이만으로 가르면 화면이 밋밋해진다. */
   --weight-regular: 400;
   --weight-medium: 500;
   --weight-strong: 600;
+  --weight-heavy: 700;
 
   /*
    * 행간 — **한글 기준이다.**
@@ -128,7 +123,9 @@
    * 본문에는 걸지 않는다. 작은 글자의 자간을 건드리면 가독성이 떨어진다.
    */
 
-  --tracking-title: -0.01em;
+  --tracking-title: -0.025em;
+  /* 본문보다 조금 위의 것들 — 절 제목·버튼처럼 짧고 굵은 자리. */
+  --tracking-tight: -0.015em;
 
   /* 여백 스케일. 이 여섯 밖의 값을 새로 만들지 않는다. */
 
@@ -146,9 +143,9 @@
    * 무엇이 면인지 구분이 사라진다. 작은 것은 덜 둥글고, 면은 더 둥글다.
    */
 
-  --radius-sm: 4px;
-  --radius: 6px;
-  --radius-lg: 10px;
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-lg: 16px;
   --radius-pill: 999px;
 
   /*
@@ -197,7 +194,7 @@
   --accent: #6b3fa3;
   --accent-strong: #56308a;
   --accent-text: #5f3894;
-  --on-accent: #fdfcf9;
+  --on-accent: #ffffff;
   --success: #2f6b3c;
   --warning: #8a5a12;
   --danger: #a8342a;
@@ -219,13 +216,12 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    /* 어두운 쪽도 종이의 성격을 잃지 않는다 — 순수 검정이 아니라 잉크가 마른 색이다. */
-    --text: #ece7dd;
-    --text-muted: #9a9186;
-    --surface: #1b1a17;
-    --surface-sidebar: #161513;
-    --hairline: #322e28;
-    --selected: #282520;
+    --text: #f0f0f3;
+    --text-muted: #92929c;
+    --surface: #1b1b1f;
+    --surface-sidebar: #151519;
+    --hairline: #2e2e35;
+    --selected: #26262c;
 
     /* 어두운 표면 위에서 같은 역할을 하는 값. 면(`--accent`)과 글자(`--accent-text`)가
        여기서 갈라진다 — 면 위의 밝은 글자와 표면 위의 보라 글자가 동시에 읽혀야 한다. */
@@ -237,7 +233,7 @@
     --accent: #7d4fbb;
     --accent-strong: #9670cf;
     --accent-text: #b394e0;
-    --on-accent: #fdfcf9;
+    --on-accent: #ffffff;
     --success: #6fbf82;
     --warning: #d4a54a;
     --danger: #e2796d;
@@ -353,11 +349,15 @@ p.t-caption {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-1) var(--space-3);
+  /* 누르는 자리는 글자보다 넉넉해야 한다. 4px 세로 여백은 눌러 볼 생각이 안 드는 높이였다. */
+  padding: var(--space-2) var(--space-4);
   border: 1px solid transparent;
   border-radius: var(--radius);
   background: none;
   font-size: var(--type-body);
+  /* **버튼 글자는 굵다.** 이 화법에서 위계는 크기가 아니라 굵기가 만든다. */
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--tracking-tight);
   line-height: var(--line-normal);
   color: var(--text);
   cursor: default;
@@ -386,6 +386,7 @@ p.t-caption {
   border-color: var(--accent);
   box-shadow: var(--shadow-raised);
   color: var(--on-accent);
+  font-weight: var(--weight-heavy);
   font-weight: var(--weight-medium);
 }
 
@@ -440,13 +441,17 @@ p.t-caption {
 .input,
 .select {
   width: 100%;
-  padding: var(--space-1) var(--space-2);
+  /* 버튼과 같은 리듬이다. 입력칸만 얇으면 한 줄에 나란히 놓였을 때 어긋나 보인다. */
+  padding: var(--space-2) var(--space-3);
   border: 1px solid var(--hairline);
   border-radius: var(--radius);
   background-color: var(--surface);
   font-size: var(--type-body);
   line-height: var(--line-normal);
   color: var(--text);
+  transition:
+    border-color var(--ease),
+    box-shadow var(--ease);
 }
 
 .input:focus-visible,
@@ -646,10 +651,9 @@ p.loading {
 
 .sidebar__brand {
   margin: 0 var(--space-3) var(--space-5);
-  font-family: var(--font-serif);
   font-size: var(--type-section-title);
-  font-weight: var(--weight-regular);
-  letter-spacing: 0;
+  font-weight: var(--weight-heavy);
+  letter-spacing: var(--tracking-title);
   color: var(--text);
 }
 
@@ -716,11 +720,10 @@ p.loading {
 
 .header__title {
   margin: 0;
-  /* **문서라는 것을 글꼴이 먼저 말한다.** 화면 이름은 이 앱에서 가장 큰 한글이고,
-     그 자리에 명조가 오면 나머지를 읽는 태도가 정해진다. */
-  font-family: var(--font-serif);
+  /* 화면 이름은 이 앱에서 가장 큰 한글이다. **굵게 그리고 좁게** — 큰 한글은 자간을
+     좁혀야 낱말이 흩어지지 않고 덩어리로 읽힌다. */
   font-size: var(--type-page-title);
-  font-weight: var(--weight-regular);
+  font-weight: var(--weight-heavy);
   line-height: var(--line-tight);
   /* 화면 제목은 한글이다. 큰 한글은 조금 좁혀야 덩어리로 읽힌다. */
   letter-spacing: var(--tracking-title);
@@ -1389,11 +1392,10 @@ p.loading {
    * 노트의 각 절이 어디서 시작하는지를 밑줄 하나가 말하되, 글자 자체는 조용히 둔다 —
    * 제목이 본문보다 커지면 읽는 흐름이 끊긴다.
    */
-  border-bottom: 1px solid var(--accent);
-  font-family: var(--font-serif);
+  border-bottom: 2px solid var(--accent);
   font-size: var(--type-section-title);
-  font-weight: var(--weight-regular);
-  letter-spacing: 0;
+  font-weight: var(--weight-heavy);
+  letter-spacing: var(--tracking-tight);
   color: var(--text);
 }
 
@@ -1448,12 +1450,12 @@ p.loading {
   margin: 0 0 var(--space-4);
   padding-bottom: var(--space-2);
   border-bottom: 1px solid var(--hairline);
-  font-family: var(--font-serif);
   font-size: var(--type-section-title);
-  font-weight: var(--weight-regular);
-  /* 이 이름은 한글이다 (녹음 · 전사 · AI 제공자 …). 라틴 소형 라벨의 양수 자간을
-     한글에 걸면 낱말이 흩어져 헐거워 보인다. 걸지 않는다. */
-  color: var(--text-muted);
+  font-weight: var(--weight-heavy);
+  /* 이 이름은 한글이다 (녹음 · 전사 · AI 제공자 …). 라틴 소형 라벨의 **양수** 자간을
+     한글에 걸면 낱말이 흩어진다. 굵고 짧은 자리이므로 오히려 조금 좁힌다. */
+  letter-spacing: var(--tracking-tight);
+  color: var(--text);
 }
 
 /* 한 그룹 안의 부분. AI 그룹이 '연결된 provider'와 '스스로 세우는 로컬 provider'로 나뉜다
@@ -1484,6 +1486,8 @@ p.loading {
 .field__label {
   display: block;
   font-size: var(--type-body);
+  /* 무엇을 넣는 칸인지가 먼저 읽혀야 한다. */
+  font-weight: var(--weight-medium);
 }
 
 /* 레이블과 컨트롤은 한 덩어리다 — 그 사이가 다음 항목과의 사이보다 좁다. */
