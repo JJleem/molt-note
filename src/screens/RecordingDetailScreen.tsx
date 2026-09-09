@@ -962,7 +962,7 @@ function ExportPanel({
     <section className="share__panel">
       <h2 className="share__title">마크다운</h2>
 
-      {body.kind === 'loading' && <Loading text="Loading…" />}
+      {body.kind === 'loading' && <Loading text="읽는 중…" />}
 
       {body.kind === 'nothingToExport' && (
         // 재료가 아직 없는 것은 실패가 아니다 (§7.2).
@@ -1119,7 +1119,7 @@ function NotionPanel({
       {/* 요청이 거절된 사실은 전송 상태를 덮지 않고 그 옆에 남는다 (§13). */}
       {trouble !== null && <FailureNotice failure={trouble.failure} headline={trouble.headline} />}
 
-      {body.kind === 'loading' && <Loading text="Loading…" />}
+      {body.kind === 'loading' && <Loading text="읽는 중…" />}
 
       {body.kind === 'nothingToSend' && <EmptyState title={body.text} body={body.hint} />}
 
@@ -1375,7 +1375,7 @@ function AiNoteTab({
       {trouble !== null && <FailureNotice failure={trouble.failure} headline={trouble.headline} />}
 
       {/* 무엇을 만들 것인가 (§9.5). 지금 바꿀 수 있는지는 화면이 아니라 값이 말한다. */}
-      <div className="note__modes" role="group" aria-label="Note mode">
+      <div className="note__modes" role="group" aria-label="노트 종류">
         {layout.modes.map((choice) => (
           <button
             key={choice.mode}
@@ -1586,7 +1586,7 @@ function CopyItem({
     <div className="note__handoff-item">
       <p className="note__handoff-title">{item.label}</p>
 
-      {body.kind === 'loading' && <Loading text="Loading…" />}
+      {body.kind === 'loading' && <Loading text="읽는 중…" />}
 
       {body.kind === 'nothingToCopy' && (
         // 재료가 아직 없는 것은 실패가 아니다 (§7.2 · MH-5).
@@ -1673,7 +1673,7 @@ function AiExportItem({
     <div className="note__handoff-item">
       <p className="note__handoff-title">{item.label}</p>
 
-      {body.kind === 'loading' && <Loading text="Loading…" />}
+      {body.kind === 'loading' && <Loading text="읽는 중…" />}
 
       {body.kind === 'nothingToExport' && <EmptyState title={body.text} body={body.hint} />}
 

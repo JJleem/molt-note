@@ -473,7 +473,7 @@ export function SettingsScreen() {
             id="recordings-directory"
             type="text"
             className="input"
-            placeholder="Not set"
+            placeholder="지정 안 함"
             value={form.recordingsDirectory}
             onChange={(event) => edit({ recordingsDirectory: event.currentTarget.value })}
           />
@@ -523,7 +523,7 @@ export function SettingsScreen() {
             id="transcription-model"
             type="text"
             className="input"
-            placeholder="Not set"
+            placeholder="지정 안 함"
             value={form.transcriptionModel}
             onChange={(event) => edit({ transcriptionModel: event.currentTarget.value })}
           />
@@ -838,7 +838,7 @@ export function SettingsScreen() {
             id="notion-parent-page"
             type="text"
             className="input"
-            placeholder="Not set"
+            placeholder="지정 안 함"
             value={form.notionParentPageId}
             onChange={(event) => edit({ notionParentPageId: event.currentTarget.value })}
           />

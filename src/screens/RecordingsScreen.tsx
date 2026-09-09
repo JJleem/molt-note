@@ -90,7 +90,7 @@ export function RecordingsScreen({ navigate }: ScreenProps) {
 
   return (
     <div className="screen">
-      <ul className="list" aria-label="Recordings">
+      <ul className="list" aria-label="녹음 목록">
         {view.items.map((item) => (
           <li key={item.id}>
             <button
