@@ -468,6 +468,45 @@ export function aiSettingsChanged(form: SettingsForm, saved: AiSettingsSnapshot 
   );
 }
 
+/**
+ * 확인 버튼이 지금 무엇이라고 말하고, 눌리는가.
+ *
+ * **저장하지 않은 값이 있으면 확인을 막는다.** 막지 않으면 확인은 저장된 값 — 즉 사용자가
+ * 방금 고른 것이 아닌 다른 것 — 에게 물어보고, 그 답이 조용히 돌아온다. 화면에는
+ * 아무 일도 일어나지 않은 것처럼 보인다. **2026-09-09에 실제로 그 일이 있었다.**
+ *
+ * 안내 문구를 하나 더 놓는 것으로는 부족했다. 문구는 이미 있었고, 그래도 눌렸다.
+ * **버튼 자신이 말해야 한다.**
+ */
+export interface AiCheckControl {
+  readonly label: string;
+  readonly enabled: boolean;
+}
+
+/** 확인을 누르기 전에 저장부터 해야 한다는 말. */
+export const AI_CHECK_SAVE_FIRST_LABEL = '먼저 저장해야 확인할 수 있다';
+
+/** 확인 버튼의 평소 이름. */
+export const AI_CHECK_LABEL = 'AI provider 확인';
+
+/** 확인이 나가 있는 동안의 이름. */
+export const AI_CHECK_RUNNING_LABEL = '확인 중…';
+
+export function aiCheckControl(
+  form: SettingsForm,
+  saved: AiSettingsSnapshot | null,
+  checking: boolean,
+): AiCheckControl {
+  if (checking) {
+    return { label: AI_CHECK_RUNNING_LABEL, enabled: false };
+  }
+  // 무엇이 저장돼 있는지 아직 모르면 막지 않는다 — 모르는 것을 근거로 사용자를 막지 않는다.
+  if (aiSettingsChanged(form, saved)) {
+    return { label: AI_CHECK_SAVE_FIRST_LABEL, enabled: false };
+  }
+  return { label: AI_CHECK_LABEL, enabled: true };
+}
+
 /** 주소 입력란에 적히는 안내. **기본 주소를 여기에 옮겨 적지 않는다.** */
 export const AI_BASE_URL_PLACEHOLDER = '비워 두면 기본 주소를 쓴다';
 

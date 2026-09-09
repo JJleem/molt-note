@@ -36,6 +36,7 @@ import {
   AI_KEY_INPUT_NOTICE,
   AI_KEY_INPUT_PLACEHOLDER,
   aiProviderLocality,
+  aiCheckControl,
   aiSettingsChanged,
   aiSettingsSnapshot,
   aiTransferNotice,
@@ -451,6 +452,7 @@ export function SettingsScreen() {
   const transfer = aiTransferNotice(aiProviderLocality(form.aiProvider));
   const modelNotice = aiModelNotice(form.aiModel, connection);
   const staleCheck = aiSettingsChanged(form, savedAi);
+  const checkControl = aiCheckControl(form, savedAi, connection.kind === 'checking');
 
   // Notion 쪽도 같다 — 저장 여부의 문구도, destination에 대한 말도, 확인 결과의 갈래도 전부
   // 순수 모듈이 정한다 (`notionSettings.ts`).
@@ -679,13 +681,16 @@ export function SettingsScreen() {
               </label>
               <p className="hint">{AI_BASE_URL_NOTICE}</p>
 
+              {/* 저장하지 않은 값이 있으면 **버튼이 직접 그렇게 말하고 눌리지 않는다.**
+                  안내 문구만 두었을 때 눌러도 조용히 저장된 값에게 물어보는 일이 있었다
+                  (2026-09-09). 규칙은 여기 없고 `aiCheckControl`에 있다. */}
               <button
                 type="button"
                 className="btn btn--secondary"
-                disabled={connection.kind === 'checking'}
+                disabled={!checkControl.enabled}
                 onClick={checkProvider}
               >
-                {connection.kind === 'checking' ? '확인 중…' : 'AI provider 확인'}
+                {checkControl.label}
               </button>
               <p className="hint">{AI_CHECK_USES_SAVED_SETTINGS}</p>
               {staleCheck && (

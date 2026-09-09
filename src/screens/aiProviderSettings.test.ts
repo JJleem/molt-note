@@ -12,7 +12,11 @@ import type { AiProviderStatus, Settings } from '../ipc/types';
 import {
   AI_BASE_URL_NOTICE,
   AI_CHECK_FAILED_TEXT,
+  AI_CHECK_LABEL,
+  AI_CHECK_RUNNING_LABEL,
+  AI_CHECK_SAVE_FIRST_LABEL,
   AI_IS_OPTIONAL_TEXT,
+  aiCheckControl,
   AI_KEY_INPUT_NOTICE,
   AI_NOT_CHECKED_TEXT,
   AI_PROVIDER_HAS_NO_MODELS_TEXT,
@@ -48,6 +52,7 @@ import {
   needsApiKey,
   type AiConnection,
 } from './aiProviderSettings';
+import type { AiSettingsSnapshot } from './aiProviderSettings';
 import {
   editedSettings,
   loadedSettings,
@@ -589,5 +594,56 @@ describe('AI provider 자격증명 (2026-09-08 · PRODUCT-SPEC §16.1)', () => {
     expect(notice).not.toBeNull();
     expect(notice?.transcriptText.length).toBeGreaterThan(0);
     expect(notice?.audioText.length).toBeGreaterThan(0);
+  });
+});
+
+describe('확인 버튼이 순서를 말한다 (2026-09-09)', () => {
+  // 지키려는 것: **누르면 아무 일도 안 일어나는 버튼이 없다.**
+  // 확인은 저장된 설정에게 묻는다. 저장하지 않은 값이 있는 채로 누르면 사용자가 방금 고른
+  // 것이 아닌 다른 것에 대한 답이 조용히 돌아온다 — 실제로 그 일이 있었고, 안내 문구가
+  // 이미 있었는데도 일어났다.
+
+  const chose = (aiProvider: string, aiModel: string): SettingsForm =>
+    form({ aiProvider, aiModel });
+
+  const saved = (provider: string, model: string): AiSettingsSnapshot => ({
+    provider,
+    baseUrl: '',
+    model,
+  });
+
+  it('저장된 것과 같으면 눌린다', () => {
+    const control = aiCheckControl(chose('anthropic', 'claude-sonnet-5'), saved('anthropic', 'claude-sonnet-5'), false);
+    expect(control.enabled).toBe(true);
+    expect(control.label).toBe(AI_CHECK_LABEL);
+  });
+
+  it('고르기만 하고 저장하지 않았으면 눌리지 않고, 왜인지 말한다', () => {
+    const control = aiCheckControl(chose('anthropic', ''), saved('', ''), false);
+    expect(control.enabled).toBe(false);
+    expect(control.label).toBe(AI_CHECK_SAVE_FIRST_LABEL);
+    // 버튼이 스스로 말해야 한다 — 옆의 안내 문구로는 부족했다.
+    expect(control.label).not.toBe(AI_CHECK_LABEL);
+  });
+
+  it('모델만 바꾸고 저장하지 않아도 막는다', () => {
+    const control = aiCheckControl(
+      chose('anthropic', 'claude-opus-5'),
+      saved('anthropic', 'claude-sonnet-5'),
+      false,
+    );
+    expect(control.enabled).toBe(false);
+  });
+
+  it('무엇이 저장돼 있는지 아직 모르면 막지 않는다', () => {
+    // 모르는 것을 근거로 사용자를 막지 않는다.
+    const control = aiCheckControl(chose('anthropic', 'claude-sonnet-5'), null, false);
+    expect(control.enabled).toBe(true);
+  });
+
+  it('확인이 나가 있는 동안에는 다시 누를 수 없다', () => {
+    const control = aiCheckControl(chose('anthropic', 'claude-sonnet-5'), saved('anthropic', 'claude-sonnet-5'), true);
+    expect(control.enabled).toBe(false);
+    expect(control.label).toBe(AI_CHECK_RUNNING_LABEL);
   });
 });
