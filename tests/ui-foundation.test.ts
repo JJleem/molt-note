@@ -423,6 +423,16 @@ function isMotion(value: string): boolean {
   return /^\d*\.?\d+m?s\b/.test(value.trim());
 }
 
+/**
+ * 값이 **글꼴 목록**인가 (2026-09-09).
+ *
+ * 색도 크기도 아니고 테마와도 무관하다. 어두운 화면에서 글꼴이 바뀔 이유가 없으므로
+ * `dark 블록이 색만 다시 정의한다`가 그대로 이것도 막는다.
+ */
+function isFontStack(value: string): boolean {
+  return /(?:^|,)\s*(?:'[^']+'|"[^"]+"|[-\w]+)/.test(value) && /sans-serif|serif|monospace|system-ui/.test(value);
+}
+
 describe('새로 더한 색 토큰이 dark 블록에도 있다 (R-1 · Out of Scope)', () => {
   // 지키려는 것: **이미 있던 dark mode 장치를 깨뜨리지 않는다.** dark는 이 Phase의 목표가
   // 아니다 — 목표가 아니라는 것과 부숴도 된다는 것은 다르다. 색 토큰 하나가 light에만 생기면
@@ -433,7 +443,7 @@ describe('새로 더한 색 토큰이 dark 블록에도 있다 (R-1 · Out of Sc
     // 않는 값이 들어오면 그 토큰은 두 검사 어디에도 걸리지 않고 조용히 빠져나간다.
     for (const [token, value] of [...lightRootTokens, ...darkRootTokens]) {
       expect(
-        isColor(value) || isScale(value) || isMotion(value),
+        isColor(value) || isScale(value) || isMotion(value) || isFontStack(value),
         `${token}의 형태를 이 검사가 모른다: ${value}`,
       ).toBe(
         true,

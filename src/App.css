@@ -1,25 +1,59 @@
 /*
- * §19 — minimal · macOS-like · calm · typography first.
- * 장식용 card·shadow·gradient를 두지 않는다. 구분은 hairline과 여백으로만 한다.
+ * Molt Note — **편집실 문서** (2026-09-09 운영자 결정).
+ *
+ * 이 앱이 하는 일은 거친 전사를 다듬어 회의록으로 만드는 것이다. 그래서 화면의 성격도
+ * 편집실이다 — 종이빛 바탕, 잉크 글자, 그리고 **교정 빨강**.
+ *
+ * ```text
+ * 바탕   따뜻한 종이 (차가운 흰색이 아니다)
+ * 글자   잉크 — 순수 검정이 아니라 갈색이 도는 검정
+ * 강조   교정 빨강 하나뿐. 편집자가 원고에 긋는 그 색이다
+ * 제목   명조 (Gowun Batang) — 문서라는 것을 글꼴이 먼저 말한다
+ * 본문   Pretendard — 한글 UI에서 자간과 굵기가 제품 것으로 읽힌다
+ * 숫자   등폭 + tabular-nums — 타임코드와 dBFS는 자리가 흔들리면 안 된다
+ * ```
  *
  * ## 이 파일은 한글을 조판한다 (2026-09-08)
  *
- * 화면의 모든 문장이 한국어가 됐다. 값들이 라틴 기준으로 잡혀 있었으므로 여기서 맞춘다 —
+ * 화면의 모든 문장이 한국어다. 값들이 라틴 기준으로 잡혀 있었으므로 여기서 맞춘다 —
  * 한글은 네모꼴이라 같은 크기·같은 행간에서 라틴보다 **훨씬 빽빽해 보인다.**
  * 바꾼 것은 토큰 층뿐이며, 모든 화면이 토큰만 쓰므로 규칙이 한 자리에 남는다.
  */
 
+/*
+ * 글꼴은 **앱 안에 들어 있다.** 외부로 요청을 보내지 않는다 — 이 앱은 오프라인에서
+ * 그대로 돌아야 하고, 무엇보다 녹음 도구가 글꼴 하나 때문에 네트워크를 켤 이유가 없다.
+ */
+
+@font-face {
+  font-family: 'Pretendard Variable';
+  src: url('./fonts/PretendardVariable.woff2') format('woff2-variations');
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Gowun Batang';
+  src: url('./fonts/GowunBatang-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-display: swap;
+}
+
 :root {
   /*
-   * 시스템 글꼴만 쓴다 — 웹폰트를 들이지 않는다 (§19 macOS-like · 선입금 금지).
-   *
-   * macOS에서 `-apple-system`은 한글을 Apple SD Gothic Neo로 그린다. 그것이 이 플랫폼의
-   * 본문 글꼴이며, 다른 것을 얹으면 OS와 어긋난다. Windows 자리(`Segoe UI`) 뒤에
-   * 한글 본문 글꼴을 이름으로 두어 그쪽에서도 폴백이 라틴 글꼴에 걸리지 않게 한다.
+   * 세 글꼴이 역할을 나눈다. **폴백은 전부 실제로 한글을 그릴 수 있는 것으로 둔다** —
+   * 번들 글꼴이 못 뜨는 순간 라틴 글꼴에 걸리면 화면이 통째로 무너진다.
    */
-  font-family:
-    -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Segoe UI',
-    'Malgun Gothic', system-ui, 'Helvetica Neue', sans-serif;
+
+  --font-sans:
+    'Pretendard Variable', -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo',
+    'Segoe UI', 'Malgun Gothic', system-ui, sans-serif;
+  /* 제목과 읽는 면. **문서라는 것을 글꼴이 먼저 말한다.** */
+  --font-serif: 'Gowun Batang', 'Apple SD Gothic Neo', 'Nanum Myeongjo', serif;
+  /* 재는 값 — 타임코드 · dBFS · 크기. 자리가 흔들리면 눈이 매번 다시 찾는다. */
+  --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
+
+  font-family: var(--font-sans);
   /* 기준 크기는 스케일의 body 칸이다 — 두 벌이 되지 않게 여기서도 같은 토큰을 쓴다. */
   font-size: var(--type-body);
   line-height: var(--line-normal);
@@ -34,7 +68,7 @@
   word-break: keep-all;
   overflow-wrap: anywhere;
 
-  --text: #1c1c1e;
+  --text: #22201c;
   /*
    * 거드는 글자. **읽을 수 있는 회색이어야 한다** (요구 12의 합리적 대비).
    *
@@ -43,11 +77,12 @@
    * 분명히 조용하되 읽히지 않는 자리가 생기지 않게 한다. dark 쪽은 이미 5:1을 넘으므로
    * 그대로 둔다.
    */
-  --text-muted: #6b6b70;
-  --surface: #ffffff;
-  --surface-sidebar: #f4f4f5;
-  --hairline: #e0e0e2;
-  --selected: #e4e4e7;
+  --text-muted: #6d665d;
+  /* 종이. 차가운 흰색이 아니라 아주 옅게 따뜻하다 — 오래 읽어도 눈이 덜 시리다. */
+  --surface: #fdfcf9;
+  --surface-sidebar: #f4f1ea;
+  --hairline: #e3ded3;
+  --selected: #ebe6da;
 
   /*
    * 타이포그래피 스케일 — 다섯 위계뿐이다 (§19 typography first).
@@ -55,7 +90,9 @@
    * 새 크기를 발명하지 않았다.
    */
 
-  --type-page-title: 20px;
+  /* 편집실 문서로 바꾸면서 한 칸 올렸다 (2026-09-09). 명조로 그려지는 자리이고,
+     화면 이름이 문서 제목처럼 읽혀야 한다. */
+  --type-page-title: 24px;
   --type-section-title: 16px;
   --type-body: 14px;
   --type-secondary: 13px;
@@ -146,13 +183,22 @@
    * 상태색은 거들 뿐이며 상태를 색으로만 말하지 않는다 — 언제나 글자가 함께 온다 (요구 12).
    */
 
-  --accent: #0060df;
-  --accent-strong: #0050bb;
-  --accent-text: #0060df;
-  --on-accent: #ffffff;
-  --success: #1a7f37;
-  --warning: #9a6700;
-  --danger: #c0362c;
+  /*
+   * **교정 빨강 하나뿐이다.** 편집자가 원고에 긋는 그 색이며, 이 화면에서 주 동작 ·
+   * 지금 보고 있는 자리 · 녹음 중이라는 신호를 전부 이 색 하나가 맡는다.
+   *
+   * 빨강을 주색으로 두면 위험(`--danger`)과 부딪힐 수 있다. 그래서 위험 쪽을 더 어둡고
+   * 탁한 벽돌색으로 내려 두 색이 나란히 있어도 갈리게 했다 — 그리고 이 저장소는 색
+   * 하나로만 뜻을 나르지 않는다 (요구 12). 언제나 글자가 함께 온다.
+   */
+
+  --accent: #9b2c22;
+  --accent-strong: #7d211a;
+  --accent-text: #8f2a20;
+  --on-accent: #fdfcf9;
+  --success: #2f6b3c;
+  --warning: #8a5a12;
+  --danger: #6f2820;
 
   color: var(--text);
   background-color: var(--surface);
@@ -171,27 +217,28 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --text: #f2f2f7;
-    --text-muted: #8e8e93;
-    --surface: #1c1c1e;
-    --surface-sidebar: #242426;
-    --hairline: #3a3a3c;
-    --selected: #38383a;
+    /* 어두운 쪽도 종이의 성격을 잃지 않는다 — 순수 검정이 아니라 잉크가 마른 색이다. */
+    --text: #ece7dd;
+    --text-muted: #9a9186;
+    --surface: #1b1a17;
+    --surface-sidebar: #161513;
+    --hairline: #322e28;
+    --selected: #282520;
 
     /* 어두운 표면 위에서 같은 역할을 하는 값. 면(`--accent`)과 글자(`--accent-text`)가
-       여기서 갈라진다 — 면 위의 흰 글자와 표면 위의 파란 글자가 동시에 읽혀야 한다. */
+       여기서 갈라진다 — 면 위의 밝은 글자와 표면 위의 붉은 글자가 동시에 읽혀야 한다. */
 
     /* 어두운 표면 위에서 옅은 검정은 보이지 않는다. 같은 위계를 내려면 더 진해야 한다. */
     --shadow-raised: 0 1px 2px rgba(0, 0, 0, 0.4), 0 1px 1px rgba(0, 0, 0, 0.3);
     --shadow-overlay: 0 8px 24px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.4);
 
-    --accent: #0a6cff;
-    --accent-strong: #3b8bff;
-    --accent-text: #6aa9ff;
-    --on-accent: #ffffff;
-    --success: #3fb950;
-    --warning: #d29922;
-    --danger: #ff6b5e;
+    --accent: #b8392c;
+    --accent-strong: #d2503f;
+    --accent-text: #e8877a;
+    --on-accent: #fdfcf9;
+    --success: #6fbf82;
+    --warning: #d4a54a;
+    --danger: #a8564c;
   }
 }
 
@@ -596,11 +643,12 @@ p.loading {
 }
 
 .sidebar__brand {
-  margin: 0 var(--space-2) var(--space-4);
-  font-size: var(--type-secondary);
-  font-weight: var(--weight-strong);
-  letter-spacing: 0.02em;
-  color: var(--text-muted);
+  margin: 0 var(--space-3) var(--space-5);
+  font-family: var(--font-serif);
+  font-size: var(--type-section-title);
+  font-weight: var(--weight-regular);
+  letter-spacing: 0;
+  color: var(--text);
 }
 
 .sidebar__list {
@@ -666,8 +714,11 @@ p.loading {
 
 .header__title {
   margin: 0;
+  /* **문서라는 것을 글꼴이 먼저 말한다.** 화면 이름은 이 앱에서 가장 큰 한글이고,
+     그 자리에 명조가 오면 나머지를 읽는 태도가 정해진다. */
+  font-family: var(--font-serif);
   font-size: var(--type-page-title);
-  font-weight: var(--weight-strong);
+  font-weight: var(--weight-regular);
   line-height: var(--line-tight);
   /* 화면 제목은 한글이다. 큰 한글은 조금 좁혀야 덩어리로 읽힌다. */
   letter-spacing: var(--tracking-title);
@@ -853,10 +904,12 @@ p.loading {
 
 .recording__elapsed {
   margin: 0;
+  /* **재는 값이다.** 등폭이 아니면 초가 넘어갈 때마다 숫자 폭이 달라져 눈이 흔들린다. */
+  font-family: var(--font-mono);
   font-size: var(--type-display);
   font-weight: 300;
   font-variant-numeric: tabular-nums;
-  letter-spacing: 0.01em;
+  letter-spacing: -0.02em;
 }
 
 /*
@@ -1142,7 +1195,8 @@ p.loading {
 /* transcript 탭 (§5 C · phase-prompt/03 요구 6) */
 
 .transcript {
-  max-width: 640px;
+  /* 한글 본문의 읽기 좋은 한 줄 길이. 라틴 65자 기준을 한글로 옮기면 이 근처다. */
+  max-width: 680px;
 }
 
 /* 문장 목록. 번호도 강조도 두지 않는다 — 읽는 것은 문장이다 (§19). */
@@ -1185,6 +1239,8 @@ p.loading {
 /* timestamp는 자리를 알려 줄 뿐이므로 문장보다 조용하다. 자릿수가 흔들리지 않게 고정폭으로. */
 
 .transcript__time {
+  /* 타임코드는 세로로 수백 줄 쌓인다. 자리가 흔들리면 훑어 내려가기가 어려워진다. */
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   font-size: var(--type-caption);
   color: var(--text-muted);
@@ -1299,15 +1355,22 @@ p.loading {
 }
 
 .note__section {
-  margin-bottom: var(--space-4);
+  margin-bottom: var(--space-5);
 }
 
 .note__section-title {
-  margin: 0 0 var(--space-1);
-  font-size: var(--type-secondary);
-  font-weight: var(--weight-strong);
-  letter-spacing: 0.02em;
-  color: var(--text-muted);
+  margin: 0 0 var(--space-2);
+  padding-bottom: var(--space-1);
+  /*
+   * **편집자가 원고에 그은 줄이다.** 노트의 각 절이 어디서 시작하는지를 색 하나가
+   * 말하되, 글자 자체는 조용히 둔다 — 제목이 본문보다 커지면 읽는 흐름이 끊긴다.
+   */
+  border-bottom: 1px solid var(--accent);
+  font-family: var(--font-serif);
+  font-size: var(--type-section-title);
+  font-weight: var(--weight-regular);
+  letter-spacing: 0;
+  color: var(--text);
 }
 
 .note__text {
@@ -1328,6 +1391,9 @@ p.loading {
 
 .note__provenance {
   margin: var(--space-4) 0 var(--space-3);
+  /* 모델 이름과 식별자다. 사람이 대조하는 값이므로 등폭이 읽기 쉽다. */
+  font-family: var(--font-mono);
+  margin-block-start: var(--space-4);
   font-size: var(--type-caption);
   color: var(--text-muted);
   word-break: break-all;
@@ -1358,8 +1424,9 @@ p.loading {
   margin: 0 0 var(--space-4);
   padding-bottom: var(--space-2);
   border-bottom: 1px solid var(--hairline);
-  font-size: var(--type-secondary);
-  font-weight: var(--weight-strong);
+  font-family: var(--font-serif);
+  font-size: var(--type-section-title);
+  font-weight: var(--weight-regular);
   /* 이 이름은 한글이다 (녹음 · 전사 · AI 제공자 …). 라틴 소형 라벨의 양수 자간을
      한글에 걸면 낱말이 흩어져 헐거워 보인다. 걸지 않는다. */
   color: var(--text-muted);
