@@ -100,12 +100,15 @@ interface SelectableAiProvider {
 const SELECTABLE_AI_PROVIDERS: readonly SelectableAiProvider[] = [
   { id: 'ollama', name: 'Ollama', locality: 'local' },
   { id: 'anthropic', name: 'Claude (Anthropic)', locality: 'external' },
+  // 같은 서비스를 부르지만 **과금 주체가 다르다** — 이쪽은 이 기기의 CLI가 알아서 한다.
+  // 그래서 API 키 칸과 무관하다. 전사는 그래도 기기 밖으로 나가므로 external이다.
+  { id: 'claude-cli', name: 'Claude Code (구독)', locality: 'external' },
 ];
 
 /** 선택지에 붙는 locality 표시. **provider의 값에서 나오며 문구가 값을 정하지 않는다.** */
 const LOCALITY_CHOICE_LABEL: Record<AiProviderLocality, string> = {
-  local: 'runs on this device',
-  external: 'runs outside this device',
+  local: '이 기기에서 돈다',
+  external: '기기 밖에서 돈다',
 };
 
 /**

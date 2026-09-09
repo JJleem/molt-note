@@ -120,15 +120,17 @@ describe('provider 선택지', () => {
     expect(first.usable).toBe(true);
   });
 
-  it('지금 고를 수 있는 provider는 둘이고, 하나는 기기 밖으로 나간다', () => {
-    // 2026-09-08에 하나가 늘었다 (PRODUCT-SPEC §16.1). **목록은 `provider_for`가 실제로
-    // 세울 수 있는 것과 같아야 한다** — 여기에만 있고 backend에 없으면 사용자가 고를 수는
-    // 있는데 아무 일도 일어나지 않는 항목이 생긴다.
+  it('지금 고를 수 있는 provider는 셋이고, 둘은 기기 밖으로 나간다', () => {
+    // 2026-09-08에 하나(anthropic), 2026-09-09에 하나(claude-cli)가 늘었다.
+    // **목록은 `provider_for`가 실제로 세울 수 있는 것과 같아야 한다** — 여기에만 있고
+    // backend에 없으면 사용자가 고를 수는 있는데 아무 일도 일어나지 않는 항목이 생긴다.
     const values = aiProviderChoices(NO_AI_PROVIDER).map((choice) => choice.value);
 
-    expect(values).toEqual([NO_AI_PROVIDER, 'ollama', 'anthropic']);
+    expect(values).toEqual([NO_AI_PROVIDER, 'ollama', 'anthropic', 'claude-cli']);
     expect(aiProviderLocality('ollama')).toBe('local');
     expect(aiProviderLocality('anthropic')).toBe('external');
+    // CLI를 거쳐도 전사는 기기 밖으로 나간다. 로컬로 적으면 화면이 거짓말을 한다.
+    expect(aiProviderLocality('claude-cli')).toBe('external');
   });
 
   /**
@@ -180,7 +182,7 @@ describe('provider 선택지', () => {
     const ollama = aiProviderChoices('ollama').find((choice) => choice.value === 'ollama');
 
     expect(ollama?.locality).toBe('local');
-    expect(ollama?.label).toContain('runs on this device');
+    expect(ollama?.label).toContain('이 기기에서 돈다');
   });
 });
 
@@ -200,7 +202,7 @@ describe('구역의 두 부분 (요구 7 · ADR-0010 §4.3)', () => {
       expect(choice, '목록에 없는 provider가 이 부분에 있다').toBeDefined();
       expect(choice?.locality).toBe('local');
       expect(setup.title).toBe(`${choice?.label}${OPTIONAL_TITLE_SUFFIX}`);
-      expect(setup.title).toContain('runs on this device');
+      expect(setup.title).toContain('이 기기에서 돈다');
     }
   });
 

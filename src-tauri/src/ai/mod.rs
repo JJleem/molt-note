@@ -42,6 +42,7 @@
 //! 그 아래(벤더)는 서로를 알지 않는다.
 
 pub mod anthropic;
+pub mod claude_cli;
 pub mod note;
 pub mod ollama;
 pub mod prompt;
@@ -115,6 +116,12 @@ pub fn provider_for(settings: &Settings) -> Option<Arc<dyn NoteAiProvider>> {
             settings.ai_model.clone().unwrap_or_default(),
             crate::platform::secret_store::app_secret_store(),
             Arc::new(crate::net::UreqTransport::new()),
+        ))),
+        // **자격증명을 만지지 않는 갈래다.** 이 기기의 CLI가 자기 인증을 하고, 이 앱은
+        // 프롬프트를 넣고 결과를 읽을 뿐이다. 전사는 그래도 기기 밖으로 나간다.
+        claude_cli::PROVIDER_ID => Some(Arc::new(claude_cli::ClaudeCliProvider::new(
+            settings.ai_model.clone().unwrap_or_default(),
+            Arc::new(claude_cli::SystemCommandRunner::new()),
         ))),
         _ => None,
     }

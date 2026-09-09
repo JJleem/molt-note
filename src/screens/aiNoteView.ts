@@ -284,9 +284,9 @@ export interface NoteProviderNotice {
 
 /** **audio는 어느 쪽에서도 전송되지 않는다** (INV-6). 나가는 것은 전사 텍스트뿐이다 (§9.6). */
 const LOCALITY_TEXT: Record<AiProviderLocality, string> = {
-  local: 'runs on this device — the transcript text does not leave it. Audio is never sent.',
+  local: '이 기기에서 돈다 — 전사 텍스트가 기기를 벗어나지 않는다. 오디오는 어떤 경우에도 보내지 않는다.',
   external:
-    'runs outside this device — the transcript text is sent to it. Audio is never sent (INV-6).',
+    '기기 밖에서 돈다 — 전사 텍스트가 그쪽으로 간다. 오디오는 어떤 경우에도 보내지 않는다 (INV-6).',
 };
 
 function providerNotice(status: AiProviderStatus): NoteProviderNotice | null {

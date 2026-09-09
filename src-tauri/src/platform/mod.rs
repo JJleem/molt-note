@@ -22,6 +22,7 @@
 
 pub mod app_data_dir;
 pub mod clock;
+pub mod command_runner;
 pub mod file_manager;
 pub mod microphone;
 pub mod secret_store;

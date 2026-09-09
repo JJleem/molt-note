@@ -651,16 +651,16 @@ describe('전사가 어디로 가는가 (§12 · INV-5)', () => {
   it('로컬 provider는 기기를 떠나지 않는다고 말한다', () => {
     const view = aiNoteTab(input());
     expect(view.provider?.locality).toBe('local');
-    expect(view.provider?.label).toContain('does not leave it');
-    expect(view.provider?.label).toContain('Audio is never sent');
+    expect(view.provider?.label).toContain('기기를 벗어나지 않는다');
+    expect(view.provider?.label).toContain('오디오는 어떤 경우에도 보내지 않는다');
   });
 
   it('외부 provider는 전사가 나간다고 말한다 — audio는 어느 쪽이든 나가지 않는다', () => {
     const view = aiNoteTab(
       input({ provider: provider({ providerName: 'Some Cloud', locality: 'external' }) }),
     );
-    expect(view.provider?.label).toContain('is sent to it');
-    expect(view.provider?.label).toContain('Audio is never sent');
+    expect(view.provider?.label).toContain('전사 텍스트가 그쪽으로 간다');
+    expect(view.provider?.label).toContain('오디오는 어떤 경우에도 보내지 않는다');
   });
 
   it('고른 provider가 없으면 할 말이 없다', () => {

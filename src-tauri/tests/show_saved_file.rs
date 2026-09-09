@@ -30,6 +30,18 @@ use molt_note_lib::platform::file_manager::testing::RecordedFileManager;
 /// 이 경계가 사는 유일한 파일. 3번 각도의 대상이다.
 const BOUNDARY: &str = "src/platform/file_manager.rs";
 
+/// **프로세스를 띄워도 되는 자리 전부** (INV-10).
+///
+/// 닫힌 목록이다. 여기 없는 파일이 프로세스를 띄우면 아래 검사가 깨진다 — 늘리려면
+/// 이 목록을 고쳐야 하고, 그러면 그 결정이 diff에 남는다.
+///
+/// 2026-09-09에 하나가 늘었다: 이 기기의 CLI로 AI 노트를 만드는 경로
+/// (`ai::claude_cli`)가 그 실행을 여기에 맡긴다.
+const MAY_SPAWN_PROCESSES: [&str; 2] = [
+    "src/platform/file_manager.rs",
+    "src/platform/command_runner.rs",
+];
+
 /// 그 경계를 쓰는 유일한 자리. 여기서만 무엇을 열어도 되는지 판정한다.
 const CALLER: &str = "src/commands/saved_file.rs";
 
@@ -221,16 +233,26 @@ fn os_calls_and_platform_branching_live_only_inside_the_boundary() {
     // 주석은 검사 대상이 아니다 — 이 규약을 설명하는 문장이 그 이름을 쓰기 때문이다.
     for path in rust_sources(Path::new("src")) {
         let relative = relative(&path);
-        if relative == BOUNDARY {
+        if MAY_SPAWN_PROCESSES.contains(&relative.as_str()) {
             continue;
         }
 
         for (number, line) in code_lines(&path) {
             assert!(
                 !line.contains("process::Command") && !line.contains("Command::new"),
-                "{relative}:{number}이 프로세스를 실행한다 (INV-10)"
+                "{relative}:{number}이 프로세스를 실행한다 (INV-10). \
+                 띄워도 되는 자리는 {MAY_SPAWN_PROCESSES:?} 뿐이다"
             );
         }
+    }
+
+    // 목록에 적힌 파일이 실제로 있어야 한다. 사라진 이름이 남아 있으면 그 자리는 검사
+    // 없이 열려 있는 것과 같다.
+    for allowed in MAY_SPAWN_PROCESSES {
+        assert!(
+            Path::new(allowed).exists(),
+            "{allowed}이 없다 — 목록에서 지우거나 파일을 되살린다",
+        );
     }
 
     // 그리고 그 파일 안에는 실제로 세 자리가 다 있다 — macOS · Windows · 그 밖.
