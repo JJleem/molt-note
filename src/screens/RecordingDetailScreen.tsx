@@ -202,7 +202,17 @@ const NOTION_REFRESH_MS = 2_000;
  * (`phase-prompt/02-reliable-recording.md`의 Human Review).
  */
 export function RecordingDetailScreen({ route, goBack }: ScreenProps) {
-  const [tab, setTab] = useState<Tab>('Transcript');
+  /*
+   * **여는 순간 보이는 것은 노트다** (2026-09-09).
+   *
+   * 전사가 기본이었다. 그래서 녹음을 열면 원본 문장 수백 줄이 먼저 뜨고, 노트를 만드는
+   * 버튼은 보이지 않는 탭 안에 있었다 — 사용자가 "어떻게 AI 노트를 쓰게 하냐"고 물었다.
+   *
+   * 노트가 이 제품이 만드는 것이고 전사는 그 재료다. 재료를 먼저 보여 줄 이유가 없다.
+   * **AI를 강요하는 것이 아니다** (INV-8) — provider를 고르지 않았으면 그 탭은
+   * "고르지 않았다"고 조용히 말할 뿐이고, 나머지 둘은 그대로 있다.
+   */
+  const [tab, setTab] = useState<Tab>('AI Note');
   const [view, setView] = useState<RecordingDetailView>(LOADING_RECORDING_DETAIL);
 
   /**
@@ -962,6 +972,10 @@ function ExportPanel({
       {body.kind === 'ready' && (
         <>
           <p className="hint">{body.text}</p>
+          {/* **노트가 함께 들어가는지를 버튼 바로 옆에서 말한다** (2026-09-09).
+              이 문장은 원래도 있었지만 버튼 아래 목록 안에 옅은 글씨로 있었고, 그래서
+              사용자가 "이게 AI 노트를 내보내는 거냐"고 물었다. */}
+          <p className="share__includes">{contents.noteText}</p>
           <ExportButton action={body.start} onExport={onExport} />
         </>
       )}

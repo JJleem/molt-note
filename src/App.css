@@ -1162,29 +1162,51 @@ p.loading {
 
 .tabs {
   display: flex;
-  gap: var(--space-4);
+  gap: var(--space-1);
   margin: var(--space-5) 0 var(--space-4);
   border-bottom: 1px solid var(--hairline);
 }
 
+/* 탭은 **누를 것처럼 보여야 한다.** 글자에 밑줄만 있던 때는 제목처럼 읽혔다. */
+
 .tabs__tab {
-  padding: 0 0 var(--space-2);
+  padding: var(--space-2) var(--space-4) var(--space-2);
   border: 0;
   border-bottom: 2px solid transparent;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
   background: none;
   font-size: var(--type-body);
   line-height: var(--line-normal);
   color: var(--text-muted);
   cursor: default;
+  transition:
+    background-color var(--ease),
+    color var(--ease),
+    border-color var(--ease);
 }
 
 .tabs__tab:hover {
+  background-color: var(--selected);
   color: var(--text);
 }
 
 .tabs__tab--active {
   border-bottom-color: var(--accent);
   font-weight: var(--weight-medium);
+  color: var(--text);
+}
+
+/*
+ * 무엇이 파일에 들어가는가. **hint가 아니다** — 사용자가 누르기 전에 알아야 하는
+ * 사실이고, 옅은 글씨로 두었더니 실제로 못 보고 물어봤다 (2026-09-09).
+ */
+
+.share__includes {
+  margin: var(--space-2) 0 var(--space-3);
+  padding-left: var(--space-3);
+  border-left: 2px solid var(--accent);
+  font-size: var(--type-secondary);
+  line-height: var(--line-normal);
   color: var(--text);
 }
 

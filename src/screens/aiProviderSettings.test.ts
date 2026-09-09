@@ -19,7 +19,6 @@ import {
   aiCheckControl,
   aiKeyFieldLabel,
   credentialFreeNotice,
-  needsApiKey,
   AI_KEY_INPUT_NOTICE,
   AI_NOT_CHECKED_TEXT,
   AI_PROVIDER_HAS_NO_MODELS_TEXT,
