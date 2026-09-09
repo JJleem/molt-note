@@ -36,7 +36,11 @@ pub const API_VERSION: &str = "2023-06-01";
 ///
 /// **1M 컨텍스트다** — 2시간 회의의 전사가 약 30K 토큰이므로 통째로 들어간다. 그래서 이
 /// adapter는 전사를 자르지 않는다.
-pub const DEFAULT_MODEL: &str = "claude-opus-5";
+///
+/// 회의록 한 편은 긴 추론이 아니라 **긴 입력을 정리하는 일**이다. 그 일에 더 비싼 모델을
+/// 기본값으로 두지 않는다 (2026-09-09 운영자 결정). 사용자가 설정에서 다른 모델을 적으면
+/// 그 값이 이 기본값을 대신한다.
+pub const DEFAULT_MODEL: &str = "claude-sonnet-5";
 
 /// 한 번에 받을 최대 출력 토큰.
 ///
@@ -197,10 +201,10 @@ mod tests {
 
     #[test]
     fn the_request_carries_the_prompt_and_the_model() {
-        let body = request_body("회의록을 만들어 줘", "claude-opus-5");
+        let body = request_body("회의록을 만들어 줘", "claude-sonnet-5");
         let value: serde_json::Value = serde_json::from_str(&body).expect("JSON이어야 한다");
 
-        assert_eq!(value["model"], "claude-opus-5");
+        assert_eq!(value["model"], "claude-sonnet-5");
         assert_eq!(value["messages"][0]["role"], "user");
         assert_eq!(value["messages"][0]["content"], "회의록을 만들어 줘");
         assert!(value["max_tokens"].as_u64().unwrap() > 0);
@@ -210,7 +214,7 @@ mod tests {
     #[test]
     fn a_transcript_with_quotes_and_newlines_stays_valid_json() {
         let nasty = "그가 \"이건 아니죠\"라고 했다.\n다음 줄\t탭\\백슬래시 😀";
-        let body = request_body(nasty, "claude-opus-5");
+        let body = request_body(nasty, "claude-sonnet-5");
         let value: serde_json::Value = serde_json::from_str(&body).expect("JSON이어야 한다");
 
         assert_eq!(value["messages"][0]["content"], nasty);
@@ -269,8 +273,8 @@ mod tests {
 
     #[test]
     fn the_reported_model_is_what_the_response_says() {
-        let body = r#"{"content":[{"type":"text","text":"x"}],"model":"claude-opus-5"}"#;
-        assert_eq!(model_from_response(body, "요청한-것"), "claude-opus-5");
+        let body = r#"{"content":[{"type":"text","text":"x"}],"model":"claude-sonnet-5"}"#;
+        assert_eq!(model_from_response(body, "요청한-것"), "claude-sonnet-5");
     }
 
     #[test]
@@ -293,6 +297,6 @@ mod tests {
     fn the_wire_constants_are_the_documented_ones() {
         assert_eq!(ENDPOINT, "https://api.anthropic.com/v1/messages");
         assert_eq!(API_VERSION, "2023-06-01");
-        assert_eq!(DEFAULT_MODEL, "claude-opus-5");
+        assert_eq!(DEFAULT_MODEL, "claude-sonnet-5");
     }
 }
