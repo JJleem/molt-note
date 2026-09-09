@@ -8,6 +8,7 @@ import {
   startCapture,
   stopCapture,
 } from '../ipc/commands';
+import { Icon } from './Icon';
 import { FailureNotice } from './FailureNotice';
 import {
   INITIAL_RECORDING,
@@ -325,6 +326,7 @@ export function RecordingScreen({ navigate }: ScreenProps) {
           disabled={!controls.record}
           onClick={start}
         >
+          <Icon name="record" />
           녹음
         </button>
         <button
@@ -333,6 +335,7 @@ export function RecordingScreen({ navigate }: ScreenProps) {
           disabled={!controls.pause}
           onClick={pause}
         >
+          <Icon name="pause" />
           일시정지
         </button>
         <button
@@ -341,6 +344,7 @@ export function RecordingScreen({ navigate }: ScreenProps) {
           disabled={!controls.resume}
           onClick={resume}
         >
+          <Icon name="play" />
           다시 시작
         </button>
         <button
@@ -349,6 +353,7 @@ export function RecordingScreen({ navigate }: ScreenProps) {
           disabled={!controls.stop}
           onClick={stop}
         >
+          <Icon name="stop" />
           정지
         </button>
       </div>
@@ -357,6 +362,7 @@ export function RecordingScreen({ navigate }: ScreenProps) {
         <p className="recording__device">{microphoneLabel(view.microphone)}</p>
         {notice !== null && <p className="hint">{notice}</p>}
         <button type="button" className="btn btn--secondary" onClick={reloadDevices}>
+          <Icon name="refresh" />
           장치 다시 읽기
         </button>
       </section>

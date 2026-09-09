@@ -12,12 +12,25 @@ import {
 import { aiNoteStatus, notionSyncStatus, transcriptionStatus } from './ipc/commands';
 import type { AiNoteStatus, NotionSendStatus, TranscriptionStatus } from './ipc/types';
 import { ErrorBoundary } from './screens/ErrorBoundary';
+import { Icon, type IconName } from './screens/Icon';
 import { hasRunningWork, runningWork } from './screens/runningWork';
 import { SCREEN_COMPONENTS } from './screens/registry';
 import './App.css';
 
 /** 배경에서 도는 일을 다시 물어보는 간격. */
 const RUNNING_WORK_REFRESH_MS = 1_500;
+
+/**
+ * 사이드바 항목마다의 아이콘.
+ *
+ * **글자를 대신하지 않는다** — 이름이 언제나 함께 오고, 아이콘은 그 줄을 훑을 때 눈이
+ * 먼저 걸리는 자리일 뿐이다 (요구 12). 화면이 늘면 여기가 먼저 깨진다.
+ */
+const SIDEBAR_ICON: Record<(typeof SIDEBAR_SCREENS)[number], IconName> = {
+  recordings: 'list',
+  recording: 'mic',
+  settings: 'settings',
+};
 
 function App() {
   const [nav, setNav] = useState<NavigationState>(INITIAL_NAVIGATION_STATE);
@@ -91,6 +104,7 @@ function App() {
                 aria-current={nav.current.screen === screen ? 'page' : undefined}
                 onClick={() => go({ screen })}
               >
+                <Icon name={SIDEBAR_ICON[screen]} />
                 {ROUTES[screen].title}
               </button>
             </li>

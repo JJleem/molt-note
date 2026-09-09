@@ -75,6 +75,7 @@ import {
   type ExportAttempt,
   type ExportPanelView,
 } from './exportView';
+import { Icon, type IconName } from './Icon';
 import { FailureNotice } from './FailureNotice';
 import { Loading } from './Loading';
 import {
@@ -125,6 +126,13 @@ const TAB_LABEL: Record<Tab, string> = {
   'AI Note': 'AI 노트',
   Transcript: '전사',
   Recording: '녹음',
+};
+
+/** 탭마다의 아이콘. 이름이 언제나 함께 온다 (요구 12). */
+const TAB_ICON: Record<Tab, IconName> = {
+  'AI Note': 'note',
+  Transcript: 'transcript',
+  Recording: 'audio',
 };
 
 /** 레코드는 있는데 파일이 없을 때 Recording 탭이 말하는 것. */
@@ -895,6 +903,7 @@ export function RecordingDetailScreen({ route, goBack }: ScreenProps) {
             className={tab === name ? 'tabs__tab tabs__tab--active' : 'tabs__tab'}
             onClick={() => setTab(name)}
           >
+            <Icon name={TAB_ICON[name]} />
             {TAB_LABEL[name]}
           </button>
         ))}
@@ -960,7 +969,10 @@ function ExportPanel({
 
   return (
     <section className="share__panel">
-      <h2 className="share__title">마크다운</h2>
+      <h2 className="share__title">
+        <Icon name="file" />
+        마크다운
+      </h2>
 
       {body.kind === 'loading' && <Loading text="읽는 중…" />}
 
