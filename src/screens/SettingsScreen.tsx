@@ -37,6 +37,8 @@ import {
   AI_KEY_INPUT_PLACEHOLDER,
   aiProviderLocality,
   aiCheckControl,
+  aiKeyFieldLabel,
+  credentialFreeNotice,
   aiSettingsChanged,
   aiSettingsSnapshot,
   aiTransferNotice,
@@ -618,6 +620,12 @@ export function SettingsScreen() {
               {/* **기기 밖에서 도는 provider만 자격증명을 요구한다** (`needsApiKey`).
                   "기기를 떠난다"는 사실은 위 `transfer` 문단이 이미 말했으므로 여기서
                   다시 말하지 않는다 — 같은 것을 두 번 적으면 언젠가 어긋난다. */}
+              {/* **키가 필요 없는 provider에게는 그렇다고 말한다.** 아무 말도 없으면
+                  사용자는 다른 칸(Notion 연동 토큰)에 넣어 보게 된다 — 실제로 그 일이 있었다. */}
+              {credentialFreeNotice(form.aiProvider) !== null && (
+                <p className="hint">{credentialFreeNotice(form.aiProvider)}</p>
+              )}
+
               {needsApiKey(form.aiProvider) && (
                 <>
                   <p className="hint">{aiCredentialNotice(aiKeyState).text}</p>
@@ -626,7 +634,7 @@ export function SettingsScreen() {
                   )}
 
                   <label className="field" htmlFor="ai-api-key">
-                    <span className="field__label">API 키</span>
+                    <span className="field__label">{aiKeyFieldLabel(form.aiProvider)}</span>
                     {/* **`value`가 없다.** 입력한 값은 React 상태에 들어가지 않고, 저장된
                         값이 여기 채워지는 일도 없다 — 되읽는 command 자체가 없다 (INV-7). */}
                     <input
@@ -781,7 +789,7 @@ export function SettingsScreen() {
         )}
 
         <label className="field" htmlFor="notion-token">
-          <span className="field__label">연동 토큰</span>
+          <span className="field__label">Notion 연동 토큰</span>
           {/* **`value`가 없다.** 입력한 값은 React 상태에 들어가지 않고, 저장된 값이 여기
               채워지는 일도 없다 — 되읽는 command 자체가 없다 (INV-7). */}
           <input

@@ -73,12 +73,27 @@ export const NO_AI_MODEL_LABEL = '고른 모델 없음';
  * `locality`가 label 안의 글자가 아니라 **값**인 이유는 §12 때문이다 — 화면이 그리는 문구는
  * 전부 이 값에서 나오며, 그래서 provider가 늘었을 때 문구를 따로 고칠 자리가 없다 (INV-5).
  */
+/**
+ * 이 provider를 쓰려면 사용자가 무엇을 해야 하는가.
+ *
+ * ```text
+ * none    아무것도 — 이 기기에서 그냥 돈다
+ * apiKey  키를 넣어야 한다 — 설정의 API 키 칸
+ * cli     이미 로그인된 CLI가 대신한다 — 앱은 자격증명을 만지지 않는다
+ * ```
+ *
+ * **locality와 다른 축이다.** 기기 밖에서 도는데 키가 필요 없을 수 있다 (`cli`).
+ */
+export type AiCredentialNeed = 'none' | 'apiKey' | 'cli';
+
 interface SelectableAiProvider {
   /** 저장되는 식별자. `ai_notes.provider`에 그대로 남는다 (ADR-0008 §7.3). */
   readonly id: string;
   /** 사람이 읽는 이름. locality는 여기 섞지 않는다. */
   readonly name: string;
   readonly locality: AiProviderLocality;
+  /** 자격증명을 어떻게 얻는가. **locality에서 유도하지 않는다.** */
+  readonly credential: AiCredentialNeed;
 }
 
 /**
@@ -98,11 +113,11 @@ interface SelectableAiProvider {
  * 테스트용 구현이 섞여 들어올 자리가 생긴다.
  */
 const SELECTABLE_AI_PROVIDERS: readonly SelectableAiProvider[] = [
-  { id: 'ollama', name: 'Ollama', locality: 'local' },
-  { id: 'anthropic', name: 'Claude (Anthropic)', locality: 'external' },
+  { id: 'ollama', name: 'Ollama', locality: 'local', credential: 'none' },
+  { id: 'anthropic', name: 'Claude (Anthropic)', locality: 'external', credential: 'apiKey' },
   // 같은 서비스를 부르지만 **과금 주체가 다르다** — 이쪽은 이 기기의 CLI가 알아서 한다.
-  // 그래서 API 키 칸과 무관하다. 전사는 그래도 기기 밖으로 나가므로 external이다.
-  { id: 'claude-cli', name: 'Claude Code (구독)', locality: 'external' },
+  // 전사는 그래도 기기 밖으로 나가므로 external이지만, **키는 필요 없다.**
+  { id: 'claude-cli', name: 'Claude Code (구독)', locality: 'external', credential: 'cli' },
 ];
 
 /** 선택지에 붙는 locality 표시. **provider의 값에서 나오며 문구가 값을 정하지 않는다.** */
@@ -686,5 +701,45 @@ export const AI_KEY_INPUT_NOTICE =
  * 이 함수가 답하는 것은 **입력란을 보일 것인가** 하나다.
  */
 export function needsApiKey(providerId: string): boolean {
-  return aiProviderLocality(providerId) === 'external';
+  return credentialOf(providerId) === 'apiKey';
+}
+
+/**
+ * 이 provider가 자격증명을 어떻게 얻는가.
+ *
+ * **locality로 판정하지 않는다.** 2026-09-09까지는 "기기 밖에서 돌면 키가 필요하다"로
+ * 보았는데, 그 규칙은 `claude-cli`에서 깨진다 — 기기 밖에서 돌지만 키는 CLI가 자기
+ * 방식으로 갖고 있다. 그대로 두면 **쓰지도 않는 키 칸이 뜨고**, 사용자는 어느 칸에
+ * 무엇을 넣어야 하는지 다시 헷갈린다. 실제로 그 일이 있었다.
+ */
+export function credentialOf(providerId: string): AiCredentialNeed {
+  return (
+    SELECTABLE_AI_PROVIDERS.find((provider) => provider.id === providerId)?.credential ?? 'none'
+  );
+}
+
+/**
+ * API 키 칸에 붙는 이름.
+ *
+ * **"API 키"만으로는 부족하다.** 설정에는 자격증명 칸이 둘 있고(AI · Notion), 이름이
+ * 둘 다 짧으면 어느 쪽에 무엇을 넣는지 헷갈린다 — 실제로 그 일이 있었다.
+ * 그래서 고른 provider의 이름을 앞에 붙인다. **화면이 벤더 이름을 글자로 알지 않는다**
+ * (INV-9) — 이름은 이 목록이 값으로 갖고 있다.
+ */
+export function aiKeyFieldLabel(providerId: string): string {
+  const chosen = SELECTABLE_AI_PROVIDERS.find((provider) => provider.id === providerId);
+  return chosen === undefined ? 'API 키' : `${chosen.name} API 키`;
+}
+
+/** 자격증명이 없어도 되는 provider에게 그 사실을 말해 주는 문장. */
+export function credentialFreeNotice(providerId: string): string | null {
+  switch (credentialOf(providerId)) {
+    case 'cli':
+      // 벤더 이름을 글자로 적지 않는다 (INV-9) — 고른 것의 이름이 값으로 온다.
+      return '이 기기에 이미 로그인된 프로그램이 인증을 대신한다. 키를 넣지 않는다.';
+    case 'none':
+      return null;
+    case 'apiKey':
+      return null;
+  }
 }

@@ -17,6 +17,9 @@ import {
   AI_CHECK_SAVE_FIRST_LABEL,
   AI_IS_OPTIONAL_TEXT,
   aiCheckControl,
+  aiKeyFieldLabel,
+  credentialFreeNotice,
+  needsApiKey,
   AI_KEY_INPUT_NOTICE,
   AI_NOT_CHECKED_TEXT,
   AI_PROVIDER_HAS_NO_MODELS_TEXT,
@@ -647,5 +650,42 @@ describe('확인 버튼이 순서를 말한다 (2026-09-09)', () => {
     const control = aiCheckControl(chose('anthropic', 'claude-sonnet-5'), saved('anthropic', 'claude-sonnet-5'), true);
     expect(control.enabled).toBe(false);
     expect(control.label).toBe(AI_CHECK_RUNNING_LABEL);
+  });
+});
+
+describe('자격증명이 필요한지는 사실이지 추측이 아니다 (2026-09-09)', () => {
+  // 지키려는 것: **쓰지도 않는 입력칸이 뜨지 않는다.**
+  //
+  // 2026-09-09까지는 "기기 밖에서 돌면 키가 필요하다"로 판정했다. `claude-cli`가 그 규칙을
+  // 깬다 — 기기 밖에서 돌지만 인증은 이미 로그인된 CLI가 한다. 그대로 두면 사용자는
+  // 안 쓰는 칸에 키를 넣고, 다른 칸(Notion)에도 넣어 본다. 실제로 그 일이 있었다.
+
+  it('키를 넣어야 하는 것은 하나뿐이다', () => {
+    expect(needsApiKey('anthropic')).toBe(true);
+    expect(needsApiKey('claude-cli')).toBe(false);
+    expect(needsApiKey('ollama')).toBe(false);
+  });
+
+  it('기기 밖에서 도는 것과 키가 필요한 것은 다른 축이다', () => {
+    // 이 둘이 같은 값이면 `claude-cli`가 다시 키를 요구하게 된다.
+    expect(aiProviderLocality('claude-cli')).toBe('external');
+    expect(needsApiKey('claude-cli')).toBe(false);
+  });
+
+  it('키가 필요 없는 provider는 그 사실을 말한다', () => {
+    const said = credentialFreeNotice('claude-cli');
+    expect(said).not.toBeNull();
+    expect(said).toContain('키를 넣지 않는다');
+    // 아무 말도 없으면 사용자는 다른 칸에 넣어 본다.
+    expect(credentialFreeNotice('ollama')).toBeNull();
+    expect(credentialFreeNotice('anthropic')).toBeNull();
+  });
+
+  it('키 칸의 이름이 어느 provider의 것인지 말한다', () => {
+    // 설정에는 자격증명 칸이 둘 있다 (AI · Notion). "API 키"만으로는 구분되지 않는다.
+    expect(aiKeyFieldLabel('anthropic')).toContain('API 키');
+    expect(aiKeyFieldLabel('anthropic')).not.toBe('API 키');
+    // 고르지 않았으면 지어내지 않는다.
+    expect(aiKeyFieldLabel('')).toBe('API 키');
   });
 });

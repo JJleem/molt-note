@@ -413,6 +413,16 @@ function isScale(value: string): boolean {
   return /^-?\d*\.?\d+(?:px|rem|em|%)?$/.test(value);
 }
 
+/**
+ * 값이 **움직임**인가 — 시간과 가속도 곡선 (2026-09-09).
+ *
+ * 크기도 색도 아니지만 테마와는 무관하다. 어두운 화면에서 전환이 더 느릴 이유가 없다.
+ * 그래서 아래 `dark 블록이 색만 다시 정의한다`가 그대로 이것을 막는다.
+ */
+function isMotion(value: string): boolean {
+  return /^\d*\.?\d+m?s\b/.test(value.trim());
+}
+
 describe('새로 더한 색 토큰이 dark 블록에도 있다 (R-1 · Out of Scope)', () => {
   // 지키려는 것: **이미 있던 dark mode 장치를 깨뜨리지 않는다.** dark는 이 Phase의 목표가
   // 아니다 — 목표가 아니라는 것과 부숴도 된다는 것은 다르다. 색 토큰 하나가 light에만 생기면
@@ -422,7 +432,10 @@ describe('새로 더한 색 토큰이 dark 블록에도 있다 (R-1 · Out of Sc
     // 아래 두 검사는 "색인 것"과 "색이 아닌 것"을 갈라 다르게 다룬다. 어느 쪽으로도 읽히지
     // 않는 값이 들어오면 그 토큰은 두 검사 어디에도 걸리지 않고 조용히 빠져나간다.
     for (const [token, value] of [...lightRootTokens, ...darkRootTokens]) {
-      expect(isColor(value) || isScale(value), `${token}의 형태를 이 검사가 모른다: ${value}`).toBe(
+      expect(
+        isColor(value) || isScale(value) || isMotion(value),
+        `${token}의 형태를 이 검사가 모른다: ${value}`,
+      ).toBe(
         true,
       );
     }
@@ -449,92 +462,38 @@ describe('새로 더한 색 토큰이 dark 블록에도 있다 (R-1 · Out of Sc
 
 // --- 검사 4 — 금지된 장식 -----------------------------------------------------------------
 
-/**
- * 움직임이 허용된 자리와 그 이유 (요구 11 — "애니메이션은 상태 전이를 분명하게 할 때만").
- *
- * 목록에 없는 자리에서 움직임이 생기면 그것은 장식이며 여기서 드러난다.
- */
-const MOTION_ALLOWED: Record<string, string> = {
-  // 눌렀는가 · 위에 있는가 · 꺼졌는가가 튀지 않고 갈린다.
-  '.btn': 'transition',
-  // 아직 진행 중이라는 사실. 글자가 언제나 함께 오므로 고리가 멈춰도 뜻은 남는다.
-  '.spinner': 'animation',
-};
-
-describe('금지된 장식이 들어오지 않았다 (요구 11 · §19)', () => {
-  // 지키려는 것: **중립 표면과 최소 장식.** gradient · glassmorphism · 그림자 · 장식적
-  // 애니메이션은 한 자리에 생기면 다음 자리에서 정당화되고, 그 뒤로는 무엇이 규칙인지 말할 수
-  // 없게 된다. 여기서 세는 것은 취향이 아니라 **명시적으로 금지된 네 가지**다.
+describe('장식을 쓰되 규율은 지킨다 (2026-09-09 운영자 결정)', () => {
+  // **금지에서 규율로 바뀌었다.** 2026-09-09에 운영자가 gradient · glassmorphism · 그림자 ·
+  // 움직임 금지를 걷어냈다. 화면이 쓰기 불편하고 밋밋하다는 판단이었고, 그 결정은 이 diff에
+  // 남아 있다.
+  //
+  // 걷어낸 것은 **금지**이지 **규율**이 아니다. 여백/타입 스케일 · focus · dark 토큰은
+  // 그대로다 (위의 describe들). 그것이 없으면 장식은 자유가 아니라 난장이 된다.
+  //
+  // 그리고 하나는 취향이 아니라 접근성이므로 남긴다: **움직임을 원하지 않는 사람에게
+  // 꺼지는 것.** 다만 허용 목록으로 세지 않는다 — 새 움직임을 더하면서 목록을 잊는 일이
+  // 실제로 생기기 때문이다. 대신 전역 차단 규칙 하나를 요구한다.
 
   const declaredCss = rules.flatMap((rule) =>
     rule.declarations.map((declaration) => ({ rule, declaration })),
   );
 
-  it('gradient가 없다', () => {
-    for (const { rule, declaration } of declaredCss) {
-      expect(
-        /\bgradient\(/i.test(declaration.value),
-        `${rule.selector}에 gradient가 있다`,
-      ).toBe(false);
+  it('움직이는 자리가 있으면 reduced-motion에서 전부 꺼진다', () => {
+    const moving = declaredCss.filter(
+      ({ declaration }) =>
+        declaration.property === 'animation' || declaration.property === 'transition',
+    );
+    if (moving.length === 0) {
+      return;
     }
-  });
 
-  it('glassmorphism이 없다', () => {
-    for (const { rule, declaration } of declaredCss) {
-      // `-webkit-` 접두 형태도 같은 효과다.
-      expect(
-        /backdrop-filter$/.test(declaration.property),
-        `${rule.selector}에 backdrop-filter가 있다`,
-      ).toBe(false);
-    }
-  });
-
-  it('그림자가 없다', () => {
-    // §19는 장식용 shadow를 두지 않는다고 못박았고 지금 저장소에 그림자는 한 곳도 없다.
-    // "과하지 않은 그림자"의 경계를 자동으로 판정할 수는 없으므로, 판정할 수 있는 선인
-    // **하나도 없다**를 그대로 지킨다 — 두어야 할 이유가 생기면 그것은 결정이고, 이 검사를
-    // 고치는 diff가 그 결정을 드러낸다.
-    for (const { rule, declaration } of declaredCss) {
-      expect(
-        /shadow/i.test(declaration.property) || /\bdrop-shadow\(/i.test(declaration.value),
-        `${rule.selector}에 그림자가 있다`,
-      ).toBe(false);
-    }
-  });
-
-  it('움직임이 허용된 두 자리에만 있다', () => {
-    for (const { rule, declaration } of declaredCss) {
-      if (declaration.property !== 'animation' && declaration.property !== 'transition') {
-        continue;
-      }
-      expect(
-        MOTION_ALLOWED[rule.selector],
-        `${rule.selector}의 ${declaration.property}은 허용된 움직임이 아니다`,
-      ).toBe(declaration.property);
-    }
-  });
-
-  it('keyframes가 허용된 하나뿐이다', () => {
-    // 이름 붙은 애니메이션이 하나 더 생기는 것은 위 목록과 별개의 사건이다 — 아직 아무도
-    // 쓰지 않는 keyframes도 다음 자리에서 쓰이기를 기다리는 장식이다.
-    const named = [...cssSource.matchAll(/@keyframes\s+([\w-]+)/g)].map((matched) => matched[1]);
-
-    expect(named).toEqual(['spinner-turn']);
-  });
-
-  it('움직임을 원하지 않는 사람에게는 전부 꺼진다', () => {
-    // 허용된 둘도 강제되지 않는다. 목록에 자리를 더하면서 여기를 잊으면 그 움직임만 남는다.
     const reduced = blockOf(cssSource, REDUCED_MOTION_HEADER);
+    expect(reduced.length, 'reduced-motion 블록이 없다').toBeGreaterThan(0);
 
-    for (const [selector, property] of Object.entries(MOTION_ALLOWED)) {
-      const off = rulesOf(reduced).find((rule) => rule.selector === selector);
-
-      expect(off, `${selector}가 reduced-motion에서 꺼지지 않는다`).toBeDefined();
+    for (const property of ['animation', 'transition']) {
       expect(
-        off?.declarations.some(
-          (declaration) => declaration.property === property && declaration.value === 'none',
-        ),
-        `${selector}의 ${property}이 reduced-motion에서 꺼지지 않는다`,
+        new RegExp(`${property}[^;]*none\\s*!important`).test(reduced),
+        `reduced-motion이 ${property}을 전부 끄지 않는다`,
       ).toBe(true);
     }
   });
