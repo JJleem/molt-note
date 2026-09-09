@@ -186,8 +186,12 @@ fn transport_failure(error: TransportError) -> Failure {
 /// 5xx         provider 쪽 사정            → 재시도 가능
 /// ```
 ///
-/// **본문을 detail에 옮기지 않는다.** 오류 본문에 요청 내용이 섞여 오는 경우가 있고, 그
-/// 요청에는 전사가 들어 있다.
+/// **본문을 통째로 옮기지 않는다.** 오류 본문에 요청 내용이 섞여 오는 경우가 있고, 그
+/// 요청에는 전사가 들어 있다. 그래서 [`wire::error_detail`]이 꺼내 주는 두 가지 —
+/// 오류 종류와 한 문장 — 만 싣고, 그 문장도 길이에서 자른다.
+///
+/// **status 숫자만으로는 400을 진단할 수 없다.** 2026-09-09에 그 자리에서 막혔고,
+/// 그래서 API가 말한 이유가 여기까지 오게 됐다.
 fn status_failure(response: &HttpResponse) -> Failure {
     match response.status {
         401 | 403 => not_configured("Claude API 키가 받아들여지지 않았다"),
@@ -197,5 +201,8 @@ fn status_failure(response: &HttpResponse) -> Failure {
         status if (400..500).contains(&status) => request_rejected("Claude API가 요청을 거절했다"),
         _ => request_failed_temporarily("Claude API가 요청을 처리하지 못했다"),
     }
-    .with_detail(format!("status={}", response.status))
+    .with_detail(match wire::error_detail(&response.body) {
+        Some(said) => format!("status={} · {said}", response.status),
+        None => format!("status={}", response.status),
+    })
 }

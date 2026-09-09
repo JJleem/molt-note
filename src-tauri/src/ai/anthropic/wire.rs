@@ -67,6 +67,49 @@ pub fn request_body(prompt: &str, model: &str) -> String {
     )
 }
 
+/// 오류 본문에서 detail에 실어도 되는 만큼만 꺼낸다.
+///
+/// **본문을 통째로 옮기지 않는다.** 오류 본문에 요청 내용이 섞여 오는 경우가 있고, 그
+/// 요청에는 전사가 들어 있다. 그래서 꺼내는 것은 두 가지뿐이다 —
+/// `error.type`(닫힌 종류 이름)과 `error.message`(무엇이 잘못됐는지 말하는 한 문장).
+///
+/// 그리고 그 문장도 [`MAX_ERROR_MESSAGE_CHARS`]에서 자른다. 길이 상한이 있으면 본문이
+/// 예상과 다른 모양으로 와도 전사가 통째로 실려 나가지 않는다.
+///
+/// **이것이 없으면 400을 진단할 수 없다** — status 숫자만으로는 무엇이 잘못됐는지 알 수
+/// 없고, 2026-09-09에 실제로 그 자리에서 막혔다.
+pub fn error_detail(body: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(body).ok()?;
+    let error = value.get("error")?;
+
+    let kind = error.get("type").and_then(|kind| kind.as_str());
+    let message = error.get("message").and_then(|message| message.as_str());
+
+    match (kind, message) {
+        (None, None) => None,
+        (kind, message) => {
+            let kind = kind.unwrap_or("unknown");
+            match message {
+                Some(message) => Some(format!("{kind}: {}", clamp(message))),
+                None => Some(kind.to_owned()),
+            }
+        }
+    }
+}
+
+/// 오류 문장을 detail에 실을 때의 길이 상한 (문자 수).
+pub const MAX_ERROR_MESSAGE_CHARS: usize = 300;
+
+/// 문자 경계에서 자른다. **byte로 자르지 않는다** — 한글이 깨진다.
+fn clamp(message: &str) -> String {
+    let message = message.trim();
+    if message.chars().count() <= MAX_ERROR_MESSAGE_CHARS {
+        return message.to_owned();
+    }
+    let kept: String = message.chars().take(MAX_ERROR_MESSAGE_CHARS).collect();
+    format!("{kept}…")
+}
+
 /// 응답 본문에서 **모델이 쓴 텍스트**만 꺼낸다.
 ///
 /// `content`는 블록의 배열이고 `type`이 여러 가지일 수 있다 (`text` · `thinking` 등).
@@ -291,6 +334,53 @@ mod tests {
         assert_eq!(credential_kind("  sk-ant-oat01-abc"), Credential::ApiKey);
         assert_eq!(credential_kind("eyJhbGciOi..."), Credential::OauthToken);
         assert_eq!(credential_kind(""), Credential::OauthToken);
+    }
+
+    #[test]
+    fn an_error_body_says_what_went_wrong_without_carrying_the_request() {
+        // 지키려는 것: **status 숫자만으로는 진단이 안 된다.** API가 말한 이유가 와야 한다.
+        let body = r#"{"type":"error","error":{"type":"invalid_request_error","message":"max_tokens: 16000 > 8192"}}"#;
+        assert_eq!(
+            error_detail(body).as_deref(),
+            Some("invalid_request_error: max_tokens: 16000 > 8192"),
+        );
+    }
+
+    #[test]
+    fn an_error_without_a_message_still_names_its_kind() {
+        let body = r#"{"type":"error","error":{"type":"overloaded_error"}}"#;
+        assert_eq!(error_detail(body).as_deref(), Some("overloaded_error"));
+    }
+
+    #[test]
+    fn a_body_that_is_not_an_error_shape_yields_nothing() {
+        // 지어내지 않는다. 모양이 다르면 detail은 status 하나로 남는다.
+        assert_eq!(error_detail("not json"), None);
+        assert_eq!(error_detail(r#"{"content":[]}"#), None);
+        assert_eq!(error_detail(r#"{"error":{}}"#), None);
+    }
+
+    #[test]
+    fn a_long_error_message_is_cut_and_the_transcript_cannot_ride_along() {
+        // 오류 본문에 요청이 섞여 와도 전사가 통째로 실려 나가지 않는다.
+        let long = "가".repeat(5_000);
+        let body = format!(
+            r#"{{"error":{{"type":"invalid_request_error","message":{}}}}}"#,
+            serde_json::Value::String(long),
+        );
+        let detail = error_detail(&body).expect("이유가 나와야 한다");
+        assert!(detail.chars().count() < 400, "잘려야 한다: {}", detail.chars().count());
+        assert!(detail.ends_with('…'), "잘렸다는 표시가 있어야 한다");
+    }
+
+    #[test]
+    fn a_multibyte_message_is_cut_on_a_character_boundary() {
+        // byte로 자르면 한글이 깨진다.
+        let body = format!(
+            r#"{{"error":{{"type":"x","message":{}}}}}"#,
+            serde_json::Value::String("한".repeat(1_000)),
+        );
+        assert!(error_detail(&body).is_some(), "잘라도 유효한 문자열이어야 한다");
     }
 
     #[test]
