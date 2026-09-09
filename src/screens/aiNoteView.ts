@@ -48,9 +48,9 @@ export const NOTE_MODES = ['meeting', 'study', 'summary'] as const;
 
 /** 버튼에 적히는 이름. */
 const MODE_LABEL: Record<NoteMode, string> = {
-  meeting: 'Meeting',
-  study: 'Study',
-  summary: 'Summary',
+  meeting: '회의록',
+  study: '학습 노트',
+  summary: '요약',
 };
 
 /**
@@ -259,15 +259,15 @@ export interface AiNoteAction {
 }
 
 function generateAction(recordingId: string, mode: NoteMode): AiNoteAction {
-  return { kind: 'generate', label: `Generate ${MODE_LABEL[mode]} note`, recordingId, mode };
+  return { kind: 'generate', label: `${MODE_LABEL[mode]} 만들기`, recordingId, mode };
 }
 
 function regenerateAction(recordingId: string, mode: NoteMode): AiNoteAction {
-  return { kind: 'regenerate', label: `Generate ${MODE_LABEL[mode]} note again`, recordingId, mode };
+  return { kind: 'regenerate', label: `${MODE_LABEL[mode]} 다시 만들기`, recordingId, mode };
 }
 
 function retryAction(recordingId: string, mode: NoteMode): AiNoteAction {
-  return { kind: 'retry', label: `Try the ${MODE_LABEL[mode]} note again`, recordingId, mode };
+  return { kind: 'retry', label: `${MODE_LABEL[mode]} 다시 시도`, recordingId, mode };
 }
 
 /**

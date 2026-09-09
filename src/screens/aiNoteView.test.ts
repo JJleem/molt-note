@@ -178,9 +178,9 @@ describe('mode 선택 (§9.5)', () => {
   it('세 mode가 표시 순서대로 있다', () => {
     expect(NOTE_MODES).toEqual(['meeting', 'study', 'summary']);
     expect(noteModeChoices('meeting').map((choice) => choice.label)).toEqual([
-      'Meeting',
-      'Study',
-      'Summary',
+      '회의록',
+      '학습 노트',
+      '요약',
     ]);
   });
 
@@ -484,7 +484,7 @@ describe('아직 노트가 없는 상태', () => {
     }
     expect(view.body.text).toBe(NO_AI_NOTE_TEXT);
     expect(view.body.generate.kind).toBe('generate');
-    expect(view.body.generate.label).toContain('Meeting');
+    expect(view.body.generate.label).toContain('회의록');
   });
 
   it('다른 mode의 노트가 있어도 고른 mode의 노트가 없으면 만들 수 있다', () => {
@@ -602,7 +602,7 @@ describe('실패한 상태 (§13)', () => {
       throw new Error('실패 상태여야 한다');
     }
     expect(view.body.failure?.retryable).toBe(false);
-    expect(view.body.retry.label).toContain('Meeting');
+    expect(view.body.retry.label).toContain('회의록');
   });
 
   it('저장된 상태만 failed면 이유를 지어내지 않는다', () => {
@@ -628,7 +628,7 @@ describe('노트를 볼 수 있는 상태', () => {
     if (view.body.kind !== 'ready') {
       throw new Error('노트를 볼 수 있는 상태여야 한다');
     }
-    expect(view.body.note.modeLabel).toBe('Meeting');
+    expect(view.body.note.modeLabel).toBe('회의록');
     expect(view.body.note.sections.map((section) => section.title)).toContain('할 일');
     expect(view.body.regenerate.kind).toBe('regenerate');
     expect(view.body.regenerate.mode).toBe('meeting');
