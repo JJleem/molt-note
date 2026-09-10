@@ -42,7 +42,6 @@ use std::thread;
 
 use tauri::Manager;
 
-use crate::ai::prompt::ContextBudget;
 use crate::ai::provider::{not_configured, NoteAiProvider};
 use crate::ai::provider_for;
 use crate::ai::run::{self, Outcome};
@@ -351,9 +350,10 @@ fn generate_one(
         &RecordingId::new(recording_id),
         mode,
         provider.as_ref(),
-        // 설정에 context 크기 항목이 아직 없으므로 시작값을 쓴다 (ADR-0008 §8.4). 이 값을
-        // 여기서 새로 정하지 않는다 — 아는 자리는 `ai::prompt` 하나다.
-        ContextBudget::DEFAULT,
+        // **예산은 provider가 안다** (2026-09-10). 여기서 하나로 정하면 컨텍스트가 1M인
+        // 모델에게도 로컬 기본값을 씌우게 된다 — 실제로 그렇게 막혔다.
+        // 값을 새로 만들지는 않는다: 아는 자리는 여전히 `ai::prompt` 하나다.
+        provider.context_budget(),
     )
 }
 

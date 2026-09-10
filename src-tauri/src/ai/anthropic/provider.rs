@@ -27,6 +27,7 @@
 use std::sync::Arc;
 
 use crate::ai::note::ResponseRejection;
+use crate::ai::prompt::ContextBudget;
 use crate::ai::provider::{
     model_unavailable, not_configured, rejected_response, request_failed_temporarily,
     request_rejected, unreachable,
@@ -111,6 +112,15 @@ impl NoteAiProvider for AnthropicProvider {
             },
             Err(failure) => Availability::Unavailable(failure),
         }
+    }
+
+
+    /// **1M 컨텍스트다.** 2시간 회의의 전사가 약 30K 토큰이므로 통째로 들어간다.
+    ///
+    /// **[문서 근거 · 미실측]** 값의 출처는 `docs/PRODUCT-SPEC.md` §16.1이 적어 둔
+    /// 2026-09-01 기준 모델 표다. 이 앱이 1M을 실제로 채워 본 적은 없다.
+    fn context_budget(&self) -> ContextBudget {
+        ContextBudget { context_tokens: 1_000_000 }
     }
 
     fn generate_note(&self, request: &NoteRequest<'_>) -> Result<NoteGeneration, Failure> {

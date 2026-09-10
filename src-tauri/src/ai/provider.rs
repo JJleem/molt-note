@@ -225,6 +225,19 @@ pub trait NoteAiProvider: Send + Sync {
     /// 지금 쓸 수 있는 상태인가, 그리고 쓸 수 있는 모델은 무엇인가 (INV-8).
     fn availability(&self) -> Availability;
 
+    /// 이 provider가 **한 번에 받을 수 있는 크기** (2026-09-10).
+    ///
+    /// 예산은 provider마다 다른 사실이다. 로컬 모델은 기기의 RAM/VRAM이 정하고, 원격
+    /// 모델은 그 모델의 컨텍스트가 정한다. 그런데 2026-09-10까지는 **누가 받든 로컬 기본값
+    /// 하나(16,384)로 판정했다** — 컨텍스트가 1M인 모델에게 보내면서도 16K를 넘으면
+    /// 거절했고, 실제로 1시간 24분짜리 전사가 그렇게 막혔다.
+    ///
+    /// 기본값을 그대로 두는 이유는 **모르는 provider를 크게 잡지 않기 위해서**다. 너무 작게
+    /// 잡으면 보내지 못하고, 너무 크게 잡으면 보냈다가 상대가 거절한다 — 둘 중 전자가 낫다.
+    fn context_budget(&self) -> crate::ai::prompt::ContextBudget {
+        crate::ai::prompt::ContextBudget::DEFAULT
+    }
+
     /// 준비된 transcript 텍스트로 structured note 하나를 만든다.
     ///
     /// 거절은 언제나 §13의 공통 실패여야 한다 — 벤더 오류를 그대로 흘려보내면 INV-9가 깨진다.

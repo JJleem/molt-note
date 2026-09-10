@@ -30,6 +30,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use super::runner::{CommandError, CommandOutput, CommandRequest, CommandRunner};
+use crate::ai::prompt::ContextBudget;
 use crate::ai::provider::{
     not_configured, rejected_response, request_failed_temporarily, unreachable, Availability,
     Locality, NoteAiProvider, NoteGeneration, NoteRequest, ProviderDescriptor,
@@ -108,6 +109,15 @@ impl NoteAiProvider for ClaudeCliProvider {
             Ok(output) => Availability::Unavailable(command_failed(&output)),
             Err(error) => Availability::Unavailable(run_failure(error)),
         }
+    }
+
+
+    /// **1M 컨텍스트다.** 2시간 회의의 전사가 약 30K 토큰이므로 통째로 들어간다.
+    ///
+    /// **[문서 근거 · 미실측]** 값의 출처는 `docs/PRODUCT-SPEC.md` §16.1이 적어 둔
+    /// 2026-09-01 기준 모델 표다. 이 앱이 1M을 실제로 채워 본 적은 없다.
+    fn context_budget(&self) -> ContextBudget {
+        ContextBudget { context_tokens: 1_000_000 }
     }
 
     fn generate_note(&self, request: &NoteRequest<'_>) -> Result<NoteGeneration, Failure> {
@@ -378,5 +388,31 @@ mod tests {
         let runner = Arc::new(FakeRunner::saying(NOTE_JSON));
         let provider = ClaudeCliProvider::new(String::new(), runner);
         assert_eq!(provider.descriptor().locality, Locality::External);
+    }
+}
+
+#[cfg(test)]
+mod budget_tests {
+    use super::*;
+
+    #[test]
+    fn a_million_token_model_is_not_judged_by_a_local_default() {
+        // 지키려는 것: **컨텍스트가 큰 모델에게 작은 예산을 씌우지 않는다.**
+        //
+        // 2026-09-10에 1시간 24분짜리 전사(약 16,428 토큰)가 "16,384 토큰을 넘는다"며
+        // 거절됐다. 그 16,384는 로컬 모델의 시작값이었고, 실제로 보낼 상대는 1M을 받는
+        // 모델이었다. 예산을 provider가 말하지 않으면 그 일이 다시 일어난다.
+        let provider = ClaudeCliProvider::new(
+            String::new(),
+            Arc::new(crate::platform::command_runner::SystemCommandRunner::new()),
+        );
+
+        let budget = provider.context_budget();
+        assert!(
+            budget.context_tokens > ContextBudget::DEFAULT.context_tokens,
+            "로컬 시작값보다 커야 한다",
+        );
+        // 그날 막힌 그 크기가 이제 들어간다.
+        assert!(budget.input_tokens() > 16_428, "그날의 전사가 들어가야 한다");
     }
 }
