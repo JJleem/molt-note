@@ -340,6 +340,8 @@ double로 대신하고(부르면 검사가 도는 동안 창이 열린다) **실
 | **선택됨 · 실제 호출 미실행** | **`ureq` 3.4.0 (`default-features = false, features = ["rustls"]`)** — 로컬 Ollama REST(`ai/ollama/network.rs`)와 Notion HTTPS(`notion/network.rs`)를 부르는 자리에서 쓰인다 | ⚠️ 실제 서버에 요청을 보낸 적이 없다 (`A-AI-001` · `A-NOTION-001`). **Phase 5가 `rustls`를 명시적으로 켰다** — ADR-0008 §12.2가 예고한 대로 HTTPS가 실제로 필요해진 시점이다 |
 | **선택됨 · 실제 저장소 미접근** | **`keyring` 3.6.3 (`apple-native` + `windows-native`)** — Notion integration token을 담는 유일한 자리(`platform/secret_store.rs`) | ⚠️ 자동 테스트는 메모리 double만 쓰며 실제 OS 자격증명 저장소를 건드리지 않는다. feature 전체 목록은 **UNVERIFIED** — 확인된 것은 두 feature 이름이 실재하고 플랫폼 API가 들어왔다는 것까지다 (`ADR-0009` §15.2.4) |
 | **선택됨 · 사용 중** | **`sha2` 0.10** — export 경로에서 쓰인다 | `Cargo.lock`이 고정한다 |
+| **선택됨 · 실제로 나갔다 ✅** | **이 기기의 `claude` CLI** — `ai/claude_cli`가 프로세스로 부른다. 실행은 `platform/command_runner.rs` 하나에만 있다 (INV-10) | **2026-09-10에 실제로 노트를 만들었다.** 앱은 자격증명을 만지지 않는다 — 인증은 CLI가 자기 방식으로 한다. 서드파티가 구독 OAuth 토큰을 대신 쓰는 것은 Anthropic이 금지하며(2026-04-04 시행), 이 경로는 그것이 아니다 |
+| **선택됨 · 번들** | **`wanted-sans` 1.0.3** (글꼴 · OFL 1.1) · **`lucide-react`** (아이콘) | 둘 다 빌드 시점에 앱 안으로 들어온다. **외부로 요청을 보내지 않는다** — 오프라인에서 그대로 돈다 (`src/fonts/LICENSE.md`) |
 | **잠정 선택 · 장치 미검증** | **`cpal` 0.18.2 + `hound` 3.5.1** — **제품 녹음 경로에서 쓰인다** | ⚠️ `ADR-0003`은 **PROVISIONAL**이다. 실제 마이크에서 확인된 적이 없다 (`ASSUMPTION A-REC-001`) |
 | **설치됨 · 미통합** | (없음) | scaffold의 `tauri-plugin-opener`는 Phase 1에서 **제거**했다 |
 | **후보 · 미선택** | recording: `cpal`+`hound` / webview MediaRecorder / 커뮤니티 플러그인<br>transcription: whisper.cpp sidecar / `whisper-rs`<br>Notion: `@notionhq/client` | **설치되지 않았다.** 각각 이를 필요로 하는 Phase에서 검증과 함께 선택한다. 확인된 사실은 `PRODUCT-SPEC.md` §14 |
@@ -998,6 +1000,36 @@ IOProc이 큐를 못 넘김     버린 프레임을 세어 두고 **정지할 �
 
 ---
 
+### 2026-09-10 — **구독으로 노트를 만들었다** · 그리고 잡은 버그 셋
+
+이 제품이 처음으로 **끝에서 끝까지** 돌아간 날이다: 1시간 24분 회의 → 전사 → AI 노트.
+
+```text
+경로   audio → transcription(whisper) → ai::claude_cli → claude CLI → StructuredNote
+과금   API 크레딧이 아니라 구독. 앱은 자격증명을 만지지 않는다
+```
+
+**전날 몰랐던 구분이 여기서 갈렸다.** 서드파티 앱이 구독 OAuth 토큰을 받아 대신 요청하는
+것은 Anthropic이 금지한다(2026-04-04 시행). 그러나 **이 기기에 로그인된 공식 CLI를 부르는
+것**은 그것이 아니다. `ai/anthropic`(HTTP · API 크레딧)과 `ai/claude_cli`(프로세스 · 구독)가
+나란히 있는 이유가 이것이다.
+
+같은 날 잡은 버그 셋 — 셋 다 **사용자가 실제로 막힌 자리**다:
+
+```text
+진행 중에 갇힘   앱이 죽으면 DB의 running 표시가 남아 껐다 켜도 안 풀렸다.
+                 → 저장소를 열 때 정리한다 (앱 시작 시점에는 도는 작업이 있을 수 없다)
+예산이 하나였다  컨텍스트 1M 모델에게 로컬 기본값 16,384를 씌워 44 토큰 차이로 거절했다.
+                 → 예산을 provider가 말한다
+안 쓰는 키 칸    needsApiKey가 "기기 밖에서 도는가"로 판정해, CLI 경로에도 키를 물었다.
+                 → 자격증명 필요 여부를 provider의 사실로 옮겼다
+```
+
+화면도 이 날 성격을 얻었다 — 굵은 산세리프 하나(Wanted Sans), 보라 강조, 아이콘.
+**장식 금지 규칙을 운영자가 걷어냈고**, 여백/타입 스케일 · focus · dark 규율은 남겼다.
+
+---
+
 ## 6. Validation Model
 
 | | 무엇을 보장하는가 | 수단 |
@@ -1019,8 +1051,9 @@ IOProc이 큐를 못 넘김     버린 프레임을 세어 두고 **정지할 �
 
 이것들은 Gate 셋을 지났고 전용 테스트가 붙어 있다. **그것이 동작한다는 뜻은 아니다.**
 
-- **Claude provider가 노트를 만든 적이 없다.** API 키를 넣은 적이 없다. 401 갈래도
-  429 갈래도 실행된 적이 없다 (`ai/anthropic/provider.rs`)
+- ~~**Claude provider가 노트를 만든 적이 없다**~~ — 2026-09-10에 해소됐다. 다만 **HTTP
+  경로(`ai/anthropic`)가 아니라 CLI 경로(`ai/claude_cli`)로** 만들었다. HTTP 쪽은
+  실제로 400(크레딧 부족)까지 갔고 그 위는 여전히 미실행이다
 - **창 상투구 제거를 실제 전사로 확인하지 않았다.** 값으로만 검증했다 — 그 27개가
   실제로 사라지는 것을 본 적이 없다
 - **VAD는 효과를 보인 적이 없다.** 켜고 돌린 결과가 오히려 0.4%p 낮았다 (`ADR-0007` §22.2)
