@@ -629,3 +629,58 @@ fn status_or_error(
         value,
     })
 }
+
+/// 앱이 시작할 때, **끝나지 못한 채 남은 작업 표시를 정리한다** (2026-09-10).
+///
+/// ## 왜 필요한가
+///
+/// `transcription_status` · `ai_status` · `notion_status`는 **DB에 남는 사실**이다. 그래서
+/// 앱을 다시 켜도 그대로이며, 화면은 그 값을 읽어 "진행 중"이라고 말하고 시작 버튼을
+/// 감춘다 (`src/screens/transcriptView.ts`의 저장된 상태 갈래).
+///
+/// 그 설계는 **앱이 정상적으로 끝난다는 것을 전제로 했다.** 앱이 죽으면 그 표시가
+/// `running`인 채로 남고, 실제로 도는 것은 아무것도 없는데 화면은 영원히 진행 중이며
+/// 사용자에게는 빠져나올 수단이 없다. **2026-09-10에 실제로 그 일이 있었다** — 전날 앱이
+/// 죽으면서 1시간 24분짜리 녹음이 그 상태에 갇혔고, 껐다 켜도 풀리지 않았다.
+///
+/// ## 왜 시작할 때인가
+///
+/// **앱이 막 시작한 시점에는 도는 작업이 있을 수 없다.** 진행 중 표시가 남아 있다면 그것은
+/// 예외 없이 지난 실행이 남긴 것이다. 이 판정에 다른 정보가 필요하지 않다는 것이 이 자리를
+/// 고른 이유다.
+///
+/// ## 왜 `failed`인가
+///
+/// `none`으로 되돌리면 "시작한 적 없음"이 되어 **작업이 중단됐다는 사실이 사라진다.**
+/// `failed`는 일어난 일을 그대로 말하고, 화면에는 이미 다시 시도하는 길이 있다.
+///
+/// `pending`도 함께 정리한다 — 큐에 들어갔다가 시작되지 못한 것이며, 그것을 되살릴 주체가
+/// 이 앱에는 없다.
+///
+/// **다른 것은 아무것도 건드리지 않는다.** 오디오(INV-1)도 Transcript(INV-2)도 AI 노트도
+/// 그대로다. 바뀌는 것은 상태 표시 세 칸뿐이다.
+pub fn abandon_interrupted_work(
+    connection: &Connection,
+    updated_at: &str,
+) -> Result<usize, DatabaseError> {
+    let changed = connection
+        .execute(
+            "UPDATE recordings
+                SET transcription_status =
+                      CASE WHEN transcription_status IN ('running','pending')
+                           THEN 'failed' ELSE transcription_status END,
+                    ai_status =
+                      CASE WHEN ai_status IN ('running','pending')
+                           THEN 'failed' ELSE ai_status END,
+                    notion_status =
+                      CASE WHEN notion_status IN ('running','pending')
+                           THEN 'failed' ELSE notion_status END,
+                    updated_at = ?1
+              WHERE transcription_status IN ('running','pending')
+                 OR ai_status IN ('running','pending')
+                 OR notion_status IN ('running','pending')",
+            rusqlite::params![updated_at],
+        )
+        .map_err(DatabaseError::Sql)?;
+    Ok(changed)
+}

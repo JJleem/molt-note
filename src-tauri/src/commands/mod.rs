@@ -907,7 +907,18 @@ fn unix_seconds() -> u64 {
 /// 두 단계의 오류는 각자의 모듈이 domain 공통 실패로 옮긴다 (`?`가 그 변환을 부른다).
 fn initialize(app_data_dir: &AppDataDirectory) -> Result<Connection, Failure> {
     app_data_dir.ensure()?;
-    Ok(db::open_in(app_data_dir)?)
+    let connection = db::open_in(app_data_dir)?;
+
+    // **앱이 막 시작한 시점에는 도는 작업이 있을 수 없다.** 진행 중 표시가 남아 있다면 그것은
+    // 예외 없이 지난 실행이 남긴 것이며, 그대로 두면 화면이 영원히 "진행 중"이라고 말한다
+    // (`store::abandon_interrupted_work`의 문서에 그 사고 기록이 있다).
+    //
+    // 정리하지 못해도 앱은 연다 — 저장소를 여는 것과 지난 흔적을 치우는 것은 다른 일이고,
+    // 후자가 실패했다고 해서 녹음을 못 하게 만들 이유가 없다.
+    let now = store::now(&connection)?;
+    let _ = store::abandon_interrupted_work(&connection, &now);
+
+    Ok(connection)
 }
 
 /// 저장할 수 없는 값을 저장소까지 보내지 않는다.

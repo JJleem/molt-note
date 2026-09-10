@@ -56,7 +56,7 @@ const STATUS_TEXT: Record<ProcessingStatus, string> = {
   none: '시작 안 함',
   pending: '대기 중',
   running: '진행 중',
-  done: 'Done',
+  done: '완료',
   failed: '실패',
 };
 
