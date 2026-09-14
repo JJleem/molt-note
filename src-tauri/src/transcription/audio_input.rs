@@ -177,21 +177,18 @@ pub fn load(path: &Path) -> Result<TranscriptionInput, Failure> {
     // 무관한 수를 담을 수 있고, 그 수를 믿고 예약하면 잘린 파일 하나가 앱의 메모리를
     // 통째로 가져간다. 자리는 실제로 읽힌 만큼만 자란다.
     let channels = usize::from(spec.channels);
-    let divisor = f32::from(spec.channels);
     let mut mono: Vec<f32> = Vec::new();
-    let mut frame_sum = 0.0_f32;
+    let mut frame = vec![0_i16; channels];
     let mut filled = 0_usize;
 
     for sample in reader.samples::<i16>() {
         let sample =
             sample.map_err(|error| unreadable(path, "녹음 파일을 끝까지 읽지 못했다", error))?;
-        // 한쪽 채널만 골라 쓰지 않는다 — 마이크가 한쪽에만 잡힌 녹음에서 반대쪽을 고르면
-        // 무음이 된다. mono 입력에서는 `divisor`가 1이므로 값이 그대로 남는다.
-        frame_sum += f32::from(sample) / I16_FULL_SCALE;
+        // 접는 규칙은 `fold_frame` 하나뿐이다 — 흘려 읽는 이쪽은 프레임을 모아 그것에 준다.
+        frame[filled] = sample;
         filled += 1;
         if filled == channels {
-            mono.push(frame_sum / divisor);
-            frame_sum = 0.0;
+            mono.push(fold_frame(&frame));
             filled = 0;
         }
     }
@@ -226,6 +223,68 @@ pub fn load(path: &Path) -> Result<TranscriptionInput, Failure> {
         source_channels: spec.channels,
         resampled,
         downmixed,
+    })
+}
+
+/// 한 프레임의 채널들을 **하나의 값으로 접는다** — 채널 평균.
+///
+/// **한쪽 채널만 골라 쓰지 않는다.** 마이크가 한쪽에만 잡힌 녹음에서 반대쪽을 고르면
+/// 무음이 된다. mono 입력에서는 나누는 수가 1이므로 값이 그대로 남는다.
+///
+/// 이 규칙이 두 곳에 생기지 않도록 여기 하나만 둔다 — [`load`]도, 녹음 중인 파일을 따라
+/// 읽는 [`super::growing_wav`]도 이것을 쓴다.
+pub(super) fn fold_frame(frame: &[i16]) -> f32 {
+    if frame.is_empty() {
+        return 0.0;
+    }
+    let sum: f32 = frame.iter().map(|s| f32::from(*s) / I16_FULL_SCALE).sum();
+    sum / frame.len() as f32
+}
+
+/// 이미 메모리에 있는 interleave 샘플을 전사 입력으로 바꾼다 (2026-09-14).
+///
+/// [`load`]는 파일을 흘려 읽으며 같은 일을 한다 — 1시간짜리를 통째로 펼치지 않기 위해서다.
+/// 이쪽은 **이미 짧은 구간만 들고 있는** 호출자를 위한 자리이며(녹음 중 실시간 전사),
+/// 접는 규칙([`fold_frame`])과 옮기는 규칙([`resample`])을 그대로 공유한다.
+pub(super) fn from_interleaved(
+    path: &Path,
+    samples: &[i16],
+    channels: u16,
+    sample_rate: u32,
+) -> Result<TranscriptionInput, Failure> {
+    if channels == 0 || sample_rate == 0 {
+        return Err(unusable(path, "녹음 파일의 형식으로는 전사 입력을 만들 수 없다"));
+    }
+    let width = usize::from(channels);
+    if !samples.len().is_multiple_of(width) {
+        return Err(
+            unusable(path, "녹음 파일의 샘플 수가 채널 수와 맞지 않는다").with_detail(format!(
+                "samples={} channels={channels}",
+                samples.len()
+            )),
+        );
+    }
+
+    let mono: Vec<f32> = samples.chunks_exact(width).map(fold_frame).collect();
+    if mono.is_empty() {
+        return Err(unusable(path, "녹음 파일에 소리가 들어 있지 않다"));
+    }
+
+    let resampled = sample_rate != TARGET_SAMPLE_RATE_HZ;
+    let samples = if resampled {
+        resample(path, mono, sample_rate)?
+    } else {
+        mono
+    };
+
+    Ok(TranscriptionInput {
+        samples,
+        sample_rate_hz: TARGET_SAMPLE_RATE_HZ,
+        channels: TARGET_CHANNELS,
+        source_sample_rate_hz: sample_rate,
+        source_channels: channels,
+        resampled,
+        downmixed: channels != TARGET_CHANNELS,
     })
 }
 

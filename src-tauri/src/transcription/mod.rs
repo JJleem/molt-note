@@ -49,6 +49,7 @@ pub mod collapse;
 pub mod engine;
 pub mod gain;
 pub mod hallucination;
+pub mod growing_wav;
 pub mod live;
 pub mod model;
 pub mod parse;
