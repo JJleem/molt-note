@@ -51,6 +51,7 @@ pub mod gain;
 pub mod hallucination;
 pub mod growing_wav;
 pub mod live;
+pub mod live_run;
 pub mod model;
 pub mod parse;
 pub mod progress;
