@@ -135,6 +135,7 @@ pub use payload::{
     TranscriptionStatusPayload,
 };
 pub use saved_file::SavedFiles;
+pub use live_transcriber::{LiveState, LiveTranscriber};
 pub use transcriber::Transcriber;
 
 /// 앱이 들고 있는 로컬 저장소.
@@ -568,6 +569,15 @@ impl Recorder {
         }
     }
 
+    /// 지금 쓰이는 중인 녹음 파일의 경로. 녹음 중이 아니면 `None`이다.
+    ///
+    /// **아직 확정되지 않은 파일이다.** 읽는 쪽은 크기 필드를 믿지 않아야 한다
+    /// (`transcription::growing_wav`).
+    pub fn output_path(&self) -> Option<PathBuf> {
+        let active = self.active.lock().ok()?;
+        Some(active.as_ref()?.capture.output_path().to_path_buf())
+    }
+
     /// 마이크 접근 권한을 묻는 자리까지 주어진 것으로 바꾼다.
     ///
     /// **권한이 거부된 상태를 확인하는 테스트가 쓰는 자리다** — 실제 마이크 권한을 끄지 않고도
@@ -789,18 +799,65 @@ pub fn finish_recording(
     recorder: &Recorder,
     storage: &Storage,
     transcriber: &Transcriber,
+    live: &LiveTranscriber,
     title: Option<&str>,
 ) -> Result<StoppedRecordingPayload, Failure> {
+    let started = std::time::Instant::now();
     let capture = recorder.stop()?;
     let output_path = PathBuf::from(&capture.output_path);
+
+    // **정지한 뒤에 마무리한다.** 파일이 확정된 다음이라야 마지막 꼬리까지 온전히 읽힌다.
+    let live_result = live.finish();
 
     let recording = storage
         .save_capture(&capture, title)
         .map_err(|failure| keeping_file(not_listed(failure), &output_path))?;
 
-    start_automatic_transcription(storage, transcriber, &recording.id);
+    // 받아 적은 것이 있으면 그것이 이 녹음의 Transcript다 (운영자 결정 · 2026-09-14).
+    // **없으면 지금까지처럼 자동 전사가 판단한다.**
+    let saved_live = save_live_transcript(storage, &recording.id, live_result, started);
+    if !saved_live {
+        start_automatic_transcription(storage, transcriber, &recording.id);
+    }
 
     Ok(StoppedRecordingPayload { recording, capture })
+}
+
+/// 녹음 중에 받아 적은 것을 이 녹음의 Transcript로 저장한다.
+///
+/// ## 여기서 일어나는 어떤 일도 정지의 성공을 되돌리지 않는다
+///
+/// 파일은 이미 확정됐고 레코드도 저장됐다 (R-002). 저장에 실패하면 **Transcript가 없는
+/// 녹음**이 남을 뿐이며, 사용자는 전사 탭에서 다시 전사할 수 있다 — 그것은 지금까지도
+/// 정상 상태였다 (INV-8).
+///
+/// 저장했으면 `true`. 그때는 자동 전사를 걸지 않는다 — 같은 오디오를 두 번 전사하게 된다.
+fn save_live_transcript(
+    storage: &Storage,
+    recording_id: &str,
+    result: Option<live_transcriber::LiveOutcome>,
+    started: std::time::Instant,
+) -> bool {
+    let Some(outcome) = result else {
+        return false;
+    };
+    if outcome.progress.segments.is_empty() {
+        return false;
+    }
+
+    let Ok(mut connection) = storage.connection() else {
+        return false;
+    };
+    crate::transcription::run::save_live(
+        &mut connection,
+        &crate::domain::RecordingId::new(recording_id),
+        outcome.progress.language.clone(),
+        outcome.progress.segments.clone(),
+        outcome.engine_id.clone(),
+        outcome.model_id.clone(),
+        started.elapsed().as_millis() as i64,
+    )
+    .is_ok()
 }
 
 /// 방금 저장된 녹음의 전사를 **설정이 켜져 있을 때만** 시작한다 (ADR-0007 §8.2.3).
@@ -1011,6 +1068,8 @@ pub fn list_input_devices(
 #[tauri::command]
 pub fn start_capture(
     recorder: State<'_, Recorder>,
+    storage: State<'_, Storage>,
+    live: State<'_, LiveTranscriber>,
     device_key: String,
     mode: Option<String>,
 ) -> Result<(), Failure> {
@@ -1019,7 +1078,33 @@ pub fn start_capture(
         Some(key) => CaptureMode::from_key(key)?,
         None => CaptureMode::default(),
     };
-    recorder.start(&device_key, mode)
+    recorder.start(&device_key, mode)?;
+
+    // **녹음이 시작된 뒤에 건다.** 실패하면 여기까지 오지 않으므로, 녹음하지 않는데
+    // 받아 적는 일이 생기지 않는다.
+    begin_live_transcription(&recorder, &storage, &live);
+    Ok(())
+}
+
+/// 방금 시작된 녹음을 따라 적기 시작한다.
+///
+/// ## 여기서 일어나는 어떤 일도 녹음을 되돌리지 않는다
+///
+/// 이 함수는 실패를 돌려주지 않는다. 녹음은 이미 시작됐고, **실시간 전사는 덤이고 녹음이
+/// 본체다** (`LiveTranscriber` 모듈 문서). 설정을 못 읽어도, 모델이 없어도, 파일 경로를
+/// 모르는 상태여도 녹음은 그대로 간다 — 그 사실은 화면이 상태로 말한다.
+fn begin_live_transcription(recorder: &Recorder, storage: &Storage, live: &LiveTranscriber) {
+    let Some(path) = recorder.output_path() else {
+        return;
+    };
+    let Ok(settings) = storage.settings() else {
+        return;
+    };
+    live.begin_from_settings(
+        &path,
+        settings.transcription_model.as_deref(),
+        settings.transcription_language.as_deref(),
+    );
 }
 
 #[tauri::command]
@@ -1042,9 +1127,10 @@ pub fn stop_capture(
     recorder: State<'_, Recorder>,
     storage: State<'_, Storage>,
     transcriber: State<'_, Transcriber>,
+    live: State<'_, LiveTranscriber>,
     title: Option<String>,
 ) -> Result<StoppedRecordingPayload, Failure> {
-    finish_recording(&recorder, &storage, &transcriber, title.as_deref())
+    finish_recording(&recorder, &storage, &transcriber, &live, title.as_deref())
 }
 
 /// 레코드는 있는데 오디오 파일이 없는 녹음을 알린다. **아무것도 지우거나 고치지 않는다.**

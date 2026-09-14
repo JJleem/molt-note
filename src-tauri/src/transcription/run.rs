@@ -207,55 +207,15 @@ fn attempt(
     // 판정은 이 모듈이 하지 않는다 — 세는 것도 나누는 것도 임계값을 아는 것도 전부
     // [`collapse::assess`]의 몫이며 (ADR-0007 §18.3), 여기서 하는 일은 그 판정을 보고
     // **저장을 그만두는 것**이다.
-    let assessment = collapse::assess(&transcription.segments);
-    match assessment.verdict {
-        // 빈 결과 — 이미 있던 판정이며 붕괴 판정이 이것을 대체하지 않는다 (ADR-0007 §18.5).
-        // 엔진 구현이 출력 계약([`super::engine::ensure_usable`])을 지켰다면 여기 오지 않는다.
-        CollapseVerdict::Empty => {
-            return Err(output_unusable("전사 결과에 남은 문장이 없다").with_detail(format!(
-                "anomalies={}",
-                transcription.anomalies.len()
-            )));
-        }
-        // 붕괴 — 2026-09-07의 103개짜리가 `done`으로 저장되어 나간 자리다 (ADR-0007 §18.1).
-        CollapseVerdict::Collapsed { .. } => {
-            return Err(collapsed_output(&assessment, transcription.anomalies.len()));
-        }
-        CollapseVerdict::Usable => {}
-    }
-
-    // **판정이 끝난 뒤에 차단한다** (ADR-0007 §20.6). 위 `assess`가 본 수치(n · u · r)는
-    // **차단 전** 열의 것이며, 그래서 저장된 segment 수보다 클 수 있다. 그 차이를 설명하는
-    // 값이 `removed_count`다 — 순서를 바꾸면 판정이 스스로 고친 결과를 보게 된다.
+    // **저장 직전이 마지막 자리다** (ADR-0007 §18.5). 한 번 저장된 Transcript는 지우지도
+    // 고치지도 못하므로 (INV-2), 쓸 수 없는 결과를 막을 수 있는 자리는 여기뿐이다.
     //
-    // 2026-09-07까지 이 함수를 부르는 제품 코드가 없었다. 모듈과 테스트만 있었고, 그래서
-    // Phase 5.8이 만든 차단은 실사용에서 한 번도 동작하지 않았다.
-    // **창을 채운 상투구를 먼저 지운다** (`super::hallucination` · 2026-09-08).
-    //
-    // 반복 차단보다 앞이다: 이 상투구는 30초 창마다 하나씩 나오므로 *이어진* 것처럼 보이지만,
-    // 사이에 다른 문장이 끼면 반복 차단이 묶음을 성립시키지 못한다. 판정 근거가 다르므로
-    // (하나는 되풀이, 하나는 말의 속도) 서로를 대신하지 않고 순서만 정한다.
-    let despoken = hallucination::drop_windows_without_speech(&transcription.segments);
-    let removed_hallucinations = despoken.removed_count;
-
-    let blocked = block_consecutive_repeats(&despoken.segments);
-    let removed_segments = blocked.removed_count + removed_hallucinations;
-
-    // segment **안쪽**의 되풀이는 위 차단이 잡지 못한다 — 묶음이 성립하지 않기 때문이다
-    // (§20.6.1). "엉덩이 × 13"이 한 segment였던 자리다.
-    let mut shortened_segments = 0usize;
-    let segments: Vec<_> = blocked
-        .segments
-        .into_iter()
-        .map(|mut segment| {
-            let collapsed = collapse::collapse_repeated_phrases(&segment.text, MAX_CONSECUTIVE_REPEATS);
-            if collapsed != segment.text {
-                shortened_segments += 1;
-                segment.text = collapsed;
-            }
-            segment
-        })
-        .collect();
+    // 손질 순서와 규칙은 [`polish`] 하나에 있다 — 실시간 전사도 같은 것을 쓴다. 두 곳에
+    // 두면 한쪽만 고쳐졌을 때 결과가 갈린다.
+    let polished = polish(transcription.segments, transcription.anomalies.len())?;
+    let removed_segments = polished.removed_segments;
+    let shortened_segments = polished.shortened_segments;
+    let segments = polished.segments;
 
     // 여기까지가 "전사 한 건"이다. 실패한 시도의 시간은 남지 않는다 — 실패 경로는 Transcript를
     // 만들지 않으며, 이 값은 Transcript와 함께만 존재한다.
@@ -307,6 +267,115 @@ fn attempt(
         removed_segments,
         shortened_segments,
         gain,
+    })
+}
+
+/// **녹음 중에 받아 적은 것을 Transcript로 저장한다** (2026-09-14).
+///
+/// 운영자가 "녹음 중 결과가 곧 최종본"을 골랐으므로, 정지 뒤에 다시 전사하지 않는다.
+/// 대신 배치 전사와 **같은 손질**([`polish`])과 **같은 저장 순서**를 지난다 —
+/// 추가 → current로 올리기 → `done`.
+///
+/// **덮어쓰지 않는다** (§7.1 · INV-2). 저장소가 내놓는 것은 여전히
+/// [`store::append_transcript`] 하나이며, 나중에 사람이 다시 전사하면 판이 하나 더 는다.
+pub fn save_live(
+    connection: &mut Connection,
+    recording_id: &RecordingId,
+    language: Option<String>,
+    segments: Vec<parse::TranscriptSegment>,
+    engine_id: String,
+    model_id: String,
+    transcription_ms: i64,
+) -> Result<Transcript, Failure> {
+    let recording = store::load_recording(connection, recording_id)?
+        .ok_or_else(|| unknown_recording(recording_id))?;
+
+    let polished = polish(segments, 0)?;
+    let raw_text = parse::join_text(&polished.segments);
+
+    let transcript = Transcript {
+        id: TranscriptId::new(store::new_id(connection)?),
+        recording_id: recording.id.clone(),
+        // **엔진이 보고한 값이다** — 사용자가 고른 언어를 베껴 넣지 않는다.
+        language,
+        segments: polished
+            .segments
+            .into_iter()
+            .map(|segment| TranscriptSegment {
+                start_ms: segment.start_ms,
+                end_ms: segment.end_ms,
+                text: segment.text,
+            })
+            .collect(),
+        raw_text,
+        created_at: store::now(connection)?,
+        engine: engine_id,
+        model: model_id,
+        transcription_ms: Some(transcription_ms),
+    };
+
+    store::append_transcript(connection, &transcript)?;
+    let now = store::now(connection)?;
+    store::set_current_transcript(connection, &recording.id, Some(&transcript.id), &now)?;
+    mark(connection, &recording, ProcessingStatus::Done)?;
+
+    Ok(transcript)
+}
+
+/// **받아 적은 것을 저장 가능한 문장들로 다듬는다** (2026-09-14 · 실시간 전사).
+///
+/// 배치 전사가 `parse::normalize` 뒤에 하는 일과 **같은 순서 · 같은 규칙**이다 —
+/// 붕괴 판정 → 창 상투구 제거 → 되풀이 차단 → segment 안쪽 축약. 실시간 결과만 이 손질을
+/// 건너뛰면 그쪽만 품질이 뒤처지고, 그 결과가 최종본으로 저장된다 (운영자 결정).
+///
+/// **판정 규칙은 여기 없다.** 세는 것도 임계값도 전부 `collapse` · `hallucination`의 몫이다.
+pub struct Polished {
+    pub segments: Vec<parse::TranscriptSegment>,
+    pub removed_segments: usize,
+    pub shortened_segments: usize,
+}
+
+pub fn polish(
+    segments: Vec<parse::TranscriptSegment>,
+    anomaly_count: usize,
+) -> Result<Polished, Failure> {
+    let assessment = collapse::assess(&segments);
+    match assessment.verdict {
+        CollapseVerdict::Empty => {
+            return Err(output_unusable("전사 결과에 남은 문장이 없다")
+                .with_detail(format!("anomalies={anomaly_count}")));
+        }
+        CollapseVerdict::Collapsed { .. } => {
+            return Err(collapsed_output(&assessment, anomaly_count));
+        }
+        CollapseVerdict::Usable => {}
+    }
+
+    let despoken = hallucination::drop_windows_without_speech(&segments);
+    let removed_hallucinations = despoken.removed_count;
+
+    let blocked = block_consecutive_repeats(&despoken.segments);
+    let removed_segments = blocked.removed_count + removed_hallucinations;
+
+    let mut shortened_segments = 0usize;
+    let segments: Vec<_> = blocked
+        .segments
+        .into_iter()
+        .map(|mut segment| {
+            let collapsed =
+                collapse::collapse_repeated_phrases(&segment.text, MAX_CONSECUTIVE_REPEATS);
+            if collapsed != segment.text {
+                shortened_segments += 1;
+                segment.text = collapsed;
+            }
+            segment
+        })
+        .collect();
+
+    Ok(Polished {
+        segments,
+        removed_segments,
+        shortened_segments,
     })
 }
 

@@ -13,7 +13,8 @@ pub mod transcription;
 use tauri::Manager;
 
 use commands::{
-    AudioDevices, Exporter, NoteGenerator, NotionSender, Recorder, SavedFiles, Storage, Transcriber,
+    AudioDevices, Exporter, LiveTranscriber, NoteGenerator, NotionSender, Recorder, SavedFiles,
+    Storage, Transcriber,
 };
 use platform::app_data_dir::AppDataDirectory;
 
@@ -50,6 +51,11 @@ pub fn run() {
             // 없는 것은 앱 시작을 막는 문제가 아니라 전사를 시작할 때 알리는 제품 상태다
             // (§13 · ADR-0007 §8.2).
             app.manage(Transcriber::open_for(app));
+
+            // **녹음과 함께 도는 전사** (2026-09-14). 모델을 물고 있는 엔진을 쓰며,
+            // 여기서 일어나는 어떤 실패도 녹음을 멈추지 않는다
+            // (`commands::live_transcriber` 모듈 문서).
+            app.manage(LiveTranscriber::open_for(app));
 
             // 진행 중인 AI 노트 생성의 소유자도 여기다 — 전사와 같은 이유이며, 로컬 모델의
             // 생성은 그보다 더 오래 걸릴 수 있다 (ADR-0008 §12.2). 그래서 같은 규약을 쓴다:

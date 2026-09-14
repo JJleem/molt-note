@@ -64,6 +64,19 @@ pub enum LiveState {
     GaveUp(Failure),
 }
 
+/// 실시간 전사가 남긴 것 전부.
+///
+/// **결과와 provenance가 같은 자리에서 나온다** — 무엇으로 받아 적었는지는 나중에 따로
+/// 물어볼 수 없다. `finish`가 끝나면 모델도 언어도 놓이기 때문이다.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LiveOutcome {
+    pub progress: LiveProgress,
+    /// 이 전사를 만든 엔진 (§7 · ADR-0007 §8.2.4).
+    pub engine_id: String,
+    /// 실제로 쓴 모델 파일의 이름. 설정 값이 아니다.
+    pub model_id: String,
+}
+
 /// 실시간 전사가 쓰는 값 전부. 스레드와 바깥이 함께 본다.
 #[derive(Debug)]
 struct Shared {
@@ -78,6 +91,8 @@ struct Shared {
 /// [`Transcriber`](super::Transcriber)와 같은 모양이다 — 실제 엔진은 trait 뒤에 있고,
 /// 테스트는 자기 구현을 넣어 **실제 모델 없이** 이 경로를 그대로 지난다 (§18).
 pub struct LiveTranscriber {
+    /// 모델이 놓인 자리. 얻지 못했다면 그 실패를 들고 있다 — [`super::Storage`]와 같다.
+    app_data_dir: Result<crate::platform::app_data_dir::AppDataDirectory, Failure>,
     engine: Arc<dyn TranscriptionEngine>,
     shared: Arc<Shared>,
     worker: Mutex<Option<JoinHandle<()>>>,
@@ -93,8 +108,37 @@ struct Source {
 }
 
 impl LiveTranscriber {
+    /// 앱이 쓰는 실행자. **모델을 물고 있는 엔진**을 쓴다 — 30초마다 다시 올릴 수 없다
+    /// (`transcription::whisper::WhisperEngine::holding_the_model`).
+    pub fn open_for<R, M>(manager: &M) -> Self
+    where
+        R: tauri::Runtime,
+        M: tauri::Manager<R>,
+    {
+        Self {
+            app_data_dir: crate::platform::app_data_dir::AppDataDirectory::from_manager(manager)
+                .map_err(Into::into),
+            ..Self::with_engine(crate::transcription::whisper::WhisperEngine::holding_the_model())
+        }
+    }
+
+    /// 주어진 디렉터리에서 모델을 찾는 실행자. **테스트가 쓰는 자리다.**
+    pub fn with_app_data_dir(
+        app_data_dir: crate::platform::app_data_dir::AppDataDirectory,
+        engine: impl TranscriptionEngine + 'static,
+    ) -> Self {
+        Self {
+            app_data_dir: Ok(app_data_dir),
+            ..Self::with_engine(engine)
+        }
+    }
+
     pub fn with_engine(engine: impl TranscriptionEngine + 'static) -> Self {
         Self {
+            app_data_dir: Err(Failure::permanent(
+                crate::domain::FailureKind::Storage,
+                "이 실행자에는 모델 디렉터리가 주어지지 않았다.",
+            )),
             engine: Arc::new(engine),
             shared: Arc::new(Shared {
                 progress: Mutex::new(LiveProgress::default()),
@@ -134,6 +178,35 @@ impl LiveTranscriber {
         }
     }
 
+    /// 설정을 읽어 시작한다. **여기가 실패해도 녹음은 계속된다** (모듈 문서).
+    ///
+    /// 모델 해석 규칙을 새로 만들지 않는다 — 배치 전사가 쓰는
+    /// [`model::resolve`](crate::transcription::model::resolve) 그대로다.
+    pub fn begin_from_settings(
+        &self,
+        path: &Path,
+        configured_model: Option<&str>,
+        language: Option<&str>,
+    ) {
+        let models_dir = match self.app_data_dir.as_ref() {
+            Ok(app_data_dir) => app_data_dir.models_dir(),
+            Err(failure) => {
+                self.reset();
+                self.set_state(LiveState::GaveUp(failure.clone()));
+                return;
+            }
+        };
+
+        match crate::transcription::model::resolve(&models_dir, configured_model) {
+            Ok(model) => self.begin(path, model, language),
+            // 모델이 없거나 읽을 수 없다. **녹음을 막지 않는다** — 화면이 그 사실을 말한다.
+            Err(failure) => {
+                self.reset();
+                self.set_state(LiveState::GaveUp(failure));
+            }
+        }
+    }
+
     /// 지금까지 받아 적은 것. **화면이 묻는 자리다.**
     pub fn snapshot(&self) -> Vec<TranscriptSegment> {
         self.shared
@@ -154,7 +227,7 @@ impl LiveTranscriber {
     /// 녹음이 끝났다. **남은 꼬리까지 마저 전사하고** 결과를 돌려준다.
     ///
     /// 돌고 있지 않았으면 `None`이다 — 실패가 아니다.
-    pub fn finish(&self) -> Option<LiveProgress> {
+    pub fn finish(&self) -> Option<LiveOutcome> {
         self.shared.stop.store(true, Ordering::Release);
 
         // 스레드가 창 하나를 붙잡고 있을 수 있다. **기다린다** — 끝내지 않고 결과를 읽으면
@@ -189,7 +262,11 @@ impl LiveTranscriber {
         if matches!(self.state(), LiveState::Running) {
             self.set_state(LiveState::Idle);
         }
-        Some(progress)
+        Some(LiveOutcome {
+            progress,
+            engine_id: self.engine.engine_id(),
+            model_id: source.model.id().to_owned(),
+        })
     }
 
     fn reset(&self) {

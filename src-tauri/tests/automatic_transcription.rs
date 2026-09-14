@@ -209,7 +209,7 @@ impl Fixture {
             .expect("녹음을 시작할 수 있어야 한다");
         self.microphone.speak(1_000);
         self.clock.advance(5_000);
-        finish_recording(&self.recorder, &self.storage, &self.transcriber, None)
+        finish_recording(&self.recorder, &self.storage, &self.transcriber, &idle_live(), None)
             .expect("정지가 성공해야 한다")
     }
 
@@ -449,7 +449,7 @@ fn a_failed_stop_does_not_start_a_transcription() {
         .start(DEVICE_KEY, CaptureMode::Microphone)
         .expect("녹음을 시작할 수 있어야 한다");
     fixture.clock.advance(1_000);
-    finish_recording(&fixture.recorder, &fixture.storage, &fixture.transcriber, None)
+    finish_recording(&fixture.recorder, &fixture.storage, &fixture.transcriber, &idle_live(), None)
         .expect_err("사전 조건: 빈 녹음은 성공이 아니다");
     thread::sleep(SETTLE);
 
@@ -466,4 +466,21 @@ fn a_failed_stop_does_not_start_a_transcription() {
             .is_empty(),
         "사전 조건: 저장된 녹음이 없다"
     );
+}
+
+
+/// 실시간 전사를 쓰지 않는 실행자.
+///
+/// **이 파일이 판정하는 것은 정지와 저장이다.** `begin`을 부르지 않으므로 받아 적은 것이
+/// 없고, 그러면 지금까지와 같은 경로(자동 전사 판단)로 간다 — 그것이 여기서 확인하려는
+/// 동작이다.
+fn idle_live() -> molt_note_lib::commands::LiveTranscriber {
+    molt_note_lib::commands::LiveTranscriber::with_engine(
+        molt_note_lib::transcription::testing::StubEngine::failing(
+            molt_note_lib::domain::Failure::permanent(
+                molt_note_lib::domain::FailureKind::TranscriptionEngineFailed,
+                "이 테스트는 실시간 전사를 쓰지 않는다",
+            ),
+        ),
+    )
 }

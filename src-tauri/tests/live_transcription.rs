@@ -179,7 +179,7 @@ fn sentences_appear_while_the_recording_is_still_going() {
     wait_until("둘째 문장이 보인다", || live.snapshot().len() >= 2);
 
     let finished = live.finish().expect("결과가 있어야 한다");
-    assert!(finished.segments.len() >= 2);
+    assert!(finished.progress.segments.len() >= 2);
 }
 
 #[test]
@@ -193,8 +193,8 @@ fn every_sentence_sits_on_the_recording_timeline() {
     wait_until("두 창이 전사된다", || live.snapshot().len() >= 2);
 
     let finished = live.finish().expect("결과가 있어야 한다");
-    assert_eq!(finished.segments[0].start_ms, 0);
-    assert_eq!(finished.segments[1].start_ms, 30_000);
+    assert_eq!(finished.progress.segments[0].start_ms, 0);
+    assert_eq!(finished.progress.segments[1].start_ms, 30_000);
 }
 
 #[test]
@@ -211,8 +211,8 @@ fn stopping_picks_up_the_tail_that_never_filled_a_window() {
     recording.record(5);
     let finished = live.finish().expect("결과가 있어야 한다");
 
-    assert_eq!(finished.segments.len(), 2, "꼬리가 전사돼야 한다");
-    assert_eq!(finished.done_frames, 37 * 16_000, "끝까지 나아가야 한다");
+    assert_eq!(finished.progress.segments.len(), 2, "꼬리가 전사돼야 한다");
+    assert_eq!(finished.progress.done_frames, 37 * 16_000, "끝까지 나아가야 한다");
 }
 
 #[test]
@@ -234,7 +234,7 @@ fn an_engine_that_always_fails_gives_up_without_touching_the_recording() {
 
     // 포기한 뒤에도 정지는 결과를 돌려준다 — 받아 적은 것이 없을 뿐이다.
     let finished = live.finish().expect("결과가 있어야 한다");
-    assert!(finished.segments.is_empty());
+    assert!(finished.progress.segments.is_empty());
 }
 
 #[test]

@@ -183,7 +183,7 @@ fn record_something(
     recorder.start(DEVICE_KEY, CaptureMode::Microphone).expect("녹음을 시작할 수 있어야 한다");
     microphone.speak(1_000);
     clock.advance(5_000);
-    finish_recording(recorder, storage, transcriber, None).expect("정지가 성공해야 한다")
+    finish_recording(recorder, storage, transcriber, &idle_live(), None).expect("정지가 성공해야 한다")
 }
 
 /// 확정된 WAV 파일에 실제로 들어 있는 샘플 전부.
@@ -228,7 +228,7 @@ fn a_successful_stop_means_the_file_is_confirmed_and_the_record_is_saved() {
     clock.advance(2_000);
 
     let stopped =
-        finish_recording(&recorder, &storage, &transcriber, None).expect("정지가 성공해야 한다");
+        finish_recording(&recorder, &storage, &transcriber, &idle_live(), None).expect("정지가 성공해야 한다");
     let audio = PathBuf::from(&stopped.recording.audio_path);
 
     // 1. 파일 경로가 실제로 존재한다.
@@ -276,7 +276,7 @@ fn a_stop_that_captured_no_sound_is_a_failure_the_user_sees() {
 
     recorder.start(DEVICE_KEY, CaptureMode::Microphone).expect("녹음을 시작할 수 있어야 한다");
     clock.advance(1_000);
-    let failure = finish_recording(&recorder, &storage, &transcriber, None)
+    let failure = finish_recording(&recorder, &storage, &transcriber, &idle_live(), None)
         .expect_err("빈 녹음은 성공이 아니다");
 
     let written = wav_files(&recordings_dir);
@@ -301,13 +301,13 @@ fn a_title_the_user_typed_is_saved_and_a_blank_one_becomes_one_made_from_the_sav
     recorder.start(DEVICE_KEY, CaptureMode::Microphone).expect("시작");
     microphone.speak(1_000);
     clock.advance(1_000);
-    let named = finish_recording(&recorder, &storage, &transcriber, Some("  3DGS Study #04  "))
+    let named = finish_recording(&recorder, &storage, &transcriber, &idle_live(), Some("  3DGS Study #04  "))
         .expect("정지가 성공해야 한다");
 
     recorder.start(DEVICE_KEY, CaptureMode::Microphone).expect("두 번째 시작");
     microphone.speak(2_000);
     clock.advance(1_000);
-    let unnamed = finish_recording(&recorder, &storage, &transcriber, Some("   "))
+    let unnamed = finish_recording(&recorder, &storage, &transcriber, &idle_live(), Some("   "))
         .expect("정지가 성공해야 한다");
 
     assert_eq!(named.recording.title, "3DGS Study #04", "입력한 제목이 저장된다");
@@ -342,7 +342,7 @@ fn a_recording_that_cannot_be_saved_keeps_its_audio_and_tells_the_user_where_it_
     recorder.start(DEVICE_KEY, CaptureMode::Microphone).expect("녹음을 시작할 수 있어야 한다");
     microphone.speak(1_000);
     clock.advance(4_000);
-    let failure = finish_recording(&recorder, &storage, &transcriber, None)
+    let failure = finish_recording(&recorder, &storage, &transcriber, &idle_live(), None)
         .expect_err("레코드를 남기지 못했으면 정지는 성공이 아니다");
 
     // 파일은 남아 있고, 내용도 그대로다.
@@ -420,12 +420,12 @@ fn no_failure_on_any_path_removes_audio_that_was_already_written() {
     // 1. 상태에 맞지 않는 요청들 — 거절이며 파일을 건드리지 않는다.
     recorder.pause().expect_err("녹음 중이 아니다");
     recorder.resume().expect_err("일시정지 상태가 아니다");
-    finish_recording(&recorder, &storage, &transcriber, None).expect_err("정지할 녹음이 없다");
+    finish_recording(&recorder, &storage, &transcriber, &idle_live(), None).expect_err("정지할 녹음이 없다");
 
     // 2. 소리 없는 녹음 — 확인에 실패하지만 만들어진 파일은 남는다.
     recorder.start(DEVICE_KEY, CaptureMode::Microphone).expect("시작");
     clock.advance(1_000);
-    finish_recording(&recorder, &storage, &transcriber, None).expect_err("빈 녹음은 성공이 아니다");
+    finish_recording(&recorder, &storage, &transcriber, &idle_live(), None).expect_err("빈 녹음은 성공이 아니다");
 
     // 3. 이미 녹음 중인데 또 시작 — 거절이며 진행 중인 녹음도 파일도 그대로다.
     recorder.start(DEVICE_KEY, CaptureMode::Microphone).expect("시작");
@@ -433,7 +433,7 @@ fn no_failure_on_any_path_removes_audio_that_was_already_written() {
     clock.advance(1_000);
     recorder.start(DEVICE_KEY, CaptureMode::Microphone).expect_err("이미 녹음 중이다");
     let second =
-        finish_recording(&recorder, &storage, &transcriber, None).expect("정지가 성공해야 한다");
+        finish_recording(&recorder, &storage, &transcriber, &idle_live(), None).expect("정지가 성공해야 한다");
 
     // 앞선 녹음은 파일도 레코드도 그대로다.
     assert_eq!(
@@ -450,4 +450,21 @@ fn no_failure_on_any_path_removes_audio_that_was_already_written() {
         storage.missing_audio().expect("감지를 부를 수 있어야 한다").is_empty(),
         "레코드가 가리키는 파일은 전부 제자리에 있다"
     );
+}
+
+
+/// 실시간 전사를 쓰지 않는 실행자.
+///
+/// **이 파일이 판정하는 것은 정지와 저장이다.** `begin`을 부르지 않으므로 받아 적은 것이
+/// 없고, 그러면 지금까지와 같은 경로(자동 전사 판단)로 간다 — 그것이 여기서 확인하려는
+/// 동작이다.
+fn idle_live() -> molt_note_lib::commands::LiveTranscriber {
+    molt_note_lib::commands::LiveTranscriber::with_engine(
+        molt_note_lib::transcription::testing::StubEngine::failing(
+            molt_note_lib::domain::Failure::permanent(
+                molt_note_lib::domain::FailureKind::TranscriptionEngineFailed,
+                "이 테스트는 실시간 전사를 쓰지 않는다",
+            ),
+        ),
+    )
 }
