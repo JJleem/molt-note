@@ -89,6 +89,7 @@
 //! 이것이다 — 여기서 죽으면 사용자는 아무 설명도 받지 못하고, 실패는 콘솔에만 남는다 (§13).
 
 pub mod export;
+pub mod live_transcriber;
 pub mod notes;
 pub mod notion;
 pub mod payload;

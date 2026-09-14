@@ -1,0 +1,274 @@
+//! **녹음이 도는 동안 전사를 함께 돌리는 실행자** (2026-09-14).
+//!
+//! ```text
+//! Recorder::start ─→ LiveTranscriber::begin ─→ 배경 스레드
+//!                                                 └ live_run::advance 를 되풀이
+//! Recorder::stop  ─→ LiveTranscriber::finish ─→ 남은 꼬리까지 전사하고 결과를 돌려준다
+//! ```
+//!
+//! ## 녹음이 절대 위험해지지 않는다
+//!
+//! **이 모듈의 어떤 실패도 녹음을 멈추지 않는다.** 모델을 못 올려도, 파일을 못 읽어도,
+//! 전사가 실패해도 녹음은 계속된다 — 실시간 전사는 **덤이고 녹음이 본체다.**
+//!
+//! 그래서 [`Self::begin`]은 실패를 돌려주지 않는다. 시작하지 못했다는 사실은 상태로
+//! 남고, 화면은 "지금은 받아 적지 않는다"고 말할 뿐이다.
+//!
+//! 읽기만 한다는 것도 같은 약속의 일부다 — 원본 오디오는 읽기 전용이며(INV-1) 이 경로는
+//! 파일을 열어 읽을 뿐 쓰는 쪽을 기다리게 하지 않는다 (`transcription::growing_wav`).
+//!
+//! ## 왜 스레드 하나인가
+//!
+//! 창은 순서대로 이어져야 한다 — 앞 창의 꼬리가 다음 창의 문맥이고, `done_frames`가
+//! 하나뿐이다. 여럿이 나눠 돌면 그 둘이 깨진다. **[실측 2026-09-14] 전사는 약 10배속**
+//! 이므로 하나로도 밀리지 않는다.
+
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::thread::{self, JoinHandle};
+use std::time::Duration;
+
+use crate::domain::Failure;
+use crate::transcription::engine::{LanguageChoice, TranscriptionEngine};
+use crate::transcription::growing_wav::GrowingWav;
+use crate::transcription::live_run::{self, LiveProgress, Step};
+use crate::transcription::model::ModelFile;
+use crate::transcription::parse::TranscriptSegment;
+
+/// 전사할 것이 없을 때 다음에 물어볼 때까지 쉬는 시간.
+///
+/// **짧을 이유가 없다.** 창 하나가 30초이므로 그보다 촘촘히 물어봐야 답은 같다.
+/// 길면 녹음이 끝난 뒤 마지막 창이 늦게 잡힌다 — 그 사이를 고른 값이다.
+const IDLE_PAUSE: Duration = Duration::from_secs(2);
+
+/// 실패한 뒤 다시 시도하기까지 쉬는 시간.
+///
+/// **실패해도 바로 포기하지 않는다.** 파일이 아직 안 열렸거나 디스크가 잠깐 바쁜 것일 수
+/// 있다. 되풀이가 로그를 채울 걱정은 [`MAX_CONSECUTIVE_FAILURES`]가 막으므로, 이 값은
+/// **정말 안 되는 경우를 빨리 알려 주는 쪽**으로 잡는다 — 둘을 곱한 만큼이 포기까지
+/// 걸리는 시간이고, 그동안 화면은 "받아 적는 중"이라고 말하고 있다.
+const RETRY_PAUSE: Duration = Duration::from_secs(2);
+
+/// 연달아 이만큼 실패하면 **실시간 전사만** 그만둔다. 녹음은 계속된다.
+const MAX_CONSECUTIVE_FAILURES: usize = 5;
+
+/// 지금 실시간 전사가 어떤 상태인가.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LiveState {
+    /// 돌고 있지 않다. **정상 상태다** — 녹음 중이 아니거나 이 기능을 쓰지 않는다.
+    Idle,
+    /// 녹음과 함께 돌고 있다.
+    Running,
+    /// 시작하지 못했거나 도중에 그만뒀다. **녹음과는 무관하다.**
+    GaveUp(Failure),
+}
+
+/// 실시간 전사가 쓰는 값 전부. 스레드와 바깥이 함께 본다.
+#[derive(Debug)]
+struct Shared {
+    progress: Mutex<LiveProgress>,
+    state: Mutex<LiveState>,
+    /// 그만 돌라는 신호. **스레드는 이것만 본다.**
+    stop: AtomicBool,
+}
+
+/// 앱이 들고 있는 실시간 전사 실행자.
+///
+/// [`Transcriber`](super::Transcriber)와 같은 모양이다 — 실제 엔진은 trait 뒤에 있고,
+/// 테스트는 자기 구현을 넣어 **실제 모델 없이** 이 경로를 그대로 지난다 (§18).
+pub struct LiveTranscriber {
+    engine: Arc<dyn TranscriptionEngine>,
+    shared: Arc<Shared>,
+    worker: Mutex<Option<JoinHandle<()>>>,
+    /// 지금 따라 읽는 녹음 파일. 마무리할 때 같은 파일을 본다.
+    source: Mutex<Option<Source>>,
+}
+
+#[derive(Debug, Clone)]
+struct Source {
+    path: PathBuf,
+    model: ModelFile,
+    language: LanguageChoice,
+}
+
+impl LiveTranscriber {
+    pub fn with_engine(engine: impl TranscriptionEngine + 'static) -> Self {
+        Self {
+            engine: Arc::new(engine),
+            shared: Arc::new(Shared {
+                progress: Mutex::new(LiveProgress::default()),
+                state: Mutex::new(LiveState::Idle),
+                stop: AtomicBool::new(false),
+            }),
+            worker: Mutex::new(None),
+            source: Mutex::new(None),
+        }
+    }
+
+    /// 녹음이 시작됐다. 따라 적기 시작한다.
+    ///
+    /// **실패를 돌려주지 않는다** (모듈 문서). 시작하지 못하면 [`LiveState::GaveUp`]으로
+    /// 남고 녹음은 그대로 간다.
+    pub fn begin(&self, path: &Path, model: ModelFile, language: Option<&str>) {
+        self.reset();
+
+        let language = LanguageChoice::from_setting(language);
+        let source = Source {
+            path: path.to_path_buf(),
+            model,
+            language,
+        };
+        if let Ok(mut held) = self.source.lock() {
+            *held = Some(source.clone());
+        }
+
+        self.set_state(LiveState::Running);
+
+        let engine = Arc::clone(&self.engine);
+        let shared = Arc::clone(&self.shared);
+        let handle = thread::spawn(move || follow(&source, engine.as_ref(), &shared));
+
+        if let Ok(mut worker) = self.worker.lock() {
+            *worker = Some(handle);
+        }
+    }
+
+    /// 지금까지 받아 적은 것. **화면이 묻는 자리다.**
+    pub fn snapshot(&self) -> Vec<TranscriptSegment> {
+        self.shared
+            .progress
+            .lock()
+            .map(|progress| progress.segments.clone())
+            .unwrap_or_default()
+    }
+
+    pub fn state(&self) -> LiveState {
+        self.shared
+            .state
+            .lock()
+            .map(|state| state.clone())
+            .unwrap_or(LiveState::Idle)
+    }
+
+    /// 녹음이 끝났다. **남은 꼬리까지 마저 전사하고** 결과를 돌려준다.
+    ///
+    /// 돌고 있지 않았으면 `None`이다 — 실패가 아니다.
+    pub fn finish(&self) -> Option<LiveProgress> {
+        self.shared.stop.store(true, Ordering::Release);
+
+        // 스레드가 창 하나를 붙잡고 있을 수 있다. **기다린다** — 끝내지 않고 결과를 읽으면
+        // 마지막 창이 빠지거나 `done_frames`가 어긋난다.
+        if let Ok(mut worker) = self.worker.lock() {
+            if let Some(handle) = worker.take() {
+                let _ = handle.join();
+            }
+        }
+
+        let source = self.source.lock().ok()?.take()?;
+        let mut progress = self.shared.progress.lock().ok()?.clone();
+
+        // 마지막 꼬리는 여기서 전사한다 — 스레드가 아니라. 그래야 "정지했는데 아직
+        // 몇 초가 비어 있다"가 생기지 않는다.
+        match GrowingWav::open(&source.path) {
+            Ok(wav) => {
+                if let Err(failure) = live_run::finish(
+                    &wav,
+                    self.engine.as_ref(),
+                    &source.model,
+                    &source.language,
+                    &mut progress,
+                ) {
+                    // 꼬리를 못 읽어도 **앞서 받아 적은 것은 그대로 돌려준다.**
+                    self.set_state(LiveState::GaveUp(failure));
+                }
+            }
+            Err(failure) => self.set_state(LiveState::GaveUp(failure)),
+        }
+
+        if matches!(self.state(), LiveState::Running) {
+            self.set_state(LiveState::Idle);
+        }
+        Some(progress)
+    }
+
+    fn reset(&self) {
+        self.shared.stop.store(false, Ordering::Release);
+        if let Ok(mut progress) = self.shared.progress.lock() {
+            *progress = LiveProgress::default();
+        }
+    }
+
+    fn set_state(&self, state: LiveState) {
+        if let Ok(mut held) = self.shared.state.lock() {
+            *held = state;
+        }
+    }
+}
+
+/// 배경 스레드가 하는 일 전부.
+///
+/// **여기서 나오는 어떤 실패도 녹음을 건드리지 않는다.** 연달아 실패하면 실시간 전사만
+/// 그만두고, 그 사실이 상태로 남는다.
+fn follow(source: &Source, engine: &dyn TranscriptionEngine, shared: &Shared) {
+    let wav = match GrowingWav::open(&source.path) {
+        Ok(wav) => wav,
+        Err(failure) => {
+            give_up(shared, failure);
+            return;
+        }
+    };
+
+    let mut failures = 0_usize;
+
+    while !shared.stop.load(Ordering::Acquire) {
+        // **자물쇠를 쥔 채 전사하지 않는다.** 전사는 수 초가 걸리고, 그동안 화면이
+        // 지금까지 받아 적은 것을 읽지 못하면 화면이 멎은 것처럼 보인다.
+        let mut working = match shared.progress.lock() {
+            Ok(progress) => progress.clone(),
+            Err(_) => return,
+        };
+
+        match live_run::advance(&wav, engine, &source.model, &source.language, &mut working) {
+            Ok(Step::Advanced) => {
+                failures = 0;
+                if let Ok(mut progress) = shared.progress.lock() {
+                    *progress = working;
+                }
+                // 바로 다음 창을 본다 — 밀려 있다면 따라잡아야 한다.
+                continue;
+            }
+            Ok(Step::NotYet) => {
+                failures = 0;
+                sleep_unless_stopped(shared, IDLE_PAUSE);
+            }
+            Err(failure) => {
+                failures += 1;
+                if failures >= MAX_CONSECUTIVE_FAILURES {
+                    give_up(shared, failure);
+                    return;
+                }
+                sleep_unless_stopped(shared, RETRY_PAUSE);
+            }
+        }
+    }
+}
+
+/// 쉬되, 그만하라는 신호가 오면 바로 깬다.
+fn sleep_unless_stopped(shared: &Shared, total: Duration) {
+    const TICK: Duration = Duration::from_millis(200);
+    let mut slept = Duration::ZERO;
+    while slept < total {
+        if shared.stop.load(Ordering::Acquire) {
+            return;
+        }
+        thread::sleep(TICK);
+        slept += TICK;
+    }
+}
+
+fn give_up(shared: &Shared, failure: Failure) {
+    if let Ok(mut state) = shared.state.lock() {
+        *state = LiveState::GaveUp(failure);
+    }
+}
