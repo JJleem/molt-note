@@ -36,10 +36,12 @@ import { toFailure, type Failure } from '../ipc/failure';
 import type {
   CaptureMode,
   InputDevice,
+  LiveTranscription,
   InputLevelVerdict,
   SessionState,
   SessionStatus,
   StoppedRecording,
+  TranscriptSegment,
 } from '../ipc/types';
 import { MISSING_DEFAULT_MICROPHONE_LABEL, resolveDefaultMicrophone } from './defaultMicrophone';
 
@@ -609,4 +611,46 @@ export function inputLevelMeter(view: RecordingView): InputLevelMeter | null {
   }
 
   return { fill: level.meterFill, weak: isWeak(level.verdict) };
+}
+
+/**
+ * 녹음 중에 받아 적은 것을 화면에 놓는 규칙 (2026-09-14).
+ *
+ * ## 무엇을 말할지가 상태마다 다르다
+ *
+ * ```text
+ * 받아 적는 중 · 아직 문장 없음   "받아 적는 중…"  — 30초쯤 걸린다는 사실을 함께
+ * 받아 적는 중 · 문장 있음        문장을 보여준다
+ * 그만둠                          왜 그만뒀는지. **녹음은 계속된다는 말과 함께**
+ * 돌지 않음                       아무것도 두지 않는다
+ * ```
+ *
+ * **그만둔 것은 실패 화면이 아니다** (INV-8). 녹음은 그대로 돌고 있고, 정지한 뒤
+ * 전사 탭에서 다시 전사하면 된다 — 그 사실을 말하지 않으면 사용자는 녹음까지
+ * 잘못된 줄 안다.
+ */
+export type LiveLinesView =
+  | { readonly kind: 'hidden' }
+  | { readonly kind: 'waiting'; readonly text: string }
+  | { readonly kind: 'lines'; readonly lines: readonly TranscriptSegment[] }
+  | { readonly kind: 'gaveUp'; readonly text: string; readonly failure: Failure | null };
+
+/** 아직 첫 문장이 나오기 전에 놓는 말. **얼마나 기다리는지 함께 말한다.** */
+export const LIVE_WAITING_TEXT = '받아 적는 중… 첫 문장은 30초쯤 뒤에 나온다.';
+
+/** 받아 적기를 그만뒀다. **녹음은 계속된다는 것이 이 문장의 핵심이다.** */
+export const LIVE_GAVE_UP_TEXT =
+  '지금은 받아 적지 않는다. 녹음은 계속되고 있으며, 정지한 뒤 전사할 수 있다.';
+
+export function liveLines(live: LiveTranscription | null): LiveLinesView {
+  if (live === null || live.state === 'idle') {
+    return { kind: 'hidden' };
+  }
+  if (live.state === 'gaveUp') {
+    return { kind: 'gaveUp', text: LIVE_GAVE_UP_TEXT, failure: live.failure };
+  }
+  if (live.lines.length === 0) {
+    return { kind: 'waiting', text: LIVE_WAITING_TEXT };
+  }
+  return { kind: 'lines', lines: live.lines };
 }

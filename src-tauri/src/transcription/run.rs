@@ -125,6 +125,63 @@ pub struct Completed {
     pub shortened_segments: usize,
 }
 
+/// **받아 적은 것을 저장 가능한 문장들로 다듬는다** (2026-09-14 · 실시간 전사).
+///
+/// 배치 전사가 `parse::normalize` 뒤에 하는 일과 **같은 순서 · 같은 규칙**이다 —
+/// 붕괴 판정 → 창 상투구 제거 → 되풀이 차단 → segment 안쪽 축약. 실시간 결과만 이 손질을
+/// 건너뛰면 그쪽만 품질이 뒤처지고, 그 결과가 최종본으로 저장된다 (운영자 결정).
+///
+/// **판정 규칙은 여기 없다.** 세는 것도 임계값도 전부 `collapse` · `hallucination`의 몫이다.
+pub struct Polished {
+    pub segments: Vec<parse::TranscriptSegment>,
+    pub removed_segments: usize,
+    pub shortened_segments: usize,
+}
+
+pub fn polish(
+    segments: Vec<parse::TranscriptSegment>,
+    anomaly_count: usize,
+) -> Result<Polished, Failure> {
+    let assessment = collapse::assess(&segments);
+    match assessment.verdict {
+        CollapseVerdict::Empty => {
+            return Err(output_unusable("전사 결과에 남은 문장이 없다")
+                .with_detail(format!("anomalies={anomaly_count}")));
+        }
+        CollapseVerdict::Collapsed { .. } => {
+            return Err(collapsed_output(&assessment, anomaly_count));
+        }
+        CollapseVerdict::Usable => {}
+    }
+
+    let despoken = hallucination::drop_windows_without_speech(&segments);
+    let removed_hallucinations = despoken.removed_count;
+
+    let blocked = block_consecutive_repeats(&despoken.segments);
+    let removed_segments = blocked.removed_count + removed_hallucinations;
+
+    let mut shortened_segments = 0usize;
+    let segments: Vec<_> = blocked
+        .segments
+        .into_iter()
+        .map(|mut segment| {
+            let collapsed =
+                collapse::collapse_repeated_phrases(&segment.text, MAX_CONSECUTIVE_REPEATS);
+            if collapsed != segment.text {
+                shortened_segments += 1;
+                segment.text = collapsed;
+            }
+            segment
+        })
+        .collect();
+
+    Ok(Polished {
+        segments,
+        removed_segments,
+        shortened_segments,
+    })
+}
+
 /// Recording 하나를 전사하고 결과를 영속화한다.
 ///
 /// 상태는 실제로 세 번(또는 두 번 + 실패) 저장된다 — `pending` · `running` 다음에 `done`
@@ -320,63 +377,6 @@ pub fn save_live(
     mark(connection, &recording, ProcessingStatus::Done)?;
 
     Ok(transcript)
-}
-
-/// **받아 적은 것을 저장 가능한 문장들로 다듬는다** (2026-09-14 · 실시간 전사).
-///
-/// 배치 전사가 `parse::normalize` 뒤에 하는 일과 **같은 순서 · 같은 규칙**이다 —
-/// 붕괴 판정 → 창 상투구 제거 → 되풀이 차단 → segment 안쪽 축약. 실시간 결과만 이 손질을
-/// 건너뛰면 그쪽만 품질이 뒤처지고, 그 결과가 최종본으로 저장된다 (운영자 결정).
-///
-/// **판정 규칙은 여기 없다.** 세는 것도 임계값도 전부 `collapse` · `hallucination`의 몫이다.
-pub struct Polished {
-    pub segments: Vec<parse::TranscriptSegment>,
-    pub removed_segments: usize,
-    pub shortened_segments: usize,
-}
-
-pub fn polish(
-    segments: Vec<parse::TranscriptSegment>,
-    anomaly_count: usize,
-) -> Result<Polished, Failure> {
-    let assessment = collapse::assess(&segments);
-    match assessment.verdict {
-        CollapseVerdict::Empty => {
-            return Err(output_unusable("전사 결과에 남은 문장이 없다")
-                .with_detail(format!("anomalies={anomaly_count}")));
-        }
-        CollapseVerdict::Collapsed { .. } => {
-            return Err(collapsed_output(&assessment, anomaly_count));
-        }
-        CollapseVerdict::Usable => {}
-    }
-
-    let despoken = hallucination::drop_windows_without_speech(&segments);
-    let removed_hallucinations = despoken.removed_count;
-
-    let blocked = block_consecutive_repeats(&despoken.segments);
-    let removed_segments = blocked.removed_count + removed_hallucinations;
-
-    let mut shortened_segments = 0usize;
-    let segments: Vec<_> = blocked
-        .segments
-        .into_iter()
-        .map(|mut segment| {
-            let collapsed =
-                collapse::collapse_repeated_phrases(&segment.text, MAX_CONSECUTIVE_REPEATS);
-            if collapsed != segment.text {
-                shortened_segments += 1;
-                segment.text = collapsed;
-            }
-            segment
-        })
-        .collect();
-
-    Ok(Polished {
-        segments,
-        removed_segments,
-        shortened_segments,
-    })
 }
 
 /// 붕괴한 전사를 §13의 실패 하나로 옮긴다 (ADR-0007 §18.4).

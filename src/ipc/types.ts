@@ -140,6 +140,29 @@ export type SessionState = 'idle' | 'recording' | 'paused' | 'stopped';
 export type CaptureMode = 'microphone' | 'meeting';
 
 /**
+ * 녹음 중에 받아 적기가 어떤 상태인가 (2026-09-14).
+ *
+ * ```text
+ * idle    돌고 있지 않다 — 녹음 중이 아니다
+ * running 녹음과 함께 받아 적는 중이다
+ * gaveUp  받아 적기를 그만뒀다. **녹음과는 무관하다**
+ * ```
+ *
+ * `gaveUp`은 실패 화면이 아니다 (INV-8). 녹음은 그대로 돌고 있으며, 정지한 뒤에 전사
+ * 탭에서 다시 전사하면 된다.
+ */
+export type LiveTranscriptionState = 'idle' | 'running' | 'gaveUp';
+
+/** 녹음 중에 지금까지 받아 적은 것. */
+export interface LiveTranscription {
+  readonly state: LiveTranscriptionState;
+  /** 이미 녹음 전체의 시간축으로 옮겨진 문장들. */
+  readonly lines: readonly TranscriptSegment[];
+  /** 그만둔 이유. 그 외에는 `null`이다. */
+  readonly failure: Failure | null;
+}
+
+/**
  * 입력 레벨 판정 하나 (docs/ADR-0003-recording-engine.md §16.4).
  *
  * `src-tauri/src/audio/level.rs`의 `LevelVerdict`와 1:1이다 — 이름도 뜻도 같다.

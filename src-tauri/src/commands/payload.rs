@@ -1316,3 +1316,44 @@ pub struct AiCredentialStatusPayload {
     /// 저장돼 있으면 `true`. **저장한 적이 없는 것은 실패가 아니다** (INV-8).
     pub stored: bool,
 }
+
+/// 녹음 중에 지금까지 받아 적은 것 (2026-09-14).
+///
+/// **상태와 문장이 함께 온다.** 문장이 비어 있는 것만으로는 "아직 안 나왔다"와 "받아 적지
+/// 않는다"를 가를 수 없고, 화면은 그 둘에 서로 다른 말을 해야 한다.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LiveTranscriptionPayload {
+    /// `idle` · `running` · `gaveUp` 중 하나. **벤더도 엔진도 드러내지 않는다** (INV-9).
+    pub state: &'static str,
+    /// 지금까지 나온 문장. 이미 녹음 전체의 시간축으로 옮겨져 있다.
+    pub lines: Vec<TranscriptSegmentPayload>,
+    /// 받아 적기를 그만둔 이유. 그 외에는 `null`이다.
+    pub failure: Option<Failure>,
+}
+
+impl From<&crate::commands::LiveTranscriber> for LiveTranscriptionPayload {
+    fn from(live: &crate::commands::LiveTranscriber) -> Self {
+        let (state, failure) = match live.state() {
+            crate::commands::LiveState::Idle => ("idle", None),
+            crate::commands::LiveState::Running => ("running", None),
+            crate::commands::LiveState::GaveUp(failure) => ("gaveUp", Some(failure)),
+        };
+
+        Self {
+            state,
+            // `parse::TranscriptSegment`(전사 안쪽의 값)를 domain의 것으로 옮긴다 —
+            // 실시간 경로는 아직 Transcript가 되기 전의 문장을 들고 있다.
+            lines: live
+                .snapshot()
+                .into_iter()
+                .map(|segment| TranscriptSegmentPayload {
+                    start_ms: segment.start_ms,
+                    end_ms: segment.end_ms,
+                    text: segment.text,
+                })
+                .collect(),
+            failure,
+        }
+    }
+}

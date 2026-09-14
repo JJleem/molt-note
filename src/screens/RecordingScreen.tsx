@@ -3,18 +3,23 @@ import {
   captureStatus,
   getSettings,
   listInputDevices,
+  liveTranscription,
   pauseCapture,
   resumeCapture,
   startCapture,
   stopCapture,
 } from '../ipc/commands';
+import type { LiveTranscription } from '../ipc/types';
 import { Icon } from './Icon';
+// 시각 표기는 **허용된 한 모듈**에만 있다 (`tests/screen-boundary.test.ts`).
+import { formatTimestamp } from './transcriptView';
 import { FailureNotice } from './FailureNotice';
 import {
   INITIAL_RECORDING,
   CAPTURE_MODES,
   canSelectMode,
   editedTitle,
+  liveLines,
   modeHint,
   selectedMode,
   failedAction,
@@ -45,6 +50,14 @@ import type { ScreenProps } from './types';
 const ELAPSED_REFRESH_MS = 500;
 
 /**
+ * 받아 적은 것을 다시 물어보는 간격.
+ *
+ * 창 하나가 30초이므로 그보다 촘촘히 물어야 답이 같다. 2초는 **새 문장이 나온 직후에
+ * 곧바로 보이게** 하는 값이며, 목록이 길어져도 이 정도면 부담이 되지 않는다.
+ */
+const LIVE_REFRESH_MS = 2_000;
+
+/**
  * 녹음 화면 (§5.B).
  *
  * 보여주는 것은 §5 B가 정한 네 가지다 — **제목 · 선택된 microphone · 경과 시간 ·
@@ -70,6 +83,13 @@ export function RecordingScreen({ navigate }: ScreenProps) {
   const [view, setView] = useState<RecordingView>(INITIAL_RECORDING);
   /** 장치·설정을 다시 읽은 횟수. 늘어나면 다시 읽는다. */
   const [deviceAttempt, setDeviceAttempt] = useState(0);
+  /**
+   * 녹음 중에 받아 적은 것 (2026-09-14).
+   *
+   * **화면이 만들어 내지 않는다** — backend가 준 값을 그대로 나른다. 상태를 아직
+   * 물어보지 못했으면 `null`이고, 그때는 아무것도 두지 않는다.
+   */
+  const [live, setLive] = useState<LiveTranscription | null>(null);
 
   /**
    * 마지막으로 보낸 상태 조회의 번호.
@@ -156,6 +176,38 @@ export function RecordingScreen({ navigate }: ScreenProps) {
     return () => clearInterval(timer);
   }, [refreshStatus, sessionState]);
 
+  /**
+   * 받아 적은 것을 되풀이해 물어본다 (2026-09-14).
+   *
+   * **경과 시간보다 훨씬 드물게 묻는다.** 창 하나가 30초이므로 그보다 촘촘히 물어야
+   * 답이 같고, 문장 목록은 경과 시간보다 무거운 값이다.
+   *
+   * 녹음이 끝나면 물어보기를 그만두되 **마지막 답은 남긴다** — 정지 직후의 화면이
+   * 갑자기 비지 않게 한다.
+   */
+  useEffect(() => {
+    if (sessionState !== 'recording' && sessionState !== 'paused') {
+      return;
+    }
+    let current = true;
+    const ask = () => {
+      liveTranscription().then(
+        (next) => {
+          if (current) setLive(next);
+        },
+        // 받아 적기 상태를 못 물어본 것은 녹음의 실패가 아니다 (INV-8). 지난 답을 남긴다.
+        () => undefined,
+      );
+    };
+
+    ask();
+    const timer = setInterval(ask, LIVE_REFRESH_MS);
+    return () => {
+      current = false;
+      clearInterval(timer);
+    };
+  }, [sessionState]);
+
   useEffect(() => {
     // 응답이 오기 전에 화면을 떠났다면 그 응답으로 상태를 바꾸지 않는다.
     let current = true;
@@ -227,6 +279,7 @@ export function RecordingScreen({ navigate }: ScreenProps) {
 
   const controls = recordingControls(view);
   const modeSelectable = canSelectMode(view);
+  const heard = liveLines(live);
   const display = sessionDisplay(view);
   const level = inputLevelDisplay(view);
   const meter = inputLevelMeter(view);
@@ -307,6 +360,38 @@ export function RecordingScreen({ navigate }: ScreenProps) {
           </>
         )}
       </section>
+
+      {/* 녹음 중에 받아 적은 것 (2026-09-14). **상태와 경과 시간 아래에 온다** — 이
+          화면에서 가장 큰 것은 여전히 그 둘이다 (§19). 무엇을 보일지 정하는 규칙은
+          여기 없고 `liveLines`에 있다. */}
+      {heard.kind === 'waiting' && (
+        <p className="heard__waiting" role="status" aria-live="polite">
+          {heard.text}
+        </p>
+      )}
+
+      {heard.kind === 'gaveUp' && (
+        <div className="heard__gave-up" role="status">
+          {/* **실패 화면이 아니다** (INV-8). 녹음이 계속된다는 것이 이 문장의 핵심이다. */}
+          <p className="heard__gave-up-text">{heard.text}</p>
+          {heard.failure !== null && <p className="hint">{heard.failure.message}</p>}
+        </div>
+      )}
+
+      {heard.kind === 'lines' && (
+        <section className="heard" aria-label="받아 적은 말">
+          {/* 새 문장이 아래에 쌓인다. **읽고 있는 자리를 빼앗지 않는다** — 스스로
+              따라 내려가지 않으므로, 위를 보고 있으면 위에 머문다. */}
+          <ol className="heard__lines">
+            {heard.lines.map((line) => (
+              <li key={`${line.startMs}-${line.text}`} className="heard__line">
+                <span className="heard__time">{formatTimestamp(line.startMs)}</span>
+                <span className="heard__text">{line.text}</span>
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
 
       {/* 쓸 수 없을 만큼 낮으면 **정지 전에** 알린다 (ADR-0003 §16.1). 이것은 실패가 아니므로
           FailureNotice가 아니고, 녹음을 막지도 않는다 — 사람이 정한다 (§16.5). */}

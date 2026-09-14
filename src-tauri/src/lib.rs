@@ -147,6 +147,7 @@ pub fn run() {
             commands::resume_capture,
             commands::stop_capture,
             commands::capture_status,
+            commands::live_transcription,
             // 레코드와 파일이 어긋난 상태를 알리는 자리다 — 고치거나 지우지 않는다 (INV-4).
             commands::list_missing_audio,
             // 전사를 **움직이는** 표면은 이 둘뿐이다 — 한 건 시작과 상태 조회. 여러 Recording을

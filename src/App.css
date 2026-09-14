@@ -633,6 +633,75 @@ p.loading {
 }
 
 /*
+ * 녹음 중에 받아 적은 말 (2026-09-14).
+ *
+ * **상태와 경과 시간 아래에 온다** — 이 화면에서 가장 큰 것은 여전히 그 둘이다 (§19).
+ * 그래서 글자도 본문보다 작고, 자리도 스스로 따라 내려가지 않는다: 위를 읽고 있으면
+ * 새 문장이 쌓여도 위에 머문다.
+ */
+
+.heard {
+  max-width: 640px;
+  margin-bottom: var(--space-5);
+  padding: var(--space-4);
+  background-color: var(--surface-sidebar);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-lg);
+  /* 길어지면 이 안에서만 넘친다. 화면 전체가 밀려나지 않는다. */
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.heard__lines {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.heard__line {
+  display: grid;
+  grid-template-columns: 5em minmax(0, 1fr);
+  gap: var(--space-3);
+  font-size: var(--type-secondary);
+  line-height: var(--line-normal);
+}
+
+.heard__time {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+
+.heard__waiting {
+  margin: 0 0 var(--space-5);
+  font-size: var(--type-secondary);
+  color: var(--text-muted);
+}
+
+/*
+ * 받아 적기를 그만뒀다. **실패 화면이 아니다** (INV-8) — 녹음은 계속되고 있다.
+ * 그래서 위험한 색을 쓰지 않고, 조용한 면 위에 사실만 적는다.
+ */
+
+.heard__gave-up {
+  max-width: 640px;
+  margin-bottom: var(--space-5);
+  padding: var(--space-3) var(--space-4);
+  background-color: var(--surface-sidebar);
+  border-left: 2px solid var(--hairline);
+  border-radius: var(--radius-sm);
+}
+
+.heard__gave-up-text {
+  margin: 0;
+  font-size: var(--type-secondary);
+  line-height: var(--line-normal);
+}
+
+/*
  * 아이콘 (2026-09-09).
  *
  * 크기는 부모의 글자 크기를 따르고(`1em`), 색은 `currentColor`다 — 자리마다 값을 적지

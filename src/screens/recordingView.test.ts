@@ -18,6 +18,7 @@ import {
   CAPTURE_MODES,
   INITIAL_RECORDING,
   canSelectMode,
+  liveLines,
   modeHint,
   selectedMode,
   UNKNOWN_ELAPSED,
@@ -679,5 +680,60 @@ describe('녹음 모드 (§22 · ADR-0012)', () => {
   it('고를 수 있는 모드가 두 가지이고 이름이 겹치지 않는다', () => {
     expect(CAPTURE_MODES.map((mode) => mode.value)).toEqual(['microphone', 'meeting']);
     expect(new Set(CAPTURE_MODES.map((mode) => mode.label)).size).toBe(CAPTURE_MODES.length);
+  });
+});
+
+describe('녹음 중에 받아 적은 말 (2026-09-14)', () => {
+  const at = (
+    state: 'idle' | 'running' | 'gaveUp',
+    lines: { startMs: number; endMs: number; text: string }[] = [],
+    failure: Failure | null = null,
+  ) => ({ state, lines, failure }) as const;
+
+  it('돌지 않으면 아무것도 두지 않는다', () => {
+    // 아직 물어보지 못한 것과 돌지 않는 것 둘 다 조용해야 한다.
+    expect(liveLines(null).kind).toBe('hidden');
+    expect(liveLines(at('idle')).kind).toBe('hidden');
+  });
+
+  it('아직 첫 문장이 없으면 얼마나 기다리는지 말한다', () => {
+    // 지키려는 것: **멎은 것처럼 보이지 않는다.** 창 하나가 30초라 첫 문장까지 그만큼
+    // 걸리는데, 아무 말이 없으면 고장난 줄 안다.
+    const view = liveLines(at('running'));
+    expect(view.kind).toBe('waiting');
+    expect(view.kind === 'waiting' && view.text).toContain('30초');
+  });
+
+  it('문장이 나오면 그대로 보여준다', () => {
+    const view = liveLines(at('running', [{ startMs: 0, endMs: 900, text: '들린 말' }]));
+    expect(view.kind).toBe('lines');
+    expect(view.kind === 'lines' && view.lines).toHaveLength(1);
+  });
+
+  it('그만뒀을 때 녹음은 계속된다고 말한다', () => {
+    // 지키려는 것: **실패 화면이 아니다** (INV-8). 이 말이 없으면 사용자는 녹음까지
+    // 잘못된 줄 알고 정지해 버린다.
+    const view = liveLines(at('gaveUp'));
+    expect(view.kind).toBe('gaveUp');
+    expect(view.kind === 'gaveUp' && view.text).toContain('녹음은 계속');
+  });
+
+  it('그만둔 이유가 있으면 함께 나른다', () => {
+    const failure: Failure = {
+      kind: 'transcriptionModelMissing',
+      message: '모델 파일을 찾지 못했다.',
+      detail: null,
+      retryable: false,
+      sourceDataSafe: true,
+    };
+    const view = liveLines(at('gaveUp', [], failure));
+    expect(view.kind === 'gaveUp' && view.failure).toBe(failure);
+  });
+
+  it('그만뒀으면 그때까지 받아 적은 것보다 그 사실을 먼저 말한다', () => {
+    // 문장이 조금 있더라도 "지금은 받아 적지 않는다"가 먼저다 — 그것을 모르면
+    // 사용자는 계속 쌓이는 줄 알고 기다린다.
+    const view = liveLines(at('gaveUp', [{ startMs: 0, endMs: 900, text: '들린 말' }]));
+    expect(view.kind).toBe('gaveUp');
   });
 });

@@ -114,6 +114,7 @@ const REGISTERED_COMMANDS = [
   'delete_recording',
   'get_settings',
   'update_settings',
+  'live_transcription',
   'list_input_devices',
   'start_capture',
   'pause_capture',
@@ -232,12 +233,18 @@ describe('command 표면', () => {
     // `get_transcript_text`가 넷째로 늘었다. **그것은 읽기 파생 하나이지 전사 큐가 아니다** —
     // 저장된 current Transcript를 사람이 붙여 넣을 수 있는 문자열로 돌려줄 뿐이며
     // (docs/ADR-0010-manual-ai-handoff.md §5.4), 전사를 시작하지도 큐에 넣지도 않는다.
+    //
+    // `live_transcription`이 다섯째로 늘었다 (2026-09-14). **그것도 읽기 하나다** —
+    // 녹음 중에 지금까지 받아 적은 것을 묻는다. 시작하는 자리는 `start_capture` 하나이며
+    // (녹음과 함께 걸린다) 이 이름으로는 시작할 수도, 취소할 수도, 큐에 넣을 수도 없다.
+    //
     // 큐를 막는다는 이 검사의 목적은 그대로다.
     const transcription = registeredCommands().filter((command) => /transcri/i.test(command));
 
     expect(transcription.sort()).toEqual([
       'get_transcript',
       'get_transcript_text',
+      'live_transcription',
       'start_transcription',
       'transcription_status',
     ]);

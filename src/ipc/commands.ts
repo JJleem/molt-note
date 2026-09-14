@@ -30,6 +30,7 @@ import type {
   ExportedFile,
   HandoffText,
   InputDevice,
+  LiveTranscription,
   MissingAudio,
   NewRecording,
   NoteMode,
@@ -60,6 +61,7 @@ export type {
   ExportedFile,
   HandoffText,
   InputDevice,
+  LiveTranscription,
   MeetingNote,
   MissingAudio,
   NewRecording,
@@ -188,6 +190,16 @@ export function startCapture(deviceKey: string, mode: CaptureMode): Promise<void
  * 장치도 파일도 열려 있는 채로 남는다 — 이 시점 이후의 소리는 파일에 들어가지 않고,
  * 흐르는 시간도 녹음 길이에 더해지지 않는다. 녹음 중이 아니면 실패한다.
  */
+/**
+ * 녹음 중에 지금까지 받아 적은 것 (2026-09-14).
+ *
+ * **돌고 있지 않은 것은 실패가 아니다** (INV-8). 받아 적지 않아도 녹음은 계속되며,
+ * 정지한 뒤 전사 탭에서 다시 전사할 수 있다.
+ */
+export function liveTranscription(): Promise<LiveTranscription> {
+  return call<LiveTranscription>('live_transcription');
+}
+
 export function pauseCapture(): Promise<void> {
   return call<void>('pause_capture');
 }

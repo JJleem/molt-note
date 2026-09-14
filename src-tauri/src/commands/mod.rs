@@ -132,7 +132,7 @@ pub use payload::{
     NotionTokenStatusPayload, PortionPayload,
     RecordingPayload, SessionStatusPayload, SettingsPayload, StoppedRecordingPayload,
     StructuredNotePayload, TextSizePayload, TranscriptPayload, TranscriptSegmentPayload,
-    TranscriptionStatusPayload,
+    LiveTranscriptionPayload, TranscriptionStatusPayload,
 };
 pub use saved_file::SavedFiles;
 pub use live_transcriber::{LiveState, LiveTranscriber};
@@ -1105,6 +1105,15 @@ fn begin_live_transcription(recorder: &Recorder, storage: &Storage, live: &LiveT
         settings.transcription_model.as_deref(),
         settings.transcription_language.as_deref(),
     );
+}
+
+/// 녹음 중에 지금까지 받아 적은 것 (2026-09-14).
+///
+/// **돌고 있지 않은 것은 실패가 아니다** (INV-8). 실시간 전사를 시작하지 못했거나 도중에
+/// 그만뒀으면 그 사실이 상태로 오며, 녹음은 그것과 무관하게 계속된다.
+#[tauri::command]
+pub fn live_transcription(live: State<'_, LiveTranscriber>) -> LiveTranscriptionPayload {
+    LiveTranscriptionPayload::from(&*live)
 }
 
 #[tauri::command]
