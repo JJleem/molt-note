@@ -110,6 +110,7 @@
 //! ADR-0007 §4.2가 B를 고른 이유이기 때문이다. 사람이 옮겨 둔 파일이 없어도 저장소가 엔진을
 //! 재현한다.
 
+use std::sync::{Arc, Mutex};
 use whisper_rs::{
     FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters, WhisperVadParams,
 };
@@ -136,15 +137,40 @@ const WHISPER_RS_VERSION: &str = "0.16";
 /// 스레드 수를 정하지 못했을 때 쓰는 값. 어떤 기기에서도 도는 보수적인 기본값이다.
 const FALLBACK_THREADS: i32 = 4;
 
+/// 한 번 열어 들고 있는 모델 하나.
+///
+/// **경로가 곧 신원이다.** 사용자가 설정에서 모델을 바꾸면 경로가 달라지고, 그때 앞의
+/// 것을 놓는다.
+struct HeldModel {
+    path: std::path::PathBuf,
+    context: Arc<WhisperContext>,
+}
+
+impl std::fmt::Debug for HeldModel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // 모델 내용은 찍지 않는다 — 수 GB다.
+        f.debug_struct("HeldModel").field("path", &self.path).finish()
+    }
+}
+
 /// 실제 whisper 엔진.
 ///
-/// **모델을 미리 들고 있지 않는다.** 모델은 [`TranscriptionEngine::transcribe`]마다 열린다 —
-/// 사용자가 설정에서 모델을 바꾸면 다음 전사부터 바로 그 모델이 쓰이고, 쓰지 않는 동안 수 GB를
-/// 메모리에 붙들고 있지 않는다. 이 선택의 대가는 전사마다 드는 모델 적재 시간이다.
-#[derive(Debug, Clone, Default)]
+/// **기본은 모델을 들고 있지 않는 것이다.** 모델은 [`TranscriptionEngine::transcribe`]마다
+/// 열린다 — 사용자가 설정에서 모델을 바꾸면 다음 전사부터 바로 그 모델이 쓰이고, 쓰지 않는
+/// 동안 수 GB를 메모리에 붙들고 있지 않는다. 이 선택의 대가는 전사마다 드는 모델 적재
+/// 시간이며, 배치 전사는 한 번에 한 파일을 끝내므로 그 대가가 한 번뿐이다.
+///
+/// **실시간 전사는 그 대가를 감당할 수 없다** (2026-09-14). 30초마다 한 번씩 부르는데
+/// 매번 1.6GB를 다시 읽으면 적재가 전사보다 오래 걸린다. 그래서 [`Self::holding_the_model`]이
+/// 있다 — 같은 모델이면 다시 열지 않는다.
+#[derive(Debug, Default)]
 pub struct WhisperEngine {
     /// 추론에 쓸 스레드 수. `None`이면 기기에서 얻는다.
     threads: Option<i32>,
+    /// 한 번 연 모델을 그대로 들고 있을 것인가. **켜면 메모리를 계속 쓴다.**
+    hold_the_model: bool,
+    /// 들고 있는 모델. `hold_the_model`이 켜졌을 때만 채워진다.
+    held: Mutex<Option<HeldModel>>,
     /// 조각이 끝날 때마다 나온 문장을 놓아 두는 자리. 없으면 아무것도 보고하지 않는다.
     ///
     /// **이것은 저장 경로가 아니다** (`progress` 모듈 문서). 여기 놓인 값은 미리보기이며,
@@ -158,11 +184,27 @@ impl WhisperEngine {
         Self::default()
     }
 
+    /// **모델을 한 번 열고 계속 들고 있는 엔진** (2026-09-14 · 실시간 전사).
+    ///
+    /// 같은 모델을 다시 부르면 열지 않는다. 다른 모델을 부르면 **앞의 것을 놓고** 새로
+    /// 연다 — 두 개를 동시에 들고 있지 않는다.
+    ///
+    /// 쓰는 쪽이 수명을 정한다: 이 엔진을 놓으면 모델도 함께 놓인다. 그래서 실시간 전사는
+    /// 녹음이 끝날 때 이 엔진을 버리고, 그 순간 메모리가 돌아온다.
+    pub fn holding_the_model() -> Self {
+        Self {
+            hold_the_model: true,
+            ..Self::default()
+        }
+    }
+
     /// 스레드 수를 고정한 엔진. 1 미만은 1로 올린다.
     pub fn with_threads(threads: i32) -> Self {
         Self {
             threads: Some(threads.max(1)),
             progress: None,
+            hold_the_model: false,
+            held: Mutex::new(None),
         }
     }
 
@@ -185,6 +227,50 @@ impl WhisperEngine {
     }
 }
 
+impl WhisperEngine {
+    /// 이 모델의 context. **들고 있으면 그것을, 아니면 새로 연다.**
+    ///
+    /// 모델 적재 실패는 **실행 실패와 구분한다** — 파일이 손상됐거나 이 엔진이 지원하지
+    /// 않는 모델이라는 뜻이고, 다시 시도해도 같다 (§13 `unsupported whisper model`).
+    fn context_for(&self, model: &ModelFile, path: &str) -> Result<Arc<WhisperContext>, Failure> {
+        let open = || {
+            WhisperContext::new_with_params(path, WhisperContextParameters::default())
+                .map(Arc::new)
+                .map_err(|error| {
+                    model_unusable(format!(
+                        "이 모델 파일로는 전사할 수 없다: {}",
+                        model.path().display()
+                    ))
+                    .with_detail(error)
+                })
+        };
+
+        if !self.hold_the_model {
+            return open();
+        }
+
+        let mut held = self.held.lock().map_err(|_| {
+            model_unusable("모델을 들고 있던 자리를 더 이상 쓸 수 없다. 앱을 다시 시작해야 한다.")
+        })?;
+
+        if let Some(current) = held.as_ref() {
+            if current.path == model.path() {
+                return Ok(Arc::clone(&current.context));
+            }
+            // 다른 모델을 부르면 **앞의 것을 먼저 놓는다.** 둘을 동시에 들고 있으면
+            // 큰 모델 두 개가 메모리에 남는다.
+            *held = None;
+        }
+
+        let context = open()?;
+        *held = Some(HeldModel {
+            path: model.path().to_path_buf(),
+            context: Arc::clone(&context),
+        });
+        Ok(context)
+    }
+}
+
 impl TranscriptionEngine for WhisperEngine {
     fn engine_id(&self) -> String {
         format!("whisper-rs/{WHISPER_RS_VERSION}")
@@ -204,16 +290,7 @@ impl TranscriptionEngine for WhisperEngine {
             .with_detail("경로가 UTF-8이 아니다")
         })?;
 
-        // 모델 적재 실패는 **실행 실패와 구분한다** — 파일이 손상됐거나 이 엔진이 지원하지
-        // 않는 모델이라는 뜻이고, 다시 시도해도 같다 (§13 `unsupported whisper model`).
-        let context = WhisperContext::new_with_params(path, WhisperContextParameters::default())
-            .map_err(|error| {
-                model_unusable(format!(
-                    "이 모델 파일로는 전사할 수 없다: {}",
-                    model.path().display()
-                ))
-                .with_detail(error)
-            })?;
+        let context = self.context_for(model, path)?;
 
         // **VAD 모델을 모델 파일 옆에서 찾는다.** `model::resolve`가 상대 이름을 모델
         // 디렉터리 안에서 풀므로 보통은 그 디렉터리이고, 사용자가 절대 경로로 모델을 다른
