@@ -1337,6 +1337,7 @@ impl From<&crate::commands::LiveTranscriber> for LiveTranscriptionPayload {
         let (state, failure) = match live.state() {
             crate::commands::LiveState::Idle => ("idle", None),
             crate::commands::LiveState::Running => ("running", None),
+            crate::commands::LiveState::Finishing => ("finishing", None),
             crate::commands::LiveState::GaveUp(failure) => ("gaveUp", Some(failure)),
         };
 

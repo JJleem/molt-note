@@ -458,13 +458,13 @@ fn no_failure_on_any_path_removes_audio_that_was_already_written() {
 /// **이 파일이 판정하는 것은 정지와 저장이다.** `begin`을 부르지 않으므로 받아 적은 것이
 /// 없고, 그러면 지금까지와 같은 경로(자동 전사 판단)로 간다 — 그것이 여기서 확인하려는
 /// 동작이다.
-fn idle_live() -> molt_note_lib::commands::LiveTranscriber {
-    molt_note_lib::commands::LiveTranscriber::with_engine(
+fn idle_live() -> std::sync::Arc<molt_note_lib::commands::LiveTranscriber> {
+    std::sync::Arc::new(molt_note_lib::commands::LiveTranscriber::with_engine(
         molt_note_lib::transcription::testing::StubEngine::failing(
             molt_note_lib::domain::Failure::permanent(
                 molt_note_lib::domain::FailureKind::TranscriptionEngineFailed,
                 "이 테스트는 실시간 전사를 쓰지 않는다",
             ),
         ),
-    )
+    ))
 }

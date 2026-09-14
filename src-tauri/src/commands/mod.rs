@@ -799,66 +799,31 @@ pub fn finish_recording(
     recorder: &Recorder,
     storage: &Storage,
     transcriber: &Transcriber,
-    live: &LiveTranscriber,
+    live: &std::sync::Arc<LiveTranscriber>,
     title: Option<&str>,
 ) -> Result<StoppedRecordingPayload, Failure> {
-    let started = std::time::Instant::now();
     let capture = recorder.stop()?;
     let output_path = PathBuf::from(&capture.output_path);
 
-    // **정지한 뒤에 마무리한다.** 파일이 확정된 다음이라야 마지막 꼬리까지 온전히 읽힌다.
-    let live_result = live.finish();
-
+    // **파일이 확정된 다음은 레코드다.** 그 사이에 다른 일을 끼워 넣지 않는다 — 2026-09-14에
+    // 여기서 남은 구간 전사를 돌렸다가 UI가 7분 멈췄고, 그동안 레코드도 저장되지 않았다.
     let recording = storage
         .save_capture(&capture, title)
         .map_err(|failure| keeping_file(not_listed(failure), &output_path))?;
 
-    // 받아 적은 것이 있으면 그것이 이 녹음의 Transcript다 (운영자 결정 · 2026-09-14).
-    // **없으면 지금까지처럼 자동 전사가 판단한다.**
-    let saved_live = save_live_transcript(storage, &recording.id, live_result, started);
-    if !saved_live {
+    // 여기까지가 정지의 성공이다 (R-002). 아래의 어떤 일도 그것을 되돌리지 않는다.
+    //
+    // 받아 적던 것이 있으면 **배경에서** 마저 전사해 저장한다. 없으면 지금까지처럼
+    // 자동 전사가 판단한다.
+    if live.was_following() {
+        live.finish_in_background(recording.id.clone());
+    } else {
         start_automatic_transcription(storage, transcriber, &recording.id);
     }
 
     Ok(StoppedRecordingPayload { recording, capture })
 }
 
-/// 녹음 중에 받아 적은 것을 이 녹음의 Transcript로 저장한다.
-///
-/// ## 여기서 일어나는 어떤 일도 정지의 성공을 되돌리지 않는다
-///
-/// 파일은 이미 확정됐고 레코드도 저장됐다 (R-002). 저장에 실패하면 **Transcript가 없는
-/// 녹음**이 남을 뿐이며, 사용자는 전사 탭에서 다시 전사할 수 있다 — 그것은 지금까지도
-/// 정상 상태였다 (INV-8).
-///
-/// 저장했으면 `true`. 그때는 자동 전사를 걸지 않는다 — 같은 오디오를 두 번 전사하게 된다.
-fn save_live_transcript(
-    storage: &Storage,
-    recording_id: &str,
-    result: Option<live_transcriber::LiveOutcome>,
-    started: std::time::Instant,
-) -> bool {
-    let Some(outcome) = result else {
-        return false;
-    };
-    if outcome.progress.segments.is_empty() {
-        return false;
-    }
-
-    let Ok(mut connection) = storage.connection() else {
-        return false;
-    };
-    crate::transcription::run::save_live(
-        &mut connection,
-        &crate::domain::RecordingId::new(recording_id),
-        outcome.progress.language.clone(),
-        outcome.progress.segments.clone(),
-        outcome.engine_id.clone(),
-        outcome.model_id.clone(),
-        started.elapsed().as_millis() as i64,
-    )
-    .is_ok()
-}
 
 /// 방금 저장된 녹음의 전사를 **설정이 켜져 있을 때만** 시작한다 (ADR-0007 §8.2.3).
 ///
@@ -1069,7 +1034,7 @@ pub fn list_input_devices(
 pub fn start_capture(
     recorder: State<'_, Recorder>,
     storage: State<'_, Storage>,
-    live: State<'_, LiveTranscriber>,
+    live: State<'_, std::sync::Arc<LiveTranscriber>>,
     device_key: String,
     mode: Option<String>,
 ) -> Result<(), Failure> {
@@ -1112,8 +1077,10 @@ fn begin_live_transcription(recorder: &Recorder, storage: &Storage, live: &LiveT
 /// **돌고 있지 않은 것은 실패가 아니다** (INV-8). 실시간 전사를 시작하지 못했거나 도중에
 /// 그만뒀으면 그 사실이 상태로 오며, 녹음은 그것과 무관하게 계속된다.
 #[tauri::command]
-pub fn live_transcription(live: State<'_, LiveTranscriber>) -> LiveTranscriptionPayload {
-    LiveTranscriptionPayload::from(&*live)
+pub fn live_transcription(
+    live: State<'_, std::sync::Arc<LiveTranscriber>>,
+) -> LiveTranscriptionPayload {
+    LiveTranscriptionPayload::from(&**live)
 }
 
 #[tauri::command]
@@ -1131,12 +1098,17 @@ pub fn resume_capture(recorder: State<'_, Recorder>) -> Result<(), Failure> {
 /// 저장된 뒤에 전사가 자동으로 시작될 수 있다 — 설정이 켜져 있을 때만이다
 /// ([`start_automatic_transcription`]). 그 전사는 배경 스레드에서 돌므로 이 command를
 /// 붙잡지 않는다.
-#[tauri::command]
+/// `async`인 이유는 **메인 스레드를 절대 막지 않기 위해서다** (2026-09-14).
+///
+/// Tauri는 `async`가 아닌 command를 main thread에서 실행한다. 정지는 파일을 확정하고
+/// 저장소에 쓰는 일이며 둘 다 디스크를 기다릴 수 있다 — 그동안 창이 굳으면 사용자는
+/// 앱이 죽은 줄 안다. 실제로 그 일이 있었다.
+#[tauri::command(async)]
 pub fn stop_capture(
     recorder: State<'_, Recorder>,
     storage: State<'_, Storage>,
     transcriber: State<'_, Transcriber>,
-    live: State<'_, LiveTranscriber>,
+    live: State<'_, std::sync::Arc<LiveTranscriber>>,
     title: Option<String>,
 ) -> Result<StoppedRecordingPayload, Failure> {
     finish_recording(&recorder, &storage, &transcriber, &live, title.as_deref())

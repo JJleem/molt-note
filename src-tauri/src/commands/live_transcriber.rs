@@ -60,6 +60,11 @@ pub enum LiveState {
     Idle,
     /// 녹음과 함께 돌고 있다.
     Running,
+    /// 녹음은 끝났고 **남은 구간을 마저 전사하는 중이다** (2026-09-14).
+    ///
+    /// 정지는 이미 성공했다 — 파일도 레코드도 저장됐다. 이 단계는 배경에서 돌며 화면을
+    /// 붙잡지 않는다.
+    Finishing,
     /// 시작하지 못했거나 도중에 그만뒀다. **녹음과는 무관하다.**
     GaveUp(Failure),
 }
@@ -216,6 +221,14 @@ impl LiveTranscriber {
             .unwrap_or_default()
     }
 
+    /// 이 녹음을 따라 적고 있었는가. **정지가 어느 길로 갈지 정하는 값이다.**
+    ///
+    /// 받아 적던 것이 있으면 그것이 최종본이 되고, 없으면 지금까지처럼 자동 전사가
+    /// 판단한다 — 둘 다 하면 같은 오디오를 두 번 전사하게 된다.
+    pub fn was_following(&self) -> bool {
+        matches!(self.state(), LiveState::Running)
+    }
+
     pub fn state(&self) -> LiveState {
         self.shared
             .state
@@ -224,7 +237,55 @@ impl LiveTranscriber {
             .unwrap_or(LiveState::Idle)
     }
 
-    /// 녹음이 끝났다. **남은 꼬리까지 마저 전사하고** 결과를 돌려준다.
+    /// 녹음이 끝났다. **배경에서** 남은 구간을 마저 전사하고 저장한다 (2026-09-14).
+    ///
+    /// ## 왜 배경인가
+    ///
+    /// 2026-09-14에 이것을 정지 경로에서 곧바로 돌렸다가 **UI가 7분 멈췄다.** 실시간
+    /// 전사가 밀려 있으면 남은 구간이 녹음 전체일 수 있고, 그것을 명령 스레드에서
+    /// 돌리면 창이 통째로 굳는다.
+    ///
+    /// **정지는 이미 성공했다.** 파일도 레코드도 저장된 뒤에 불린다 — 여기서 무슨 일이
+    /// 일어나든 그 사실은 되돌아가지 않는다 (R-002).
+    pub fn finish_in_background(self: &Arc<Self>, recording_id: String) {
+        if !matches!(self.state(), LiveState::Running | LiveState::GaveUp(_)) {
+            return;
+        }
+        self.set_state(LiveState::Finishing);
+
+        let live = Arc::clone(self);
+        thread::spawn(move || {
+            let outcome = live.finish();
+            live.save(&recording_id, outcome);
+        });
+    }
+
+    /// 마무리한 결과를 저장한다. **실패해도 아무것도 잃지 않는다** — 이미 저장된 녹음은
+    /// 그대로이고, 사용자는 전사 탭에서 다시 전사할 수 있다 (INV-8).
+    fn save(&self, recording_id: &str, outcome: Option<LiveOutcome>) {
+        let Some(outcome) = outcome else { return };
+        if outcome.progress.segments.is_empty() {
+            return;
+        }
+        let Ok(app_data_dir) = self.app_data_dir.as_ref() else { return };
+        let Ok(mut connection) = crate::db::open_in(app_data_dir) else { return };
+
+        let _ = crate::transcription::run::save_live(
+            &mut connection,
+            &crate::domain::RecordingId::new(recording_id),
+            outcome.progress.language,
+            outcome.progress.segments,
+            outcome.engine_id,
+            outcome.model_id,
+            0,
+        );
+    }
+
+    /// 남은 꼬리까지 전사하고 결과를 돌려준다.
+    ///
+    /// **명령 스레드에서 부르지 않는다.** 실시간 전사가 밀려 있으면 남은 구간이 녹음
+    /// 전체일 수 있고, 그것을 여기서 기다리면 창이 굳는다 — 2026-09-14에 7분 굳었다.
+    /// 앱이 쓰는 자리는 [`Self::finish_in_background`]다.
     ///
     /// 돌고 있지 않았으면 `None`이다 — 실패가 아니다.
     pub fn finish(&self) -> Option<LiveOutcome> {

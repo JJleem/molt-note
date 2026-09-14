@@ -638,6 +638,15 @@ export type LiveLinesView =
 /** 아직 첫 문장이 나오기 전에 놓는 말. **얼마나 기다리는지 함께 말한다.** */
 export const LIVE_WAITING_TEXT = '받아 적는 중… 첫 문장은 30초쯤 뒤에 나온다.';
 
+/**
+ * 정지한 뒤 남은 구간을 마저 전사하는 중이다 (2026-09-14).
+ *
+ * **정지는 이미 끝났다** — 파일도 레코드도 저장됐다. 그 사실을 말하지 않으면 사용자는
+ * 아직 정지가 안 된 줄 알고 다시 누른다.
+ */
+export const LIVE_FINISHING_TEXT =
+  '녹음은 저장됐다. 남은 구간을 마저 받아 적는 중이며, 끝나면 전사에 담긴다.';
+
 /** 받아 적기를 그만뒀다. **녹음은 계속된다는 것이 이 문장의 핵심이다.** */
 export const LIVE_GAVE_UP_TEXT =
   '지금은 받아 적지 않는다. 녹음은 계속되고 있으며, 정지한 뒤 전사할 수 있다.';
@@ -645,6 +654,9 @@ export const LIVE_GAVE_UP_TEXT =
 export function liveLines(live: LiveTranscription | null): LiveLinesView {
   if (live === null || live.state === 'idle') {
     return { kind: 'hidden' };
+  }
+  if (live.state === 'finishing') {
+    return { kind: 'waiting', text: LIVE_FINISHING_TEXT };
   }
   if (live.state === 'gaveUp') {
     return { kind: 'gaveUp', text: LIVE_GAVE_UP_TEXT, failure: live.failure };

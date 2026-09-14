@@ -737,3 +737,26 @@ describe('녹음 중에 받아 적은 말 (2026-09-14)', () => {
     expect(view.kind).toBe('gaveUp');
   });
 });
+
+describe('정지 뒤 마무리 (2026-09-14)', () => {
+  // 지키려는 것: **정지가 끝났다는 사실이 먼저 보인다.**
+  //
+  // 2026-09-14에 정지 경로에서 남은 구간 전사를 그대로 돌렸다가 UI가 7분 멈췄다.
+  // 이제 그 일은 배경에서 돌지만, 그 사이 화면이 아무 말도 없으면 사용자는 정지가
+  // 안 된 줄 알고 다시 누른다.
+
+  it('마무리 중에는 녹음이 이미 저장됐다고 말한다', () => {
+    const view = liveLines({ state: 'finishing', lines: [], failure: null });
+    expect(view.kind).toBe('waiting');
+    expect(view.kind === 'waiting' && view.text).toContain('저장됐다');
+  });
+
+  it('마무리 중이라는 말이 "아직 받아 적는 중"과 다르다', () => {
+    // 둘을 같은 문장으로 두면 정지가 됐는지 알 수 없다.
+    const finishing = liveLines({ state: 'finishing', lines: [], failure: null });
+    const running = liveLines({ state: 'running', lines: [], failure: null });
+    expect(finishing.kind === 'waiting' && finishing.text).not.toBe(
+      running.kind === 'waiting' && running.text,
+    );
+  });
+});

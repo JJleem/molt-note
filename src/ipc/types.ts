@@ -143,15 +143,16 @@ export type CaptureMode = 'microphone' | 'meeting';
  * 녹음 중에 받아 적기가 어떤 상태인가 (2026-09-14).
  *
  * ```text
- * idle    돌고 있지 않다 — 녹음 중이 아니다
- * running 녹음과 함께 받아 적는 중이다
- * gaveUp  받아 적기를 그만뒀다. **녹음과는 무관하다**
+ * idle      돌고 있지 않다 — 녹음 중이 아니다
+ * running   녹음과 함께 받아 적는 중이다
+ * finishing 녹음은 끝났고 **남은 구간을 마저 전사하는 중이다** (배경에서)
+ * gaveUp    받아 적기를 그만뒀다. **녹음과는 무관하다**
  * ```
  *
  * `gaveUp`은 실패 화면이 아니다 (INV-8). 녹음은 그대로 돌고 있으며, 정지한 뒤에 전사
  * 탭에서 다시 전사하면 된다.
  */
-export type LiveTranscriptionState = 'idle' | 'running' | 'gaveUp';
+export type LiveTranscriptionState = 'idle' | 'running' | 'finishing' | 'gaveUp';
 
 /** 녹음 중에 지금까지 받아 적은 것. */
 export interface LiveTranscription {
