@@ -175,6 +175,7 @@ mod tests {
 
     fn input() -> TranscriptionInput {
         TranscriptionInput {
+            preceding_text: None,
             samples: vec![0.0; 1_600],
             sample_rate_hz: crate::transcription::audio_input::TARGET_SAMPLE_RATE_HZ,
             channels: crate::transcription::audio_input::TARGET_CHANNELS,

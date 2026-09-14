@@ -104,6 +104,14 @@ pub struct TranscriptionInput {
     pub samples: Vec<f32>,
     /// 언제나 [`TARGET_SAMPLE_RATE_HZ`].
     pub sample_rate_hz: u32,
+    /// **직전 구간에서 들린 말의 꼬리** (2026-09-14 · 실시간 전사).
+    ///
+    /// 실시간 전사는 30초짜리 창을 하나씩 전사한다. 창을 그냥 자르면 경계에서 문장이
+    /// 토막 나므로, 앞 창의 끝 문장을 문맥으로 함께 준다 — whisper의 `initial_prompt`다.
+    ///
+    /// **배치 경로는 언제나 `None`이다.** 그쪽은 파일 하나를 통째로 다루므로 앞이 없다.
+    /// 값이 없을 때의 실행은 2026-09-14 이전과 한 글자도 다르지 않다.
+    pub preceding_text: Option<String>,
     /// 언제나 [`TARGET_CHANNELS`].
     pub channels: u16,
     /// 원본 파일에서 읽은 샘플레이트.
@@ -117,6 +125,21 @@ pub struct TranscriptionInput {
 }
 
 impl TranscriptionInput {
+    /// 앞 구간의 꼬리를 문맥으로 달아 돌려준다 (실시간 전사).
+    ///
+    /// **비어 있거나 null 바이트가 섞인 문자열은 달지 않는다.** whisper-rs의
+    /// `set_initial_prompt`은 null 바이트에서 panic한다 — 전사가 죽는 것보다 문맥 하나를
+    /// 포기하는 편이 낫다.
+    pub fn with_preceding_text(mut self, text: &str) -> Self {
+        let trimmed = text.trim();
+        self.preceding_text = if trimmed.is_empty() || trimmed.contains('\0') {
+            None
+        } else {
+            Some(trimmed.to_owned())
+        };
+        self
+    }
+
     /// 샘플 프레임 수. mono이므로 샘플 수와 같다.
     pub fn frames(&self) -> usize {
         self.samples.len()
@@ -217,6 +240,7 @@ pub fn load(path: &Path) -> Result<TranscriptionInput, Failure> {
 
     Ok(TranscriptionInput {
         samples,
+        preceding_text: None,
         sample_rate_hz: TARGET_SAMPLE_RATE_HZ,
         channels: TARGET_CHANNELS,
         source_sample_rate_hz: spec.sample_rate,
@@ -279,6 +303,7 @@ pub(super) fn from_interleaved(
 
     Ok(TranscriptionInput {
         samples,
+        preceding_text: None,
         sample_rate_hz: TARGET_SAMPLE_RATE_HZ,
         channels: TARGET_CHANNELS,
         source_sample_rate_hz: sample_rate,
@@ -931,5 +956,52 @@ mod tests {
             expected_frame_count(48_000 * 3_600, 48_000, 16_000),
             16_000 * 3_600
         );
+    }
+}
+
+#[cfg(test)]
+mod preceding_text_tests {
+    use super::*;
+
+    fn input() -> TranscriptionInput {
+        TranscriptionInput {
+            samples: vec![0.0; 16],
+            preceding_text: None,
+            sample_rate_hz: TARGET_SAMPLE_RATE_HZ,
+            channels: TARGET_CHANNELS,
+            source_sample_rate_hz: TARGET_SAMPLE_RATE_HZ,
+            source_channels: 1,
+            resampled: false,
+            downmixed: false,
+        }
+    }
+
+    #[test]
+    fn a_real_sentence_is_carried_as_context() {
+        let carried = input().with_preceding_text("  그러면 일단 위클리를 미루고  ");
+        assert_eq!(
+            carried.preceding_text.as_deref(),
+            Some("그러면 일단 위클리를 미루고"),
+        );
+    }
+
+    #[test]
+    fn nothing_useful_is_not_carried() {
+        assert!(input().with_preceding_text("").preceding_text.is_none());
+        assert!(input().with_preceding_text("   \n ").preceding_text.is_none());
+    }
+
+    #[test]
+    fn a_null_byte_is_dropped_instead_of_killing_the_transcription() {
+        // 지키려는 것: **전사가 죽지 않는다.** whisper-rs의 `set_initial_prompt`은 null
+        // 바이트에서 panic한다. 문맥 하나를 포기하는 편이 낫다.
+        let carried = input().with_preceding_text("앞 문장\0뒤");
+        assert!(carried.preceding_text.is_none());
+    }
+
+    #[test]
+    fn the_batch_path_carries_nothing() {
+        // 배치는 파일 하나를 통째로 다루므로 앞이 없다. 값이 생기면 실행이 달라진다.
+        assert!(input().preceding_text.is_none());
     }
 }

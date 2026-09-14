@@ -360,6 +360,13 @@ impl TranscriptionEngine for WhisperEngine {
 
             // whisper.cpp의 진행 출력은 제품 로그가 아니다. 상태는 Recording.transcriptionStatus가
             // 말한다 (TASK-027 · TASK-028).
+            // **앞 구간의 꼬리를 문맥으로 준다** (실시간 전사 · 2026-09-14). 창을 그냥
+            // 자르면 경계에서 문장이 토막 나고, 그 창이 최종본이면 토막 난 채로 남는다.
+            // 배치 경로에서는 이 값이 언제나 없으므로 실행이 전과 같다.
+            if let Some(preceding) = input.preceding_text.as_deref() {
+                params.set_initial_prompt(preceding);
+            }
+
             params.set_print_special(false);
             params.set_print_progress(false);
             params.set_print_realtime(false);

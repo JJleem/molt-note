@@ -68,6 +68,7 @@ fn placeholder_model(directory: &Path) -> ModelFile {
 /// 0.1초짜리 무음 파생 입력. 엔진에 무엇이 넘어가는지 보기 위한 것이다.
 fn derived_input() -> TranscriptionInput {
     TranscriptionInput {
+        preceding_text: None,
         samples: vec![0.0; 1_600],
         sample_rate_hz: TARGET_SAMPLE_RATE_HZ,
         channels: TARGET_CHANNELS,
