@@ -796,3 +796,68 @@ describe('상태는 언제나 문장으로 온다 — 색은 거들 뿐이다 (�
     }
   });
 });
+
+describe('녹음 중의 일렁임은 장식이 아니라 신호다 (2026-09-15)', () => {
+  // 지키려는 것: **움직임이 실제 입력 레벨을 따라간다.**
+  //
+  // 그냥 도는 스피너를 두면 마이크가 죽어 있어도 똑같이 예쁘게 돈다. 이 앱은 이미
+  // 레벨을 재고 있으므로, 같은 값으로 세기를 바꾸면 "지금 들리고 있다"가 보인다.
+
+  const auraRules = rules.filter((rule) => rule.selector.includes('recording__aura'));
+
+  it('일렁임이 실제로 있다', () => {
+    expect(auraRules.length, '일렁임 규칙을 찾지 못했다').toBeGreaterThan(0);
+  });
+
+  it('레벨 갈래 셋이 저마다 다른 세기를 갖는다', () => {
+    // 갈래가 같은 세기면 레벨을 따라간다고 말할 수 없다.
+    const intensity = (kind: string) => {
+      const rule = rules.find((one) => one.selector.includes(`recording--${kind}`));
+      const found = rule?.declarations.find((one) => one.property === 'opacity')?.value;
+      return found;
+    };
+
+    const levels = ['usable', 'low', 'silent'].map(intensity);
+    for (const [index, value] of levels.entries()) {
+      expect(value, `${['usable', 'low', 'silent'][index]} 갈래의 세기가 없다`).toBeDefined();
+    }
+    expect(new Set(levels).size, '갈래마다 세기가 달라야 한다').toBe(levels.length);
+  });
+
+  it('소리가 클수록 더 또렷하다', () => {
+    const opacityOf = (kind: string) =>
+      Number(
+        rules
+          .find((one) => one.selector.includes(`recording--${kind}`))
+          ?.declarations.find((one) => one.property === 'opacity')?.value ?? '0',
+      );
+
+    expect(opacityOf('usable')).toBeGreaterThan(opacityOf('low'));
+    expect(opacityOf('low')).toBeGreaterThan(opacityOf('silent'));
+  });
+
+  it('무음이어도 꺼지지는 않는다', () => {
+    // 녹음은 여전히 돌고 있다. 완전히 꺼지면 "녹음이 멈췄다"로 읽힌다.
+    const silent = rules.find((one) => one.selector.includes('recording--silent'));
+    const opacity = Number(
+      silent?.declarations.find((one) => one.property === 'opacity')?.value ?? '0',
+    );
+    expect(opacity).toBeGreaterThan(0);
+  });
+
+  it('강조색 하나만 쓴다 (요구 11)', () => {
+    // 여러 색이 섞인 무지개를 두면 화면에서 가장 눈에 띄는 것이 상태도 시간도 아니게 된다.
+    const background = auraRules
+      .flatMap((rule) => rule.declarations)
+      .filter((declaration) => declaration.property === 'background')
+      .map((declaration) => declaration.value)
+      .join(' ');
+
+    expect(background, '일렁임에 background가 없다').not.toBe('');
+    const literals = background.match(/#[0-9a-f]{3,8}\b/gi) ?? [];
+    expect(literals, '색을 토큰이 아니라 직접 적었다').toEqual([]);
+    for (const used of background.match(/var\(--[\w-]+\)/g) ?? []) {
+      expect(used, `${used}는 강조색이 아니다`).toMatch(/var\(--accent(?:-strong|-text)?\)/);
+    }
+  });
+});

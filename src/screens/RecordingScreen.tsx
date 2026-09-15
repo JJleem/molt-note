@@ -324,7 +324,16 @@ export function RecordingScreen({ navigate }: ScreenProps) {
       <p className="hint">{modeHint(view.mode)}</p>
 
       {/* 녹음 상태와 경과 시간이 화면에서 가장 크고 분명하다 (§19). */}
-      <section className="recording">
+      <section
+        className={display.live ? `recording recording--${level.kind}` : 'recording'}
+      >
+        {/* 녹음 중이라는 것을 **움직임으로도** 말한다 (2026-09-15). 세기는 backend가 낸
+            레벨 갈래를 따라간다 — 소리가 들어오면 살아나고, 무음이면 거의 멈춘다.
+            그래서 이것은 장식이 아니라 **지금 들리고 있다는 신호**다.
+
+            값을 화면이 만들지 않는다: 여기 붙는 것은 class 이름뿐이고, 어떤 갈래인지는
+            `inputLevelDisplay`가 backend의 판정에서 정한다 (INV-9). */}
+        {display.live && <span className="recording__aura" aria-hidden="true" />}
         {/* 상태가 바뀌는 순간은 소리로도 알려 준다. 경과 시간은 계속 바뀌므로 알리지 않는다. */}
         <p
           className={display.live ? 'recording__state recording__state--live' : 'recording__state'}

@@ -968,6 +968,84 @@ p.loading {
 
 .recording {
   margin: var(--space-6) 0 var(--space-4);
+  /* 일렁임이 앉을 자리. **상태 표시가 아니라 배치다** — 그래서 녹음 중에만 붙는
+     수식자를 두지 않는다. 녹음 중이라는 사실은 글자 굵기가 말한다
+     (`.recording__state--live`). */
+  position: relative;
+  isolation: isolate;
+}
+
+/*
+ * 녹음 중의 일렁임 (2026-09-15).
+ *
+ * **장식이 아니라 신호다.** 세기가 backend의 레벨 판정을 따라가므로, 움직임이 살아
+ * 있으면 소리가 들어오고 있다는 뜻이고 거의 멈추면 안 들어오고 있다는 뜻이다.
+ * 그래서 이것은 `.spinner`처럼 "아직 돌고 있다"를 말하는 것과 다르다.
+ *
+ * 색은 강조색 하나뿐이다 (요구 11). 여러 색이 섞인 무지개를 두지 않는다 — 그 순간
+ * 화면에서 가장 눈에 띄는 것이 상태도 시간도 아니게 된다 (§19).
+ *
+ * **글자 뒤에 깔린다.** 상태와 경과 시간이 여전히 가장 크고 분명하며, 일렁임은 그
+ * 뒤에서 번질 뿐이다.
+ */
+
+.recording__aura {
+  position: absolute;
+  z-index: -1;
+  /* 글자 덩어리보다 넉넉히 크게 — 경계가 보이면 '상자'가 되고, 그러면 장식이 된다. */
+  inset: calc(var(--space-5) * -1) calc(var(--space-6) * -1);
+  border-radius: var(--radius-lg);
+  pointer-events: none;
+
+  background:
+    radial-gradient(60% 120% at 20% 40%, var(--accent) 0%, transparent 60%),
+    radial-gradient(50% 100% at 74% 62%, var(--accent-strong) 0%, transparent 55%),
+    radial-gradient(70% 90% at 50% 100%, var(--accent-text) 0%, transparent 50%);
+  background-size: 200% 200%;
+  filter: blur(28px);
+
+  /* 기본 세기. 레벨 갈래가 이 둘을 바꾼다. */
+  opacity: 0.16;
+  animation: aura-drift 9s ease-in-out infinite;
+}
+
+/*
+ * 레벨 갈래마다의 세기 (ADR-0003 §16.4의 판정 셋).
+ *
+ * **값을 화면이 만들지 않는다** — 어느 갈래인지는 backend가 정하고, 여기서는 그
+ * 이름에 얼마나 살아 있을지를 붙일 뿐이다.
+ */
+
+.recording--usable .recording__aura {
+  opacity: 0.3;
+  animation-duration: 5.5s;
+}
+
+.recording--low .recording__aura {
+  opacity: 0.18;
+  animation-duration: 8s;
+}
+
+/* 무음이면 거의 멈춘다. **꺼지지는 않는다** — 녹음은 여전히 돌고 있기 때문이다. */
+
+.recording--silent .recording__aura {
+  opacity: 0.08;
+  animation-duration: 14s;
+}
+
+@keyframes aura-drift {
+  0% {
+    background-position: 0% 50%;
+    transform: scale(1);
+  }
+  50% {
+    background-position: 100% 50%;
+    transform: scale(1.06);
+  }
+  100% {
+    background-position: 0% 50%;
+    transform: scale(1);
+  }
 }
 
 .recording__state {
