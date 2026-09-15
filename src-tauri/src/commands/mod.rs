@@ -143,6 +143,9 @@ pub use transcriber::Transcriber;
 /// 열려 있거나, **열지 못한 이유를 들고 있거나** 둘 중 하나다. 세 번째 상태는 없다.
 pub struct Storage {
     state: StorageState,
+    /// 녹음 파일이 놓인 자리. **레코드 없이 남은 파일을 찾을 때 쓴다** (2026-09-15).
+    /// 얻지 못했다면 그 실패를 들고 있다 — [`Recorder`]와 같은 모양이다.
+    app_data_dir: Result<AppDataDirectory, Failure>,
 }
 
 enum StorageState {
@@ -161,7 +164,15 @@ impl Storage {
             Ok(connection) => StorageState::Ready(Mutex::new(connection)),
             Err(failure) => StorageState::Unavailable(failure),
         };
-        Self { state }
+        let storage = Self {
+            state,
+            app_data_dir: Ok(app_data_dir.clone()),
+        };
+
+        // **여는 순간 되살린다** (2026-09-15). 부르는 쪽이 기억해야 하는 구조로 두면
+        // 언젠가 잊는다 — 이 기능이 있는 이유가 바로 그런 종류의 실수였다.
+        storage.adopt_orphaned_recordings();
+        storage
     }
 
     /// Tauri가 결정한 앱 데이터 디렉터리에서 저장소를 연다 (INV-10).
@@ -174,9 +185,13 @@ impl Storage {
     {
         match AppDataDirectory::from_manager(manager) {
             Ok(app_data_dir) => Self::open(&app_data_dir),
-            Err(error) => Self {
-                state: StorageState::Unavailable(error.into()),
-            },
+            Err(error) => {
+                let failure: Failure = error.into();
+                Self {
+                    state: StorageState::Unavailable(failure.clone()),
+                    app_data_dir: Err(failure),
+                }
+            }
         }
     }
 
@@ -371,6 +386,61 @@ impl Storage {
             .filter(|recording| !finalized::audio_is_present(&recording.audio_path))
             .map(MissingAudioPayload::from)
             .collect())
+    }
+
+    /// **레코드 없이 남은 녹음 파일을 되살린다** (2026-09-15).
+    ///
+    /// ## 왜 시작할 때인가
+    ///
+    /// 정지는 두 걸음이다 — 파일을 확정하고, 레코드를 저장한다. 그 사이에서 무슨 일이든
+    /// 생기면 디스크에는 온전한 녹음이 있는데 앱은 그것을 모르고, 사용자에게는 **녹음이
+    /// 사라진 것으로 보인다.** 2026-09-15에 15.7분짜리 회의가 그렇게 남았고 사람이 DB를
+    /// 직접 고쳐야 했다.
+    ///
+    /// 앱이 막 시작한 시점에는 쓰이는 중인 파일이 없다. 그래서 **여기서 본 것은 전부
+    /// 지난 실행이 남긴 것**이며, 이 판정에 다른 정보가 필요하지 않다.
+    ///
+    /// ## 지어내지 않는다
+    ///
+    /// 제목은 파일이 만들어진 시각에서 만들고 (`title_for`), 길이는 **파일에서 읽는다.**
+    /// 읽지 못하면 되살리지 않는다 — 길이를 0으로 적느니 그대로 두는 편이 낫다.
+    /// 장치 이름은 알 수 없으므로 비운다: 모르는 것을 적지 않는다.
+    ///
+    /// **파일을 건드리지 않는다** (INV-1). 되살리지 못해도 앱은 연다.
+    pub fn adopt_orphaned_recordings(&self) -> usize {
+        let Ok(app_data_dir) = self.app_data_dir.as_ref() else {
+            return 0;
+        };
+        let Ok(known) = self.list_recordings() else {
+            return 0;
+        };
+        let known_paths: std::collections::HashSet<String> =
+            known.into_iter().map(|recording| recording.audio_path).collect();
+
+        let directory = app_data_dir.recordings_dir();
+        let mut adopted = 0usize;
+
+        for orphan in crate::audio::orphaned::find(&directory, &known_paths) {
+            let Some(duration_ms) = crate::audio::finalized::duration_ms(&orphan.path) else {
+                continue;
+            };
+            let Some(path) = orphan.path.to_str() else {
+                continue;
+            };
+
+            let saved = self.insert(|created_at| NewRecording {
+                title: title_for(created_at),
+                duration_ms,
+                audio_path: path.to_owned(),
+                audio_format: capture::EXTENSION.to_string(),
+                // **모르는 것을 적지 않는다.** 어느 마이크였는지는 파일에 없다.
+                microphone: None,
+            });
+            if saved.is_ok() {
+                adopted += 1;
+            }
+        }
+        adopted
     }
 
     /// 녹음 하나를 저장한다. 식별자와 시각을 만드는 자리가 여기 하나뿐이다.

@@ -28,6 +28,7 @@ pub mod level;
 #[cfg(target_os = "macos")]
 pub mod meeting_capture;
 pub mod meeting_mix;
+pub mod orphaned;
 pub mod session;
 pub mod system_capture;
 pub mod system_devices;

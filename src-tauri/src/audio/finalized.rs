@@ -144,6 +144,23 @@ fn describe(spec: hound::WavSpec) -> String {
     )
 }
 
+/// 확정된 녹음 파일의 길이(밀리초). 읽지 못하면 `None`이다.
+///
+/// **레코드 없이 남은 파일을 되살릴 때 쓴다** (`commands::Storage::adopt_orphaned_recordings`).
+/// 길이를 지어내지 않는다 — 읽지 못하면 되살리지 않는 편이 0으로 적는 것보다 낫다.
+///
+/// 헤더의 크기 필드를 믿어도 되는 자리다: 이 함수가 보는 것은 **확정이 끝난** 파일이며,
+/// 아직 쓰이는 중인 파일을 따라 읽는 자리는 따로 있다 (`transcription::growing_wav`).
+pub fn duration_ms(path: &Path) -> Option<i64> {
+    let reader = hound::WavReader::open(path).ok()?;
+    let spec = reader.spec();
+    if spec.sample_rate == 0 {
+        return None;
+    }
+    let frames = i64::from(reader.duration());
+    Some(frames * 1_000 / i64::from(spec.sample_rate))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
