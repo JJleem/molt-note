@@ -575,7 +575,7 @@ Provider abstraction을 실제로 검증하는 데 필요한 최소 범위만 �
 
 | Mode | 출력 섹션 |
 | --- | --- |
-| **Meeting** | Overview · Key Discussions · Decisions · Action Items · Open Questions |
+| **Meeting** | 팀 회의록 형식 (`docs/MEETING-NOTE-FORMAT.md`) — 📌 전사 신뢰도 안내 · 🔑 핵심 요약 · 🔁 지난 액션 아이템(해당 시) · 주제별 섹션 · ✅ 액션 아이템(담당 · 날짜) · 🔍 확인 필요. 2026-11-13 변경 (Phase 5.10). 그 전에 만든 노트는 Overview · Key Discussions · Decisions · Action Items · Open Questions 그대로 읽힌다 |
 | **Study** | Overview · Key Concepts · Important Details · Questions · Things to Study · References Mentioned |
 | **Summary** | Short Summary · Key Points |
 
@@ -695,6 +695,8 @@ Duration: 52:31
 ```
 
 AI Note가 있으면 포함하고, 없으면 Transcript와 메타데이터만으로 유효한 문서가 나와야 한다.
+
+**AI Note가 있으면 Transcript를 넣을지 사용자가 고른다** (2026-11-13, Phase 5.10). Meeting 노트의 기본값은 넣지 않는 것이다 — 회의록은 노트만으로 공유된다. AI Note가 없으면 Transcript는 언제나 들어간다 (INV-8).
 
 Notion · NotebookLM · Obsidian 등에서 그대로 쓸 수 있는 형태를 목표로 한다.
 
