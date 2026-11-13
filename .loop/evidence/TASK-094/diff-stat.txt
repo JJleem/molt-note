@@ -1,0 +1,21 @@
+ src-tauri/src/ai/claude_cli/provider.rs         |   2 +-
+ src-tauri/src/ai/note.rs                        | 667 +++++++++++++++++++-----
+ src-tauri/src/ai/ollama/wire.rs                 |   4 +-
+ src-tauri/src/ai/prompt.rs                      | 205 +++++++-
+ src-tauri/src/ai/run.rs                         |   9 +-
+ src-tauri/src/ai/testing.rs                     |  40 +-
+ src-tauri/src/commands/payload.rs               |  52 +-
+ src-tauri/src/export/ai_request.rs              |   6 +-
+ src-tauri/src/export/markdown.rs                |  35 +-
+ src-tauri/src/transcription/growing_wav.rs      |   5 +-
+ src-tauri/tests/ai_note_commands.rs             |  11 +-
+ src-tauri/tests/ai_note_run.rs                  |   7 +-
+ src-tauri/tests/audio_never_reaches_ai.rs       |   7 +-
+ src-tauri/tests/notion_and_export_invariants.rs |   7 +-
+ src/ipc/types.ts                                |  62 ++-
+ src/screens/aiHandoffView.test.ts               |   1 +
+ src/screens/aiNoteView.test.ts                  |   3 +
+ src/screens/aiNoteView.ts                       |  11 +
+ src/screens/coreWithoutAi.test.ts               |   1 +
+ src/screens/exportView.test.ts                  |   1 +
+ 20 files changed, 944 insertions(+), 192 deletions(-)

@@ -1,0 +1,44 @@
+# Frontend IPC 타입 · payload 경계 — V2 Meeting
+# Runtime이 PLAN-20261113T071558Z 승인 시점에 생성했다 (proposal P3). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-094
+status: DONE
+
+request: |-
+  (1) src/ipc/types.ts의 MeetingNote 인터페이스를 V2 필드로 교체하거나, MeetingNoteV2를 추가하고 StructuredNote union을 갱신한다. (2) src-tauri/src/commands/payload.rs의 StructuredNotePayload · AiNotePayload가 V2 Meeting을 직렬화해 frontend에 내려준다. 옛 노트(V1)도 정상 직렬화 — V1은 기존 MeetingNote 모양으로 mode='meeting'에 overview 등 필드가 있는 그대로 내려간다. (3) V2 note의 mode는 'meeting'이며 frontend가 schemaVersion으로 V1/V2를 구분할 수 있게 payload에 schemaVersion 필드를 추가한다.
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-092
+
+stop_condition:
+  gates: [build, lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 3
+
+acceptance_criteria:
+  - id: AC-3-1
+    description: |-
+      V2 Meeting payload가 frontend 타입과 일치하는 JSON으로 직렬화된다
+    verification:
+      type: gate
+      ref: test
+  - id: AC-3-2
+    description: |-
+      V1 Meeting payload가 기존 모양 그대로 직렬화된다 (옛 노트 호환)
+    verification:
+      type: gate
+      ref: test
+  - id: AC-3-3
+    description: |-
+      build Gate가 frontend 타입 오류 없이 통과한다
+    verification:
+      type: gate
+      ref: build
+
+evidence: []
+
+failure_memo: []

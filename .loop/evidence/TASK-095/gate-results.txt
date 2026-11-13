@@ -1,0 +1,5 @@
+Self-check (advisory) — all gates passed
+
+[build] npm run build — PASS exit=0 1.8s
+[lint]  npm run lint  — PASS exit=0 2.7s
+[test]  npm run test  — PASS exit=0 19.5s

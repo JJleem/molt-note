@@ -965,7 +965,7 @@ fn a_second_send_while_one_is_running_is_refused_instead_of_disappearing() {
 
     let accepted = NotionSendStatusPayload::from(
         sender
-            .start(&recording.id, Confirmation::NotAsked)
+            .start(&recording.id, Confirmation::NotAsked, true)
             .expect("접수된다"),
     );
     assert_eq!(accepted.state, "running", "돌아오는 것은 접수 사실이다");
@@ -982,7 +982,7 @@ fn a_second_send_while_one_is_running_is_refused_instead_of_disappearing() {
     }
 
     let refused = sender
-        .start(&recording.id, Confirmation::NotAsked)
+        .start(&recording.id, Confirmation::NotAsked, true)
         .expect_err("한 번에 한 건이다 — 두 번째 요청이 조용히 사라지지 않는다");
     assert_eq!(refused.kind, FailureKind::InvalidInput);
     assert!(refused.source_data_safe, "거절은 아무것도 건드리지 않았다");

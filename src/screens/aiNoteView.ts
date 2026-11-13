@@ -38,6 +38,7 @@ import type {
   AiProviderState,
   AiProviderStatus,
   NoteMode,
+  PreviousActionItems,
   Recording,
   StructuredNote,
   Transcript,
@@ -59,7 +60,7 @@ const MODE_LABEL: Record<NoteMode, string> = {
  * 고르기 전에 무엇이 나오는지 알 수 있어야 Meeting과 Study를 구분해 고를 수 있다.
  */
 const MODE_SECTIONS: Record<NoteMode, string> = {
-  meeting: '개요 · 논의한 것 · 정해진 것 · 할 일 · 남은 질문',
+  meeting: '핵심 요약 · 지난 액션 아이템 · 주제별 섹션 · 액션 아이템 · 확인 필요',
   study:
     '개요 · 핵심 개념 · 중요한 세부 · 질문 · 더 공부할 것 · 언급된 자료',
   summary: '짧은 요약 · 핵심',
@@ -91,7 +92,13 @@ export function noteModeChoices(selected: NoteMode): readonly NoteModeChoice[] {
  * Overview는 문단이고 Decisions는 항목이다. 화면이 문단을 목록처럼 그리지 않게 하려면
  * 그 구분이 값으로 있어야 한다.
  */
-export type NoteSectionKind = 'text' | 'list';
+export type NoteSectionKind = 'text' | 'list' | 'grouped';
+
+/** `grouped` 섹션의 하위 묶음 — 소제목과 글머리표. */
+export interface NoteGroup {
+  readonly heading: string;
+  readonly items: readonly string[];
+}
 
 export interface NoteSection {
   /** §9.5의 섹션 이름 그대로. */
@@ -101,6 +108,8 @@ export interface NoteSection {
   readonly text: string | null;
   /** `list` 섹션의 항목. `text` 섹션에서는 빈 배열이다. */
   readonly items: readonly string[];
+  /** `grouped` 섹션의 하위 묶음. 그 밖의 섹션에서는 빈 배열이다. */
+  readonly groups: readonly NoteGroup[];
   /**
    * 비어 있다는 사실을 담담하게 알리는 문장. 비어 있지 않으면 `null`이다.
    *
@@ -120,6 +129,7 @@ function textSection(title: string, value: string): NoteSection {
     kind: 'text',
     text: text.length === 0 ? null : text,
     items: [],
+    groups: [],
     emptyText: text.length === 0 ? EMPTY_SECTION_TEXT : null,
   };
 }
@@ -130,8 +140,40 @@ function listSection(title: string, values: readonly string[]): NoteSection {
     kind: 'list',
     text: null,
     items: values,
+    groups: [],
     emptyText: values.length === 0 ? EMPTY_SECTION_TEXT : null,
   };
+}
+
+function groupedSection(title: string, groups: readonly NoteGroup[]): NoteSection {
+  const empty = groups.every((g) => g.items.length === 0);
+  return {
+    title,
+    kind: 'grouped',
+    text: null,
+    items: [],
+    groups,
+    emptyText: empty ? EMPTY_SECTION_TEXT : null,
+  };
+}
+
+const PREVIOUS_ACTION_LABELS: readonly (readonly [keyof PreviousActionItems, string])[] = [
+  ['done', '완료'],
+  ['changed', '변경됨'],
+  ['inProgress', '진행 중'],
+  ['noProgress', '진전 없음'],
+  ['notMentioned', '언급 없음'],
+];
+
+function previousActionItemsEmpty(prev: PreviousActionItems): boolean {
+  return PREVIOUS_ACTION_LABELS.every(([key]) => prev[key].length === 0);
+}
+
+function previousActionItemsSection(prev: PreviousActionItems): NoteSection {
+  const groups: NoteGroup[] = PREVIOUS_ACTION_LABELS
+    .filter(([key]) => prev[key].length > 0)
+    .map(([key, heading]) => ({ heading, items: prev[key] }));
+  return groupedSection('지난 액션 아이템', groups);
 }
 
 /**
@@ -145,6 +187,22 @@ function listSection(title: string, values: readonly string[]): NoteSection {
 export function noteSections(note: StructuredNote): readonly NoteSection[] {
   switch (note.mode) {
     case 'meeting':
+      if (note.schemaVersion === 2) {
+        const sections: NoteSection[] = [
+          listSection('핵심 요약', note.keySummary),
+        ];
+        if (!previousActionItemsEmpty(note.previousActionItems)) {
+          sections.push(previousActionItemsSection(note.previousActionItems));
+        }
+        for (const topic of note.topics) {
+          sections.push(groupedSection(topic.title, topic.groups.map((g) => ({ heading: g.heading, items: g.items }))));
+        }
+        sections.push(
+          listSection('액션 아이템', note.actionItems.map((ai) => `${ai.task} (${ai.owner}, ${ai.due})`)),
+          listSection('확인 필요', note.needsConfirmation),
+        );
+        return sections;
+      }
       return [
         textSection('개요', note.overview),
         listSection('논의한 것', note.keyDiscussions),

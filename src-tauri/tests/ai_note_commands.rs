@@ -535,15 +535,16 @@ fn a_generated_note_comes_back_through_the_command_surface_with_its_provenance()
     assert!(!one.generated_at.trim().is_empty());
 
     // 본문은 봉투가 풀린 채로 온다 — 화면은 저장 형식도 schema 버전도 알지 않는다.
-    let StructuredNotePayload::Meeting(meeting) = &one.note else {
-        panic!("요청한 mode의 노트가 와야 한다");
+    let StructuredNotePayload::MeetingV2(meeting) = &one.note else {
+        panic!("요청한 mode의 V2 노트가 와야 한다");
     };
-    assert!(!meeting.overview.trim().is_empty());
+    assert!(!meeting.meeting_title.trim().is_empty());
 
-    // 직렬화된 모양이 화면과의 계약이다 — mode로 갈라 읽을 수 있어야 한다.
+    // 직렬화된 모양이 화면과의 계약이다 — mode + schemaVersion으로 V1/V2를 구분한다.
     let wire = serde_json::to_value(&one).expect("payload는 직렬화된다");
     assert_eq!(wire["note"]["mode"], "meeting");
-    assert!(wire["note"]["keyDiscussions"].is_array());
+    assert_eq!(wire["note"]["schemaVersion"], 2);
+    assert!(wire["note"]["keySummary"].is_array());
     assert_eq!(wire["transcriptId"], fixture.transcript_id.as_str());
 
     // 입력은 그대로다 (INV-1 · INV-2).

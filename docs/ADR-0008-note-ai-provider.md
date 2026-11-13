@@ -434,6 +434,15 @@ HTTP 200 본문
 | **Markdown 문자열을 core data로 쓰지 않는다** | §9.3이 "provider가 돌려준 임의의 Markdown을 core data model로 쓰지 않는 것을 우선 검토한다"고 요구한다. 렌더링은 `Structured Note → UI / Markdown / Notion` 한 방향으로만 흐르며, Phase 5의 Notion 렌더러가 §14.9의 블록 한도를 다루려면 **구조가 남아 있어야 한다** — Markdown 덩어리는 다시 파싱해야 한다 |
 | **모드마다 다른 struct** | 세 모드는 출력 섹션이 다르다. 하나의 옵셔널 필드 뭉치로 합치면 "Meeting에 `thingsToStudy`가 있는" 상태가 타입 수준에서 가능해진다 |
 
+#### 7.3.1 개정 기록
+
+| 날짜 | 대상 | 변경 |
+| --- | --- | --- |
+| 2026-11-13 | **Meeting v2** | `actionItems`의 원소 타입을 `string`에서 **한 단계 객체 중첩**으로 확장한다. 각 원소는 `{ text: string, owner: string, dueDate: string }` 형태이며, `text`는 필수, `owner`·`dueDate`는 필수 키이되 **모르면 각각 `"담당 확인"`·`"일정 확인"`을 강제**한다. 모델이 추정한 값에는 접미사 `"(추정)"`을 붙여 사실과 구분한다. — 이 변경은 Meeting 모드에만 적용되며, **`schemaVersion`을 올려 구분**한다 |
+| 2026-11-13 | **Study · Summary** | v1 그대로 유지. 변경 없음 |
+
+**UNVERIFIED** — 담당·기한 추출 정확도는 여전히 검증되지 않았다 [E4]. §14.5의 "어느 모델이 적합한지도 UNVERIFIED"는 그대로이며, Meeting v2의 객체 중첩이 로컬 소형 모델에서 안정적으로 동작하는지는 실제 Ollama 호출로 확인되어야 한다. §7.3 원문이 `actionItems`를 `string[]`로 둔 이유("확인되지 않은 능력 위에 스키마를 세우면 필드가 늘 비거나 틀린 값으로 찬다")는 여전히 유효한 위험이다.
+
 ### 7.4 검증 규칙 (§6.3의 4단계가 적용하는 것)
 
 - 문자열은 trim 후 비교한다. 필수 문자열이 비면 **무효**.

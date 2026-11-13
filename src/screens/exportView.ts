@@ -53,22 +53,24 @@ export interface ExportAction {
   readonly kind: 'export' | 'again' | 'retry';
   readonly label: string;
   readonly recordingId: string;
+  /** Transcript를 포함할지. AI 노트가 있을 때만 `false`가 될 수 있다. */
+  readonly includeTranscript: boolean;
 }
 
 /** 화면에 처음 보이는 이름. Task와 Phase Goal이 부르는 이름 그대로다. */
 export const EXPORT_LABEL = '마크다운 내보내기';
 
-function exportAction(recordingId: string): ExportAction {
-  return { kind: 'export', label: EXPORT_LABEL, recordingId };
+function exportAction(recordingId: string, includeTranscript: boolean): ExportAction {
+  return { kind: 'export', label: EXPORT_LABEL, recordingId, includeTranscript };
 }
 
-function againAction(recordingId: string): ExportAction {
+function againAction(recordingId: string, includeTranscript: boolean): ExportAction {
   // 다시 내보내면 파일이 하나 더 생긴다 — 있던 파일을 덮어쓰지 않는다 (§4.3).
-  return { kind: 'again', label: '마크다운 하나 더 내보내기', recordingId };
+  return { kind: 'again', label: '마크다운 하나 더 내보내기', recordingId, includeTranscript };
 }
 
-function retryAction(recordingId: string): ExportAction {
-  return { kind: 'retry', label: '내보내기 다시 시도', recordingId };
+function retryAction(recordingId: string, includeTranscript: boolean): ExportAction {
+  return { kind: 'retry', label: '내보내기 다시 시도', recordingId, includeTranscript };
 }
 
 /**
@@ -265,9 +267,23 @@ export type ExportPanelBody =
  * 본문과 나란히 **언제나 보이는 것 하나**가 있다 — 무엇이 파일에 들어가는가다 (§11 · INV-6).
  * 본문이 어느 상태든 그 사실은 남는다.
  */
+/**
+ * Transcript 포함 여부 토글.
+ *
+ * AI 노트가 있을 때만 보인다. AI 노트가 없으면 `null`이며 Transcript는 항상 포함된다 (INV-8).
+ */
+export interface TranscriptToggle {
+  /** 토글을 보일 것인가. AI 노트가 있을 때만 `true`다. */
+  readonly visible: boolean;
+  /** 지금 Transcript를 포함하는가. */
+  readonly includeTranscript: boolean;
+}
+
 export interface ExportPanelView {
   readonly contents: ExportContentsNotice;
   readonly body: ExportPanelBody;
+  /** Transcript 포함 토글. AI 노트가 없으면 `null`이다. */
+  readonly transcriptToggle: TranscriptToggle | null;
 }
 
 /**
@@ -296,6 +312,13 @@ export interface ExportPanelInput {
    * 않는다 (`savedFileView.ts`의 `showFile`).
    */
   readonly show: ShowFileAttempt;
+  /**
+   * Transcript를 포함할지 사용자가 선택한 값.
+   *
+   * AI 노트가 있을 때만 의미가 있다. AI 노트가 없으면 이 값과 무관하게 항상 포함된다 (INV-8).
+   * 기본값은 `false`(AI 노트가 있을 때 Transcript 미포함)다.
+   */
+  readonly includeTranscript: boolean;
 }
 
 /**
@@ -306,15 +329,22 @@ export interface ExportPanelInput {
  * 다른 녹음에 대한 내보내기는 이 자리와 아무 상관이 없으므로 보지 않는다.
  */
 export function exportPanel(input: ExportPanelInput): ExportPanelView {
-  const { recording, notes, attempt, show } = input;
+  const { recording, notes, attempt, show, includeTranscript } = input;
   const contents = contentsNotice(notes);
 
   if (recording === null) {
-    return { contents, body: { kind: 'loading' } };
+    return { contents, body: { kind: 'loading' }, transcriptToggle: null };
   }
 
-  const body = panelBody(recording, mine(attempt, recording.id), show);
-  return { contents, body };
+  // AI 노트가 있으면 사용자가 Transcript를 빼고 내보낼 수 있다. 없으면 항상 포함 (INV-8).
+  const hasAiNote = notes !== null && notes.length > 0;
+  const effectiveInclude = hasAiNote ? includeTranscript : true;
+  const transcriptToggle: TranscriptToggle | null = hasAiNote
+    ? { visible: true, includeTranscript: effectiveInclude }
+    : null;
+
+  const body = panelBody(recording, mine(attempt, recording.id), show, effectiveInclude);
+  return { contents, body, transcriptToggle };
 }
 
 /** 이 녹음에 대한 시도만 본다. 다른 녹음의 결과가 이 자리에 보이지 않는다. */
@@ -333,6 +363,7 @@ function panelBody(
   recording: Recording,
   attempt: ExportAttempt,
   show: ShowFileAttempt,
+  includeTranscript: boolean,
 ): ExportPanelBody {
   if (attempt.kind === 'running') {
     return { kind: 'exporting', text: EXPORTING_TEXT };
@@ -349,7 +380,7 @@ function panelBody(
         show: showFile(attempt.file.path, show),
       },
       text: EXPORT_DONE_TEXT,
-      again: againAction(recording.id),
+      again: againAction(recording.id, includeTranscript),
     };
   }
 
@@ -362,7 +393,7 @@ function panelBody(
       cause,
       preservedNotice: EXPORT_PRESERVED_NOTICE,
       resolution: FAILURE_RESOLUTION[cause],
-      retry: retryAction(recording.id),
+      retry: retryAction(recording.id, includeTranscript),
     };
   }
 
@@ -371,5 +402,5 @@ function panelBody(
     return { kind: 'nothingToExport', text: NOTHING_TO_EXPORT_TEXT, hint: NOTHING_TO_EXPORT_HINT };
   }
 
-  return { kind: 'ready', text: EXPORT_READY_TEXT, start: exportAction(recording.id) };
+  return { kind: 'ready', text: EXPORT_READY_TEXT, start: exportAction(recording.id, includeTranscript) };
 }

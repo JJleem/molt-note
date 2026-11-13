@@ -1,9 +1,9 @@
 # 회의록 형식 (Meeting Note Format)
 
-> 상태: **기준 형식 (2026-11-13 사용자 지정)**.
-> 앱의 Meeting 노트가 이 형식을 따르는 것은 아직 **PLANNED**다 — 지금 앱이 만드는 Meeting 노트는
-> `PRODUCT-SPEC.md` §9.5의 5개 섹션(Overview · Key Discussions · Decisions · Action Items ·
-> Open Questions)이다. 반영 계획은 `phase-prompt/05.10-meeting-note-format.md`.
+> 상태: **구현됨 (Phase 5.10 · 2026-11-13)**.
+> 앱의 Meeting 노트가 이 형식을 따른다 — content schema v2 (`PRODUCT-SPEC.md` §9.5).
+> 그 전에 만든 노트(v1: Overview · Key Discussions · Decisions · Action Items · Open Questions)는
+> 그대로 읽히고 그대로 렌더된다.
 
 ## 왜 있는가
 

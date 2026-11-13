@@ -576,7 +576,7 @@ fn tr3_the_file_this_app_just_exported_is_the_one_that_reaches_the_os_boundary()
 
     let exported = app
         .exporter
-        .export("rec-1")
+        .export("rec-1", true)
         .expect("Markdown 파일을 쓸 수 있어야 한다");
 
     app.saved_files
@@ -602,7 +602,7 @@ fn tr3_nothing_outside_the_exports_directory_reaches_the_os_boundary() {
     app.save_recording_with_transcript("rec-1", "3DGS Study #04", &sentences(3));
     let exported = app
         .exporter
-        .export("rec-1")
+        .export("rec-1", true)
         .expect("사전 조건: 파일 하나를 내보낸다");
 
     let database = app.app_data_dir.database_path();

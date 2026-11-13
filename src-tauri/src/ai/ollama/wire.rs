@@ -333,13 +333,13 @@ mod tests {
         // 노트에 가장 가까웠던 후보의 이유가 남아야 "무엇이 달랐는가"를 말할 수 있다.
         let body = json!({
             "model": "served-model",
-            "response": r#"{"overview":"","keyDiscussions":[],"decisions":[],"actionItems":[],"openQuestions":[]}"#,
+            "response": r#"{"meetingTitle":"","meetingKind":"위클리","attendees":[],"reliabilityNotice":"x","keySummary":[],"previousActionItems":{"done":[],"changed":[],"inProgress":[],"noProgress":[],"notMentioned":[]},"topics":[],"actionItems":[],"needsConfirmation":[]}"#,
         })
         .to_string();
 
         assert_eq!(
             generated_note(NoteType::Meeting, &body),
-            Err(ResponseRejection::BlankRequiredText { field: "overview" })
+            Err(ResponseRejection::BlankRequiredText { field: "meetingTitle" })
         );
     }
 

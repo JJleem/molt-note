@@ -261,6 +261,11 @@ export function RecordingDetailScreen({ route, goBack }: ScreenProps) {
   /** 이 화면이 건 Markdown export 한 번 (§11). 상태를 물어보는 규약을 쓰지 않는다. */
   const [exportAttempt, setExportAttempt] = useState<ExportAttempt>(NO_EXPORT_ATTEMPT);
   /**
+   * Transcript 포함 여부. AI 노트가 있는 Meeting 녹음의 기본값은 `false` (Transcript 미포함).
+   * AI 노트가 없으면 이 값과 무관하게 항상 포함된다 (INV-8).
+   */
+  const [includeTranscript, setIncludeTranscript] = useState(false);
+  /**
    * 이 화면이 건 복사 한 번 (요구 A-1 · A-2). 두 복사 자리 중 하나에만 해당한다.
    *
    * **AI provider와 아무 상관이 없다** — 이 값이 만들어지는 경로에 provider가 들어오지 않는다
@@ -594,14 +599,22 @@ export function RecordingDetailScreen({ route, goBack }: ScreenProps) {
 
   // 내보내기와 Notion 전송. 어느 쪽도 재생 · Transcript · AI Note 탭을 막지 않으며, 판단은
   // 전부 exportPanel · notionPanel에 있고 여기에는 없다.
+  const exportNotes = noteTranscriptId === null ? [] : aiNotes;
   const exportView = exportPanel({
     recording: record,
     // 가리키는 Transcript가 없으면 노트도 없다 (§7.2) — 읽지 못한 것과 다른 사실이다.
-    notes: noteTranscriptId === null ? [] : aiNotes,
+    notes: exportNotes,
     attempt: exportAttempt,
     show: showAttempt,
+    includeTranscript,
   });
-  const notionView = notionPanel({ recording: record, sync: notionSync, live: notionLive });
+  const notionView = notionPanel({
+    recording: record,
+    sync: notionSync,
+    live: notionLive,
+    includeTranscript,
+    notes: exportNotes,
+  });
   const sendingToNotion = notionView.body.kind === 'sending';
 
   useEffect(() => {
@@ -655,9 +668,10 @@ export function RecordingDetailScreen({ route, goBack }: ScreenProps) {
    * 돌아오는 것은 **이미 만들어진 파일**이지 접수 사실이 아니다 — 기다릴 모델도 서버도 없다.
    * 실패해도 녹음 · 전사 · 노트는 그대로이며 (INV-3), 그 사실은 실패 상태가 들고 있다.
    */
-  const beginExport = (id: string) => {
+  const beginExport = (action: ExportAction) => {
+    const { recordingId: id, includeTranscript } = action;
     setExportAttempt({ kind: 'running', recordingId: id });
-    exportMarkdown(id).then(
+    exportMarkdown(id, includeTranscript).then(
       (file) => setExportAttempt(exportedFile(file)),
       // 실패를 console에만 남기지 않는다. 화면 상태가 된다 (§13).
       (error: unknown) => setExportAttempt(failedExport(id, error)),
@@ -741,9 +755,9 @@ export function RecordingDetailScreen({ route, goBack }: ScreenProps) {
    * 않는다** — 값은 사용자가 누른 버튼이 들고 있던 것 그대로이며, 그래서 확인 없이 페이지가
    * 하나 더 생기는 경로가 없다 (§8.3). 거절되면 그 사실이 화면에 남는다.
    */
-  const beginNotionSend = (id: string, confirmation: NotionConfirmation) => {
+  const beginNotionSend = (id: string, confirmation: NotionConfirmation, includeTranscript?: boolean) => {
     setNotionIssue(null);
-    startNotionSync(id, confirmation).then(
+    startNotionSync(id, confirmation, includeTranscript).then(
       (next) => {
         setNotionLive(next);
         lastNotionState.current = next.state;
@@ -885,7 +899,7 @@ export function RecordingDetailScreen({ route, goBack }: ScreenProps) {
       {/* 기록을 이 앱 밖으로 꺼내는 문 둘 (§10 · §11). 탭 위에 있으므로 어느 탭을 보고
           있든 Notion 상태가 보인다 (요구 9). */}
       <section className="share">
-        <ExportPanel panel={exportView} onExport={beginExport} onShowFile={beginShowFile} />
+        <ExportPanel panel={exportView} onExport={beginExport} onShowFile={beginShowFile} onToggleTranscript={setIncludeTranscript} />
         <NotionPanel panel={notionView} trouble={notionIssue} onSend={beginNotionSend} />
       </section>
 
@@ -960,12 +974,14 @@ function ExportPanel({
   panel,
   onExport,
   onShowFile,
+  onToggleTranscript,
 }: {
   panel: ExportPanelView;
-  onExport: (recordingId: string) => void;
+  onExport: (action: ExportAction) => void;
   onShowFile: (action: ShowFileAction) => void;
+  onToggleTranscript: (include: boolean) => void;
 }) {
-  const { body, contents } = panel;
+  const { body, contents, transcriptToggle } = panel;
 
   return (
     <section className="share__panel">
@@ -973,6 +989,17 @@ function ExportPanel({
         <Icon name="file" />
         마크다운
       </h2>
+
+      {transcriptToggle?.visible && (
+        <label className="share__toggle">
+          <input
+            type="checkbox"
+            checked={transcriptToggle.includeTranscript}
+            onChange={(e) => onToggleTranscript(e.target.checked)}
+          />
+          전사 텍스트 포함
+        </label>
+      )}
 
       {body.kind === 'loading' && <Loading text="읽는 중…" />}
 
@@ -1086,13 +1113,13 @@ function ExportButton({
   onExport,
 }: {
   action: ExportAction;
-  onExport: (recordingId: string) => void;
+  onExport: (action: ExportAction) => void;
 }) {
   return (
     <button
       type="button"
       className="btn btn--secondary"
-      onClick={() => onExport(action.recordingId)}
+      onClick={() => onExport(action)}
     >
       {action.label}
     </button>
@@ -1116,7 +1143,7 @@ function NotionPanel({
 }: {
   panel: NotionPanelView;
   trouble: NotionTrouble | null;
-  onSend: (recordingId: string, confirmation: NotionConfirmation) => void;
+  onSend: (recordingId: string, confirmation: NotionConfirmation, includeTranscript?: boolean) => void;
 }) {
   const { body, contents, status } = panel;
 
@@ -1215,7 +1242,7 @@ function SendButton({
   onSend,
 }: {
   action: NotionSendAction;
-  onSend: (recordingId: string, confirmation: NotionConfirmation) => void;
+  onSend: (recordingId: string, confirmation: NotionConfirmation, includeTranscript?: boolean) => void;
 }) {
   return (
     <>
@@ -1224,7 +1251,7 @@ function SendButton({
       <button
         type="button"
         className="btn btn--secondary"
-        onClick={() => onSend(action.recordingId, action.confirmation)}
+        onClick={() => onSend(action.recordingId, action.confirmation, action.includeTranscript)}
       >
         {action.label}
       </button>

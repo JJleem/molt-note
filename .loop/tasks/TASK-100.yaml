@@ -1,0 +1,47 @@
+# 문서 마무리 — PRODUCT-SPEC §9.5 · §11 갱신
+# Runtime이 PLAN-20261113T071558Z 승인 시점에 생성했다 (proposal P9). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-100
+status: DONE
+
+request: |-
+  문서만 바꾸는 Task다 — 소스·설정·의존성·테스트를 건드리지 않는다. (1) PRODUCT-SPEC §9.5의 Meeting 출력 섹션 표를 V2 필드에 맞게 갱신한다 (기존 5섹션 → V2 구조). (2) PRODUCT-SPEC §11의 내보내기 설명에 Transcript 포함 선택을 반영한다 (AI 노트가 있으면 Transcript 기본 미포함, 없으면 항상 포함). (3) docs/MEETING-NOTE-FORMAT.md의 상태를 PLANNED에서 구현 Phase를 적는다. (4) docs/SYSTEM-MAP.md에 Phase 5.10의 완료 결과를 반영한다(Meeting v2 schema · Transcript 포함 선택).
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-099
+
+stop_condition:
+  gates: [build, lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 1
+
+acceptance_criteria:
+  - id: AC-9-1
+    description: |-
+      PRODUCT-SPEC §9.5 Meeting 출력 섹션이 V2 필드를 반영한다
+    verification:
+      type: verifier
+      instruction: |-
+        docs/PRODUCT-SPEC.md에서 §9.5의 Meeting 출력 섹션을 찾아 V2 필드(meetingTitle, keySummary, previousActionItems, topics, actionItems with owner/due, needsConfirmation)가 언급되는지 확인한다.
+  - id: AC-9-2
+    description: |-
+      PRODUCT-SPEC §11에 Transcript 포함 선택이 반영됐다
+    verification:
+      type: verifier
+      instruction: |-
+        docs/PRODUCT-SPEC.md의 §11에서 Transcript 포함/미포함 선택과 Meeting 기본값(미포함)이 기술되는지 확인한다.
+  - id: AC-9-3
+    description: |-
+      소스·설정·테스트 파일이 이 Task에서 변경되지 않았다
+    verification:
+      type: verifier
+      instruction: |-
+        이 Task의 diff에 src-tauri/ · src/ · tests/ · package.json · Cargo.toml · Cargo.lock이 포함되지 않는지 확인한다.
+
+evidence: []
+
+failure_memo: []

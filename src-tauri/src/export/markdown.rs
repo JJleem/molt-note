@@ -41,7 +41,7 @@
 //! 있다. 노트 타입의 필드 이름도 같은 표에서 왔으므로 (ADR-0008 §7.1) 제목과 내용이 어긋날
 //! 자리가 없다.
 
-use crate::ai::note::StructuredNote;
+use crate::ai::note::{ActionItemV2, MeetingNoteV2, PreviousActionItems, StructuredNote, Topic};
 use crate::domain::{format_duration_ms, Recording, Transcript, TranscriptSegment};
 
 use super::iso_date;
@@ -56,13 +56,34 @@ pub const UNTITLED_TITLE: &str = "제목 없음";
 /// `created_at`이 예상한 모양이 아니고 그마저 비어 있을 때 `Date:` 줄에 쓰는 값.
 pub const UNKNOWN_DATE: &str = super::filename::UNKNOWN_DATE;
 
-/// Meeting 노트의 섹션 제목 — §9.5의 출력 섹션 순서 그대로다.
-pub const MEETING_SECTIONS: [&str; 5] = [
+/// Meeting V1 노트의 섹션 제목 — 옛 노트 렌더링에 쓰인다.
+pub const MEETING_V1_SECTIONS: [&str; 5] = [
     "Overview",
     "Key Discussions",
     "Decisions",
     "Action Items",
     "Open Questions",
+];
+
+/// Meeting V2 노트의 섹션 제목 — `docs/MEETING-NOTE-FORMAT.md` 구조다.
+pub const MEETING_SECTIONS: [&str; 9] = [
+    "Meeting Title",
+    "Meeting Kind",
+    "Attendees",
+    "Reliability Notice",
+    "Key Summary",
+    "Previous Action Items",
+    "Topics",
+    "Action Items",
+    "Needs Confirmation",
+];
+
+/// Meeting V2가 렌더링하는 `##` 섹션 제목 — 머리말은 인라인, Topics는 동적이므로 여기 없다.
+pub const MEETING_V2_SECTIONS: [&str; 4] = [
+    "🔑 핵심 요약",
+    "🔁 지난주 액션 아이템 진행 상황",
+    "✅ 액션 아이템",
+    "🔍 확인 필요",
 ];
 
 /// Study 노트의 섹션 제목 — §9.5의 출력 섹션 순서 그대로다.
@@ -104,7 +125,7 @@ pub struct ExportDocument<'a> {
 /// ## Overview                 ← AI Note가 있을 때만. 내용이 없는 섹션은 적지 않는다
 /// …
 ///
-/// ## Transcript
+/// ## Transcript               ← include_transcript이 false이면 이 섹션이 빠진다
 ///
 /// ### 00:00:03
 /// …
@@ -113,7 +134,11 @@ pub struct ExportDocument<'a> {
 /// 문서는 언제나 개행 하나로 끝나고, 블록 사이에는 빈 줄이 정확히 하나 있다. 같은 입력은
 /// 언제나 같은 문자열을 낸다 — 시계도 로캘도 해시맵 순회도 없고, segment는 **받은 순서
 /// 그대로** 적는다.
-pub fn render(document: &ExportDocument<'_>) -> String {
+///
+/// `include_transcript`가 `false`이면 `## Transcript` 섹션 전체를 생략한다. AI 노트가 있는
+/// Meeting 녹음에서 사용자가 Transcript를 빼고 내보내거나 Notion으로 보낼 수 있게 하기
+/// 위해서다. AI 노트가 없으면 부르는 쪽이 `true`를 넘겨야 한다 (INV-8).
+pub fn render(document: &ExportDocument<'_>, include_transcript: bool) -> String {
     let recording = document.recording;
 
     // 블록 하나가 문단 하나다. 마지막에 빈 줄 하나로 잇는다 — 이렇게 하면 "언제 빈 줄을
@@ -124,17 +149,24 @@ pub fn render(document: &ExportDocument<'_>) -> String {
     ];
 
     if let Some(note) = document.note {
-        for (title, body) in note_sections(note) {
-            // 내용이 없는 섹션은 제목도 남기지 않는다 (INV-8 · ADR-0008 §7.3).
-            if let Some(rendered) = render_body(body) {
-                blocks.push(format!("## {title}\n{rendered}"));
+        match note {
+            StructuredNote::MeetingV2(v2) => blocks.extend(meeting_v2_blocks(v2)),
+            _ => {
+                for (title, body) in note_sections(note) {
+                    // 내용이 없는 섹션은 제목도 남기지 않는다 (INV-8 · ADR-0008 §7.3).
+                    if let Some(rendered) = render_body(body) {
+                        blocks.push(format!("## {title}\n{rendered}"));
+                    }
+                }
             }
         }
     }
 
-    // §11의 파일 형식이다 — 이 문서의 모양은 [`TranscriptShape::Sectioned`] 하나뿐이며,
-    // AI 경로가 고른 압축 모양은 여기에 닿지 않는다.
-    blocks.extend(transcript_blocks(document.transcript, TranscriptShape::Sectioned));
+    if include_transcript {
+        // §11의 파일 형식이다 — 이 문서의 모양은 [`TranscriptShape::Sectioned`] 하나뿐이며,
+        // AI 경로가 고른 압축 모양은 여기에 닿지 않는다.
+        blocks.extend(transcript_blocks(document.transcript, TranscriptShape::Sectioned));
+    }
 
     let mut markdown = blocks.join("\n\n");
     markdown.push('\n');
@@ -176,6 +208,13 @@ fn note_sections(note: &StructuredNote) -> Vec<(&'static str, SectionBody<'_>)> 
             ("Action Items", SectionBody::List(&note.action_items)),
             ("Open Questions", SectionBody::List(&note.open_questions)),
         ],
+        // render()는 MeetingV2를 meeting_v2_blocks()로 직접 렌더한다. 이 경로는
+        // note_sections를 직접 호출하는 곳이 있을 때의 안전 경로다.
+        StructuredNote::MeetingV2(note) => vec![
+            ("Overview", SectionBody::Text(&note.meeting_title)),
+            ("Key Summary", SectionBody::List(&note.key_summary)),
+            ("Needs Confirmation", SectionBody::List(&note.needs_confirmation)),
+        ],
         StructuredNote::Study(note) => vec![
             ("Overview", SectionBody::Text(&note.overview)),
             ("Key Concepts", SectionBody::List(&note.key_concepts)),
@@ -214,6 +253,188 @@ fn render_body(body: SectionBody<'_>) -> Option<String> {
             (!lines.is_empty()).then(|| lines.join("\n"))
         }
     }
+}
+
+// ── Meeting V2 전용 렌더링 ─────────────────────────────────────────────────────
+//
+// V2의 구조(Topics · 기간별 액션 아이템 · PreviousActionItems의 다섯 분류)는
+// `SectionBody::Text | List` 둘로 표현되지 않는다. 그래서 `note_sections` +
+// `render_body`를 거치지 않고, 블록을 직접 만들어 `render`에 넘긴다.
+
+/// MeetingV2 노트의 블록들 — `docs/MEETING-NOTE-FORMAT.md` 형식.
+fn meeting_v2_blocks(note: &MeetingNoteV2) -> Vec<String> {
+    let mut blocks = Vec::new();
+
+    // 머리말: 📌 안내 + 메타데이터 ─────────────────────────────────────────
+    let mut preamble_parts: Vec<String> = Vec::new();
+    let notice = single_line(&note.reliability_notice);
+    if !notice.is_empty() {
+        preamble_parts.push(format!("> 📌 {notice}"));
+    }
+
+    let mut meta_lines: Vec<String> = Vec::new();
+    let title = single_line(&note.meeting_title);
+    if !title.is_empty() {
+        meta_lines.push(format!("- **회의명**: {title}"));
+    }
+    let kind = single_line(&note.meeting_kind);
+    if !kind.is_empty() {
+        meta_lines.push(format!("- **유형**: {kind}"));
+    }
+    let attendees: Vec<String> = note
+        .attendees
+        .iter()
+        .map(|a| single_line(a))
+        .filter(|a| !a.is_empty())
+        .collect();
+    if !attendees.is_empty() {
+        meta_lines.push(format!("- **참석자**: {}", attendees.join(", ")));
+    }
+    if !meta_lines.is_empty() {
+        preamble_parts.push(meta_lines.join("\n"));
+    }
+    if !preamble_parts.is_empty() {
+        blocks.push(preamble_parts.join("\n\n"));
+    }
+
+    // 🔑 핵심 요약 ────────────────────────────────────────────────────────
+    if let Some(body) = render_bullet_list(&note.key_summary) {
+        blocks.push(format!("## 🔑 핵심 요약\n{body}"));
+    }
+
+    // 🔁 지난주 액션 아이템 진행 상황 (전부 비면 생략) ──────────────────────
+    if let Some(body) = render_previous_action_items(&note.previous_action_items) {
+        blocks.push(format!("## 🔁 지난주 액션 아이템 진행 상황\n{body}"));
+    }
+
+    // 주제별 ## 섹션 ──────────────────────────────────────────────────────
+    for (i, topic) in note.topics.iter().enumerate() {
+        if let Some(section) = render_topic(i + 1, topic) {
+            blocks.push(section);
+        }
+    }
+
+    // ✅ 액션 아이템 (기간별 그룹) ─────────────────────────────────────────
+    if let Some(section) = render_action_items_v2(&note.action_items) {
+        blocks.push(section);
+    }
+
+    // 🔍 확인 필요 ────────────────────────────────────────────────────────
+    if let Some(body) = render_bullet_list(&note.needs_confirmation) {
+        blocks.push(format!("## 🔍 확인 필요\n{body}"));
+    }
+
+    blocks
+}
+
+/// 글머리표 목록을 렌더한다. 빈 항목은 버리고, 전부 비면 `None`.
+fn render_bullet_list(items: &[String]) -> Option<String> {
+    let lines: Vec<String> = items
+        .iter()
+        .map(|item| single_line(item))
+        .filter(|item| !item.is_empty())
+        .map(|item| format!("- {item}"))
+        .collect();
+    (!lines.is_empty()).then(|| lines.join("\n"))
+}
+
+/// PreviousActionItems의 다섯 분류를 렌더한다. 전부 비면 `None` (AC-5-3).
+fn render_previous_action_items(pai: &PreviousActionItems) -> Option<String> {
+    let categories: [(&str, &[String]); 5] = [
+        ("완료", &pai.done),
+        ("일정·방향 변경", &pai.changed),
+        ("진행 중", &pai.in_progress),
+        ("진전 없음", &pai.no_progress),
+        ("회의에서 언급 없음", &pai.not_mentioned),
+    ];
+
+    let mut parts: Vec<String> = Vec::new();
+    for (label, items) in &categories {
+        let lines: Vec<String> = items
+            .iter()
+            .map(|item| single_line(item))
+            .filter(|item| !item.is_empty())
+            .map(|item| format!("- {item}"))
+            .collect();
+        if !lines.is_empty() {
+            parts.push(format!("**{label}**\n{}", lines.join("\n")));
+        }
+    }
+
+    (!parts.is_empty()).then(|| parts.join("\n"))
+}
+
+/// 주제 하나를 `## N. <title>` 섹션으로 렌더한다.
+fn render_topic(number: usize, topic: &Topic) -> Option<String> {
+    let title = single_line(&topic.title);
+    if title.is_empty() {
+        return None;
+    }
+
+    let mut section = format!("## {number}. {title}");
+    for group in &topic.groups {
+        let heading = single_line(&group.heading);
+        let items: Vec<String> = group
+            .items
+            .iter()
+            .map(|item| single_line(item))
+            .filter(|item| !item.is_empty())
+            .collect();
+
+        if !heading.is_empty() {
+            section.push_str(&format!("\n**{heading}**"));
+        }
+        for item in &items {
+            section.push_str(&format!("\n- {item}"));
+        }
+    }
+
+    Some(section)
+}
+
+/// 액션 아이템을 기간(`period`)별로 묶어 렌더한다.
+fn render_action_items_v2(items: &[ActionItemV2]) -> Option<String> {
+    if items.is_empty() {
+        return None;
+    }
+
+    // 안정적인 순서 — 먼저 나온 period가 먼저.
+    let mut groups: Vec<(String, Vec<&ActionItemV2>)> = Vec::new();
+    for item in items {
+        let period = {
+            let p = single_line(&item.period);
+            if p.is_empty() {
+                "기타".to_owned()
+            } else {
+                p
+            }
+        };
+        if let Some(group) = groups.iter_mut().find(|(p, _)| *p == period) {
+            group.1.push(item);
+        } else {
+            groups.push((period, vec![item]));
+        }
+    }
+
+    let mut section = "## ✅ 액션 아이템".to_owned();
+    for (period, group_items) in &groups {
+        section.push_str(&format!("\n### {period}"));
+        for item in group_items {
+            let task = single_line(&item.task);
+            let detail = single_line(&item.detail);
+            let owner = single_line(&item.owner);
+            let due = single_line(&item.due);
+
+            let mut line = format!("\n- [ ]  **{task}**");
+            if !detail.is_empty() {
+                line.push_str(&format!(" ({detail})"));
+            }
+            line.push_str(&format!(" — {owner} · 📅 {due}"));
+            section.push_str(&line);
+        }
+    }
+
+    Some(section)
 }
 
 /// segment 하나를 어떤 모양으로 적는가 — **규칙이 아니라 모양이다.**
@@ -419,7 +640,10 @@ fn single_line(text: &str) -> String {
 mod tests {
     use super::*;
 
-    use crate::ai::note::{MeetingNote, StudyNote, SummaryNote};
+    use crate::ai::note::{
+        ActionItemV2, MeetingNote, MeetingNoteV2, PreviousActionItems, StudyNote, SummaryNote,
+        Topic, TopicGroup,
+    };
     use crate::domain::{ProcessingStatus, RecordingId, TranscriptId, TranscriptSegment};
 
     fn recording() -> Recording {
@@ -486,6 +710,38 @@ mod tests {
         })
     }
 
+    fn meeting_v2_note() -> StructuredNote {
+        StructuredNote::MeetingV2(MeetingNoteV2 {
+            meeting_title: "분기 계획 회의".to_owned(),
+            meeting_kind: "정기 위클리 (일정 확정)".to_owned(),
+            attendees: vec!["김철수".to_owned(), "이영희".to_owned()],
+            reliability_notice: "1시간 53분 녹음을 자동 전사 후 정리했습니다.".to_owned(),
+            key_summary: vec!["**9월 출시 확정**: 일정이 최종 합의됨".to_owned()],
+            previous_action_items: PreviousActionItems {
+                done: vec!["RFP 초안 완료".to_owned()],
+                changed: vec![],
+                in_progress: vec![],
+                no_progress: vec![],
+                not_mentioned: vec![],
+            },
+            topics: vec![Topic {
+                title: "일정 확정".to_owned(),
+                groups: vec![TopicGroup {
+                    heading: "".to_owned(),
+                    items: vec!["9월 출시로 합의".to_owned()],
+                }],
+            }],
+            action_items: vec![ActionItemV2 {
+                task: "초안 작성".to_owned(),
+                detail: "RFP 기반".to_owned(),
+                owner: "김철수".to_owned(),
+                due: "11/20".to_owned(),
+                period: "이번 주".to_owned(),
+            }],
+            needs_confirmation: vec![],
+        })
+    }
+
     fn summary_note() -> StructuredNote {
         StructuredNote::Summary(SummaryNote {
             short_summary: "짧은 요약.".to_owned(),
@@ -514,7 +770,7 @@ mod tests {
         let transcript = transcript();
         let note = study_note();
 
-        let markdown = render(&document(&recording, &transcript, Some(&note)));
+        let markdown = render(&document(&recording, &transcript, Some(&note)), true);
 
         assert_eq!(
             markdown,
@@ -555,7 +811,7 @@ mod tests {
         let recording = recording();
         let transcript = transcript();
 
-        let markdown = render(&document(&recording, &transcript, None));
+        let markdown = render(&document(&recording, &transcript, None), true);
 
         assert_eq!(
             markdown,
@@ -583,7 +839,7 @@ mod tests {
         let recording = recording();
         let transcript = transcript();
 
-        let markdown = render(&document(&recording, &transcript, None));
+        let markdown = render(&document(&recording, &transcript, None), true);
 
         // 메타데이터와 Transcript는 그대로 있다.
         assert!(markdown.starts_with("# 3DGS Study #04\n"));
@@ -592,9 +848,10 @@ mod tests {
         assert!(markdown.contains("\n## Transcript\n"));
         assert!(markdown.contains("\n### 00:00:03\n"));
 
-        // AI 섹션의 껍데기는 하나도 없다 — 열세 개 이름 전부.
+        // AI 섹션의 껍데기는 하나도 없다.
         for section in MEETING_SECTIONS
             .iter()
+            .chain(MEETING_V2_SECTIONS.iter())
             .chain(STUDY_SECTIONS.iter())
             .chain(SUMMARY_SECTIONS.iter())
         {
@@ -613,7 +870,7 @@ mod tests {
     #[test]
     fn the_section_titles_are_the_output_section_names_of_section_9_5() {
         for (note, expected) in [
-            (meeting_note(), MEETING_SECTIONS.as_slice()),
+            (meeting_note(), MEETING_V1_SECTIONS.as_slice()),
             (study_note(), STUDY_SECTIONS.as_slice()),
             (summary_note(), SUMMARY_SECTIONS.as_slice()),
         ] {
@@ -625,11 +882,9 @@ mod tests {
             assert_eq!(titles, expected, "{}의 섹션이 §9.5와 다르다", note.mode());
         }
 
-        // §9.5의 13개 출력 섹션이 13개 제목에 1:1로 대응한다.
-        assert_eq!(
-            MEETING_SECTIONS.len() + STUDY_SECTIONS.len() + SUMMARY_SECTIONS.len(),
-            13
-        );
+        // V1 meeting(5) + V2 meeting(9) + study(6) + summary(2) 제목이 각각 있다.
+        assert_eq!(MEETING_V1_SECTIONS.len(), 5);
+        assert_eq!(MEETING_SECTIONS.len(), 9);
     }
 
     #[test]
@@ -638,11 +893,11 @@ mod tests {
         let transcript = transcript();
 
         for (note, expected) in [
-            (meeting_note(), MEETING_SECTIONS.as_slice()),
+            (meeting_note(), MEETING_V1_SECTIONS.as_slice()),
             (study_note(), STUDY_SECTIONS.as_slice()),
             (summary_note(), SUMMARY_SECTIONS.as_slice()),
         ] {
-            let markdown = render(&document(&recording, &transcript, Some(&note)));
+            let markdown = render(&document(&recording, &transcript, Some(&note)), true);
             let rendered: Vec<&str> = markdown
                 .lines()
                 .filter_map(|line| line.strip_prefix("## "))
@@ -676,7 +931,7 @@ mod tests {
         let transcript = transcript();
 
         for note in [meeting_note(), study_note(), summary_note()] {
-            let markdown = render(&document(&recording, &transcript, Some(&note)));
+            let markdown = render(&document(&recording, &transcript, Some(&note)), true);
 
             assert!(markdown.starts_with("# 3DGS Study #04\n"));
             assert!(markdown.contains("\n## Transcript\n"));
@@ -700,7 +955,7 @@ mod tests {
             open_questions: vec![],
         });
 
-        let markdown = render(&document(&recording, &transcript, Some(&note)));
+        let markdown = render(&document(&recording, &transcript, Some(&note)), true);
 
         assert!(markdown.contains("## Overview\n짧은 회의."));
         assert!(!markdown.contains("## Decisions"));
@@ -717,7 +972,7 @@ mod tests {
             key_points: vec!["첫\n줄과  둘째 줄".to_owned(), "   ".to_owned()],
         });
 
-        let markdown = render(&document(&recording, &transcript, Some(&note)));
+        let markdown = render(&document(&recording, &transcript, Some(&note)), true);
 
         assert!(markdown.contains("## Key Points\n- 첫 줄과 둘째 줄\n"));
         // 빈 항목은 `- `만 남기지 않고 사라진다.
@@ -734,7 +989,7 @@ mod tests {
             ..transcript()
         };
 
-        let markdown = render(&document(&recording, &transcript, None));
+        let markdown = render(&document(&recording, &transcript, None), true);
 
         assert!(markdown.ends_with(
             "## Transcript\n안녕하세요. 오늘은 3DGS를 봅니다. 먼저 splat 표현부터 보겠습니다.\n"
@@ -754,7 +1009,7 @@ mod tests {
             ..transcript()
         };
 
-        let markdown = render(&document(&recording, &transcript, None));
+        let markdown = render(&document(&recording, &transcript, None), true);
 
         assert_eq!(
             markdown,
@@ -781,7 +1036,7 @@ mod tests {
             ..transcript()
         };
 
-        let markdown = render(&document(&recording, &transcript, None));
+        let markdown = render(&document(&recording, &transcript, None), true);
 
         // 정렬하지 않는다 — 순서를 만드는 것은 전사이고, 여기서 바꾸면 원본과 문서가 달라진다.
         let later = markdown.find("나중 것").expect("첫 segment가 있어야 한다");
@@ -948,7 +1203,7 @@ mod tests {
         let recording = recording();
         let transcript = transcript();
 
-        let markdown = render(&document(&recording, &transcript, None));
+        let markdown = render(&document(&recording, &transcript, None), true);
 
         assert!(markdown.contains("\n### 00:00:03\n안녕하세요. 오늘은 3DGS를 봅니다.\n"));
         assert!(
@@ -981,7 +1236,7 @@ mod tests {
         };
         let transcript = transcript();
 
-        let markdown = render(&document(&recording, &transcript, None));
+        let markdown = render(&document(&recording, &transcript, None), true);
 
         assert!(markdown.contains("\nDate: 2026-09-01\n"));
     }
@@ -1001,7 +1256,7 @@ mod tests {
                 ..recording()
             };
 
-            let markdown = render(&document(&recording, &transcript, None));
+            let markdown = render(&document(&recording, &transcript, None), true);
 
             assert!(
                 markdown.contains(&format!("\nDate: {expected}\n")),
@@ -1026,7 +1281,7 @@ mod tests {
                 ..recording()
             };
 
-            let markdown = render(&document(&recording, &transcript, None));
+            let markdown = render(&document(&recording, &transcript, None), true);
 
             assert!(
                 markdown.starts_with(&format!("# {expected}\n")),
@@ -1040,7 +1295,7 @@ mod tests {
         let recording = recording();
         let transcript = transcript();
 
-        let markdown = render(&document(&recording, &transcript, None));
+        let markdown = render(&document(&recording, &transcript, None), true);
 
         assert!(markdown.contains(&format!(
             "\nDuration: {}\n",
@@ -1056,10 +1311,16 @@ mod tests {
         let recording = recording();
         let transcript = transcript();
 
-        for note in [None, Some(meeting_note()), Some(study_note()), Some(summary_note())] {
+        for note in [
+            None,
+            Some(meeting_note()),
+            Some(meeting_v2_note()),
+            Some(study_note()),
+            Some(summary_note()),
+        ] {
             let document = document(&recording, &transcript, note.as_ref());
 
-            assert_eq!(render(&document), render(&document));
+            assert_eq!(render(&document, true), render(&document, true));
         }
     }
 
@@ -1068,12 +1329,288 @@ mod tests {
         let recording = recording();
         let transcript = transcript();
         let note = meeting_note();
+        let v2 = meeting_v2_note();
 
-        for note in [None, Some(&note)] {
-            let markdown = render(&document(&recording, &transcript, note));
+        for note in [None, Some(&note), Some(&v2)] {
+            let markdown = render(&document(&recording, &transcript, note), true);
 
             assert!(markdown.ends_with('\n'));
             assert!(!markdown.ends_with("\n\n"));
+        }
+    }
+
+    // ── Meeting V2 렌더링 (AC-5-1 · AC-5-2 · AC-5-3) ──────────────────────────
+
+    #[test]
+    fn a_v2_meeting_renders_the_reference_format_sections_in_order() {
+        let recording = recording();
+        let transcript = transcript();
+        let note = meeting_v2_note();
+
+        let markdown = render(&document(&recording, &transcript, Some(&note)), true);
+
+        assert_eq!(
+            markdown,
+            [
+                "# 3DGS Study #04",
+                "",
+                "Date: 2026-09-01",
+                "Duration: 52:31",
+                "",
+                "> 📌 1시간 53분 녹음을 자동 전사 후 정리했습니다.",
+                "",
+                "- **회의명**: 분기 계획 회의",
+                "- **유형**: 정기 위클리 (일정 확정)",
+                "- **참석자**: 김철수, 이영희",
+                "",
+                "## 🔑 핵심 요약",
+                "- **9월 출시 확정**: 일정이 최종 합의됨",
+                "",
+                "## 🔁 지난주 액션 아이템 진행 상황",
+                "**완료**",
+                "- RFP 초안 완료",
+                "",
+                "## 1. 일정 확정",
+                "- 9월 출시로 합의",
+                "",
+                "## ✅ 액션 아이템",
+                "### 이번 주",
+                "- [ ]  **초안 작성** (RFP 기반) — 김철수 · 📅 11/20",
+                "",
+                "## Transcript",
+                "",
+                "### 00:00:03",
+                "안녕하세요. 오늘은 3DGS를 봅니다.",
+                "",
+                "### 00:00:06",
+                "먼저 splat 표현부터 보겠습니다.",
+                "",
+            ]
+            .join("\n")
+        );
+    }
+
+    #[test]
+    fn v1_meeting_renders_exactly_like_before() {
+        let recording = recording();
+        let transcript = transcript();
+        let note = meeting_note();
+
+        let markdown = render(&document(&recording, &transcript, Some(&note)), true);
+
+        // V1 섹션이 그대로 나온다.
+        assert!(markdown.contains("## Overview\n분기 계획 회의."));
+        assert!(markdown.contains("## Key Discussions\n- 일정"));
+        assert!(markdown.contains("## Decisions\n- 9월 출시"));
+        assert!(markdown.contains("## Action Items\n- 초안 작성"));
+        // V2 이모지가 새어 들어가지 않는다.
+        assert!(!markdown.contains("🔑"));
+        assert!(!markdown.contains("🔁"));
+        assert!(!markdown.contains("✅"));
+        assert!(!markdown.contains("📌"));
+    }
+
+    #[test]
+    fn previous_action_items_section_is_omitted_when_all_categories_are_empty() {
+        let recording = recording();
+        let transcript = transcript();
+        let note = StructuredNote::MeetingV2(MeetingNoteV2 {
+            meeting_title: "회의".to_owned(),
+            meeting_kind: "위클리".to_owned(),
+            attendees: vec![],
+            reliability_notice: "녹음 기반.".to_owned(),
+            key_summary: vec!["요약".to_owned()],
+            previous_action_items: PreviousActionItems {
+                done: vec![],
+                changed: vec![],
+                in_progress: vec![],
+                no_progress: vec![],
+                not_mentioned: vec![],
+            },
+            topics: vec![],
+            action_items: vec![],
+            needs_confirmation: vec![],
+        });
+
+        let markdown = render(&document(&recording, &transcript, Some(&note)), true);
+
+        assert!(!markdown.contains("🔁"), "빈 지난 액션 아이템 섹션이 남았다");
+        assert!(markdown.contains("## 🔑 핵심 요약"), "핵심 요약은 있어야 한다");
+    }
+
+    #[test]
+    fn v2_needs_confirmation_section_is_omitted_when_empty() {
+        let recording = recording();
+        let transcript = transcript();
+        let note = meeting_v2_note(); // needs_confirmation is empty
+
+        let markdown = render(&document(&recording, &transcript, Some(&note)), true);
+
+        assert!(!markdown.contains("🔍"), "빈 확인 필요 섹션이 남았다");
+    }
+
+    #[test]
+    fn v2_action_items_are_grouped_by_period() {
+        let recording = recording();
+        let transcript = transcript();
+        let note = StructuredNote::MeetingV2(MeetingNoteV2 {
+            meeting_title: "회의".to_owned(),
+            meeting_kind: "위클리".to_owned(),
+            attendees: vec![],
+            reliability_notice: "녹음.".to_owned(),
+            key_summary: vec!["요약".to_owned()],
+            previous_action_items: PreviousActionItems {
+                done: vec![], changed: vec![], in_progress: vec![],
+                no_progress: vec![], not_mentioned: vec![],
+            },
+            topics: vec![],
+            action_items: vec![
+                ActionItemV2 {
+                    task: "A".to_owned(), detail: "".to_owned(),
+                    owner: "김".to_owned(), due: "11/20".to_owned(),
+                    period: "이번 주".to_owned(),
+                },
+                ActionItemV2 {
+                    task: "B".to_owned(), detail: "설명".to_owned(),
+                    owner: "이".to_owned(), due: "12/01".to_owned(),
+                    period: "다음 주".to_owned(),
+                },
+                ActionItemV2 {
+                    task: "C".to_owned(), detail: "".to_owned(),
+                    owner: "박".to_owned(), due: "11/22".to_owned(),
+                    period: "이번 주".to_owned(),
+                },
+            ],
+            needs_confirmation: vec![],
+        });
+
+        let markdown = render(&document(&recording, &transcript, Some(&note)), true);
+
+        // 이번 주 그룹이 먼저 오고, 다음 주 그룹이 뒤에 온다.
+        let this_week = markdown.find("### 이번 주").expect("이번 주 그룹");
+        let next_week = markdown.find("### 다음 주").expect("다음 주 그룹");
+        assert!(this_week < next_week);
+
+        // A와 C가 같은 그룹에, B가 다음 그룹에.
+        assert!(markdown.contains("**A** — 김"));
+        assert!(markdown.contains("**C** — 박"));
+        assert!(markdown.contains("**B** (설명) — 이"));
+    }
+
+    #[test]
+    fn v2_topics_render_numbered_sections_with_bold_subheadings() {
+        let recording = recording();
+        let transcript = transcript();
+        let note = StructuredNote::MeetingV2(MeetingNoteV2 {
+            meeting_title: "회의".to_owned(),
+            meeting_kind: "위클리".to_owned(),
+            attendees: vec![],
+            reliability_notice: "녹음.".to_owned(),
+            key_summary: vec!["요약".to_owned()],
+            previous_action_items: PreviousActionItems {
+                done: vec![], changed: vec![], in_progress: vec![],
+                no_progress: vec![], not_mentioned: vec![],
+            },
+            topics: vec![
+                Topic {
+                    title: "일정".to_owned(),
+                    groups: vec![
+                        TopicGroup {
+                            heading: "결정 사항".to_owned(),
+                            items: vec!["9월 출시".to_owned()],
+                        },
+                        TopicGroup {
+                            heading: "".to_owned(),
+                            items: vec!["추가 논의 필요".to_owned()],
+                        },
+                    ],
+                },
+                Topic {
+                    title: "예산".to_owned(),
+                    groups: vec![TopicGroup {
+                        heading: "".to_owned(),
+                        items: vec!["500만원 배정".to_owned()],
+                    }],
+                },
+            ],
+            action_items: vec![],
+            needs_confirmation: vec![],
+        });
+
+        let markdown = render(&document(&recording, &transcript, Some(&note)), true);
+
+        assert!(markdown.contains("## 1. 일정\n**결정 사항**\n- 9월 출시\n- 추가 논의 필요"));
+        assert!(markdown.contains("## 2. 예산\n- 500만원 배정"));
+    }
+
+    // ── include_transcript (AC-6-1 · AC-6-2) ──────────────────────────────────
+
+    #[test]
+    fn include_transcript_false_omits_the_transcript_section() {
+        // AC-6-1: include_transcript=false로 render하면 출력에 ## Transcript가 없다.
+        let recording = recording();
+        let transcript = transcript();
+        let note = study_note();
+
+        let markdown = render(&document(&recording, &transcript, Some(&note)), false);
+
+        assert!(!markdown.contains("## Transcript"), "Transcript 섹션이 남았다");
+        assert!(!markdown.contains("### 00:00:03"), "segment가 남았다");
+        // AI 섹션은 그대로 있다.
+        assert!(markdown.contains("## Overview\n3DGS 스터디 4회차."));
+        assert!(markdown.contains("## Key Concepts"));
+        // 메타데이터도 그대로다.
+        assert!(markdown.starts_with("# 3DGS Study #04\n"));
+        assert!(markdown.contains("Date: 2026-09-01"));
+        assert!(markdown.contains("Duration: 52:31"));
+        // 문서는 개행 하나로 끝난다.
+        assert!(markdown.ends_with('\n'));
+        assert!(!markdown.ends_with("\n\n"));
+    }
+
+    #[test]
+    fn include_transcript_true_keeps_transcript_as_before() {
+        // AC-6-2: include_transcript=true로 render하면 기존과 동일하게 ## Transcript가 있다.
+        let recording = recording();
+        let transcript = transcript();
+        let note = study_note();
+
+        let with = render(&document(&recording, &transcript, Some(&note)), true);
+        let without = render(&document(&recording, &transcript, Some(&note)), false);
+
+        assert!(with.contains("## Transcript"));
+        assert!(with.contains("### 00:00:03"));
+        assert!(!without.contains("## Transcript"));
+        // true일 때의 문서 모양은 기존 §11 기대와 같다.
+        assert!(with.contains("\n## Transcript\n\n### 00:00:03\n"));
+    }
+
+    #[test]
+    fn include_transcript_false_without_ai_note_still_omits_transcript() {
+        // 렌더러 자체는 AI 노트 유무를 판단하지 않는다. 부르는 쪽이 정한다.
+        let recording = recording();
+        let transcript = transcript();
+
+        let markdown = render(&document(&recording, &transcript, None), false);
+
+        assert!(!markdown.contains("## Transcript"));
+        assert_eq!(
+            markdown,
+            "# 3DGS Study #04\n\nDate: 2026-09-01\nDuration: 52:31\n"
+        );
+    }
+
+    #[test]
+    fn include_transcript_false_still_produces_a_valid_document_ending_with_one_newline() {
+        let recording = recording();
+        let transcript = transcript();
+
+        for note in [None, Some(meeting_note()), Some(meeting_v2_note()), Some(study_note()), Some(summary_note())] {
+            let markdown = render(&document(&recording, &transcript, note.as_ref()), false);
+
+            assert!(markdown.ends_with('\n'), "개행 하나로 끝나야 한다");
+            assert!(!markdown.ends_with("\n\n"), "빈 줄로 끝나면 안 된다");
+            assert!(!markdown.contains("## Transcript"), "Transcript가 남았다");
         }
     }
 }

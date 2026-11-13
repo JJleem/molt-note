@@ -1,0 +1,6 @@
+Self-check: all gates passed
+  build: PASS  exit=0
+  lint:  PASS  exit=0
+  test:  PASS  exit=0
+
+682+ tests pass (674 unit + 8 integration suites).

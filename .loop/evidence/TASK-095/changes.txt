@@ -1,0 +1,3 @@
+Changed files:
+- src/screens/aiNoteView.ts: Added NoteGroup type, grouped kind, V2 Meeting rendering with topics/previousActionItems
+- src/screens/aiNoteView.test.ts: Added V2 Meeting fixture and tests for AC-4-1, AC-4-2, AC-4-3

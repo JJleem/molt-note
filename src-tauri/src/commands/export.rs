@@ -88,9 +88,9 @@ impl Exporter {
     ///
     /// 같은 이름의 파일이 이미 있으면 **덮어쓰지 않고 번호를 붙인다** (ADR-0009 §4.3). 그래서
     /// 돌려주는 값에는 실제로 쓰인 이름이 함께 들어 있다 — 화면이 이름을 다시 짐작하지 않는다.
-    pub fn export(&self, recording_id: &str) -> Result<ExportedFilePayload, Failure> {
+    pub fn export(&self, recording_id: &str, include_transcript: bool) -> Result<ExportedFilePayload, Failure> {
         self.write_file(recording_id, |connection, directory, id| {
-            let written = export::run::export(connection, directory, id)?;
+            let written = export::run::export(connection, directory, id, include_transcript)?;
 
             Ok(ExportedFilePayload::new(id.as_str(), written))
         })
@@ -167,7 +167,7 @@ mod tests {
             )),
         };
 
-        let failure = exporter.export("rec-1").expect_err("자리를 모르면 쓸 수 없다");
+        let failure = exporter.export("rec-1", true).expect_err("자리를 모르면 쓸 수 없다");
 
         assert_eq!(failure.kind, FailureKind::Storage);
         assert!(failure.source_data_safe, "아무것도 건드리지 않았다 (INV-3)");
@@ -181,7 +181,7 @@ mod tests {
         ));
         let exporter = Exporter::in_directory(AppDataDirectory::new(&temp));
 
-        let failure = exporter.export("   ").expect_err("고른 녹음이 없다");
+        let failure = exporter.export("   ", true).expect_err("고른 녹음이 없다");
 
         assert_eq!(failure.kind, FailureKind::InvalidInput);
         assert!(!failure.retryable, "같은 값을 다시 보내도 같다");

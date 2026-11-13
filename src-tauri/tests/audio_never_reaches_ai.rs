@@ -50,6 +50,9 @@ const AUDIO_BYTES: &[u8] = b"MOLT-NOTE-AUDIO-BYTES-THAT-MUST-NEVER-BE-SENT";
 /// 전사 텍스트. 프롬프트에 실려 **나가는 것이 정상인** 유일한 사용자 데이터다 (§9.6).
 const TRANSCRIPT_TEXT: &str = "오늘 회의에서는 다음 분기 일정과 남은 과제를 이야기했다.";
 
+/// segments가 있으면 [HH:MM:SS] 시각이 붙는다. fixture의 segment가 start_ms=0이므로 이 형태.
+const TIMESTAMPED_TEXT: &str = "[00:00:00] 오늘 회의에서는 다음 분기 일정과 남은 과제를 이야기했다.";
+
 static COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 /// 시스템 임시 디렉터리 아래의 고유 디렉터리. Drop 시 지운다.
@@ -326,7 +329,7 @@ fn everything_that_goes_out_is_built_from_the_mode_and_the_transcript_text_alone
         // 그것은 domain이 전사 **텍스트**로 만든 문자열과 글자 하나까지 같다.
         assert_eq!(
             body["prompt"].as_str().expect("프롬프트는 문자열이다"),
-            build_prompt(mode, TRANSCRIPT_TEXT),
+            build_prompt(mode, TIMESTAMPED_TEXT),
             "{mode}: 프롬프트가 전사 텍스트 말고 다른 것에서 만들어졌다"
         );
         assert_eq!(body["model"], MODEL_IN_THE_LIST, "{mode}");
@@ -371,7 +374,7 @@ fn the_provider_is_handed_the_transcript_text_and_nothing_else() {
     let calls = provider.calls();
     assert_eq!(calls.len(), 1, "한 번의 생성은 한 번의 호출이다");
     assert_eq!(calls[0].mode, NoteType::Summary);
-    assert_eq!(calls[0].transcript, TRANSCRIPT_TEXT, "current Transcript의 텍스트다");
+    assert_eq!(calls[0].transcript, TIMESTAMPED_TEXT, "current Transcript의 segments가 [HH:MM:SS] 형식으로 간다");
     assert_eq!(calls[0].context_tokens, ContextBudget::DEFAULT.context_tokens);
 
     // 오디오는 한 바이트도 바뀌지 않았다 (INV-1).

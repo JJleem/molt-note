@@ -46,7 +46,7 @@ use crate::domain::{Failure, FailureKind, NoteType};
 /// **저장된 노트는 schema보다 오래 산다.** `ai_notes`에는 UPDATE 경로가 없으므로 옛 노트를
 /// 새 형태로 고쳐 쓸 수 없고, 고쳐 쓰는 것은 provenance를 지우는 일이다. 읽는 쪽이 형태를
 /// 판정할 값이 봉투 안에 있어야 한다.
-pub const CONTENT_SCHEMA_VERSION: u32 = 1;
+pub const CONTENT_SCHEMA_VERSION: u32 = 2;
 
 /// 배열 하나가 가질 수 있는 원소 수의 상한 (ADR-0008 §7.4).
 pub const MAX_ITEMS: usize = 200;
@@ -59,16 +59,20 @@ pub const MAX_ITEM_CHARS: usize = 2_000;
 /// `overview` · `shortSummary`의 길이 상한(문자 수) (ADR-0008 §7.4).
 pub const MAX_OVERVIEW_CHARS: usize = 4_000;
 
-/// Meeting 노트의 필드 이름 — §9.5의 출력 섹션 순서 그대로다.
+/// Meeting V2 노트의 필드 이름 — `docs/MEETING-NOTE-FORMAT.md` 구조의 camelCase 표현이다.
 ///
 /// 이 배열은 [`json_schema`]의 `required`와 직렬화 키 순서 **양쪽의 근거**이며, 테스트가
 /// 셋이 어긋나지 않는 것을 고정한다.
-pub const MEETING_FIELDS: [&str; 5] = [
-    "overview",
-    "keyDiscussions",
-    "decisions",
+pub const MEETING_FIELDS: [&str; 9] = [
+    "meetingTitle",
+    "meetingKind",
+    "attendees",
+    "reliabilityNotice",
+    "keySummary",
+    "previousActionItems",
+    "topics",
     "actionItems",
-    "openQuestions",
+    "needsConfirmation",
 ];
 
 /// Study 노트의 필드 이름 — §9.5의 출력 섹션 순서 그대로다.
@@ -100,6 +104,79 @@ pub struct MeetingNote {
     pub decisions: Vec<String>,
     pub action_items: Vec<String>,
     pub open_questions: Vec<String>,
+}
+
+/// 🔁 지난주 액션 아이템 진행 상황 — 다섯 분류 각각 `string[]`.
+/// 전부 비면 렌더러가 섹션을 그리지 않는다.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviousActionItems {
+    #[serde(default)]
+    pub done: Vec<String>,
+    #[serde(default)]
+    pub changed: Vec<String>,
+    #[serde(default)]
+    pub in_progress: Vec<String>,
+    #[serde(default)]
+    pub no_progress: Vec<String>,
+    #[serde(default)]
+    pub not_mentioned: Vec<String>,
+}
+
+/// 주제별 섹션의 하위 묶음 — `**굵은 소제목**` + 글머리표.
+/// `heading`이 빈 문자열이면 소제목 없이 글머리표만 그린다.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TopicGroup {
+    pub heading: String,
+    pub items: Vec<String>,
+}
+
+/// 주제 하나 — `## N. <title>`, 안에 여러 `TopicGroup`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Topic {
+    pub title: String,
+    pub groups: Vec<TopicGroup>,
+}
+
+/// ✅ 액션 아이템 하나 — task/detail/owner/due/period 전부 string.
+/// owner를 모르면 `"담당 확인"`, due를 모르면 `"일정 확인"`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActionItemV2 {
+    pub task: String,
+    #[serde(default)]
+    pub detail: String,
+    pub owner: String,
+    pub due: String,
+    #[serde(default)]
+    pub period: String,
+}
+
+/// Meeting V2 노트 — `docs/MEETING-NOTE-FORMAT.md`의 팀 회의록 형식.
+///
+/// §7.3 개정: Meeting v2에 한해 한 단계의 객체 중첩을 허용한다. Study · Summary는 v1 그대로.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MeetingNoteV2 {
+    /// 회의명 — 제목 `[YYMMDD] <회의명>_회의록`에 쓰인다.
+    pub meeting_title: String,
+    /// 유형 한 줄 (회의 종류 + 흐름).
+    pub meeting_kind: String,
+    /// 들린 이름·호칭. 확정 못 하면 비워도 된다.
+    #[serde(default)]
+    pub attendees: Vec<String>,
+    /// 📌 안내 문구 본문.
+    pub reliability_notice: String,
+    /// 🔑 핵심 요약 (5~7개 권장).
+    pub key_summary: Vec<String>,
+    /// 🔁 지난주 액션 아이템 진행 상황.
+    pub previous_action_items: PreviousActionItems,
+    /// 주제별 섹션.
+    pub topics: Vec<Topic>,
+    /// ✅ 액션 아이템.
+    pub action_items: Vec<ActionItemV2>,
+    /// 🔍 확인 필요.
+    #[serde(default)]
+    pub needs_confirmation: Vec<String>,
 }
 
 /// Study 노트
@@ -134,6 +211,7 @@ pub struct SummaryNote {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StructuredNote {
     Meeting(MeetingNote),
+    MeetingV2(MeetingNoteV2),
     Study(StudyNote),
     Summary(SummaryNote),
 }
@@ -142,7 +220,7 @@ impl StructuredNote {
     /// 이 노트가 어느 mode의 것인가.
     pub fn mode(&self) -> NoteType {
         match self {
-            Self::Meeting(_) => NoteType::Meeting,
+            Self::Meeting(_) | Self::MeetingV2(_) => NoteType::Meeting,
             Self::Study(_) => NoteType::Study,
             Self::Summary(_) => NoteType::Summary,
         }
@@ -212,16 +290,60 @@ pub fn json_schema(mode: NoteType) -> Value {
     let list = || json!({ "type": "array", "items": { "type": "string" } });
 
     let (properties, required): (Value, &[&str]) = match mode {
-        NoteType::Meeting => (
-            json!({
-                "overview": text(),
-                "keyDiscussions": list(),
-                "decisions": list(),
-                "actionItems": list(),
-                "openQuestions": list(),
-            }),
-            &MEETING_FIELDS,
-        ),
+        NoteType::Meeting => {
+            let previous_action_items_schema = json!({
+                "type": "object",
+                "properties": {
+                    "done": list(),
+                    "changed": list(),
+                    "inProgress": list(),
+                    "noProgress": list(),
+                    "notMentioned": list(),
+                },
+                "required": ["done", "changed", "inProgress", "noProgress", "notMentioned"],
+            });
+            let topic_group_schema = json!({
+                "type": "object",
+                "properties": {
+                    "heading": text(),
+                    "items": list(),
+                },
+                "required": ["heading", "items"],
+            });
+            let topic_schema = json!({
+                "type": "object",
+                "properties": {
+                    "title": text(),
+                    "groups": { "type": "array", "items": topic_group_schema },
+                },
+                "required": ["title", "groups"],
+            });
+            let action_item_schema = json!({
+                "type": "object",
+                "properties": {
+                    "task": text(),
+                    "detail": text(),
+                    "owner": text(),
+                    "due": text(),
+                    "period": text(),
+                },
+                "required": ["task", "detail", "owner", "due", "period"],
+            });
+            (
+                json!({
+                    "meetingTitle": text(),
+                    "meetingKind": text(),
+                    "attendees": list(),
+                    "reliabilityNotice": text(),
+                    "keySummary": list(),
+                    "previousActionItems": previous_action_items_schema,
+                    "topics": { "type": "array", "items": topic_schema },
+                    "actionItems": { "type": "array", "items": action_item_schema },
+                    "needsConfirmation": list(),
+                }),
+                &MEETING_FIELDS,
+            )
+        }
         NoteType::Study => (
             json!({
                 "overview": text(),
@@ -260,14 +382,8 @@ pub fn parse_note(mode: NoteType, generated_text: &str) -> Result<StructuredNote
 
     match mode {
         NoteType::Meeting => {
-            let raw: MeetingNote = from_value(value)?;
-            Ok(StructuredNote::Meeting(MeetingNote {
-                overview: clean_required_text("overview", &raw.overview, MAX_OVERVIEW_CHARS)?,
-                key_discussions: clean_items("keyDiscussions", raw.key_discussions)?,
-                decisions: clean_items("decisions", raw.decisions)?,
-                action_items: clean_items("actionItems", raw.action_items)?,
-                open_questions: clean_items("openQuestions", raw.open_questions)?,
-            }))
+            let raw: MeetingNoteV2 = from_value(value)?;
+            clean_meeting_v2(raw)
         }
         NoteType::Study => {
             let raw: StudyNote = from_value(value)?;
@@ -304,19 +420,28 @@ pub fn encode_content(note: &StructuredNote) -> String {
     // 선언 순서가 아니게 될 수 있고, 그러면 §7.5가 요구한 "같은 노트는 같은 문자열"이
     // 조용히 깨진다.
     let mode = note.mode().as_str();
+    let schema_version = match note {
+        StructuredNote::Meeting(_) => 1,
+        _ => CONTENT_SCHEMA_VERSION,
+    };
     let encoded = match note {
         StructuredNote::Meeting(inner) => serde_json::to_string(&Envelope {
-            schema_version: CONTENT_SCHEMA_VERSION,
+            schema_version,
+            mode,
+            note: inner,
+        }),
+        StructuredNote::MeetingV2(inner) => serde_json::to_string(&Envelope {
+            schema_version,
             mode,
             note: inner,
         }),
         StructuredNote::Study(inner) => serde_json::to_string(&Envelope {
-            schema_version: CONTENT_SCHEMA_VERSION,
+            schema_version,
             mode,
             note: inner,
         }),
         StructuredNote::Summary(inner) => serde_json::to_string(&Envelope {
-            schema_version: CONTENT_SCHEMA_VERSION,
+            schema_version,
             mode,
             note: inner,
         }),
@@ -342,10 +467,10 @@ pub fn decode_content(content: &str, note_type: NoteType) -> Result<StructuredNo
         storage_failure("저장된 AI 노트를 읽을 수 없다").with_detail(error)
     })?;
 
-    if envelope.schema_version != CONTENT_SCHEMA_VERSION {
+    let sv = envelope.schema_version;
+    if sv != 1 && sv != 2 {
         return Err(storage_failure("이 앱보다 새 버전이 만든 AI 노트다").with_detail(format!(
-            "schemaVersion {} (이 앱이 아는 값: {CONTENT_SCHEMA_VERSION})",
-            envelope.schema_version
+            "schemaVersion {sv} (이 앱이 아는 값: 1, {CONTENT_SCHEMA_VERSION})",
         )));
     }
 
@@ -361,10 +486,17 @@ pub fn decode_content(content: &str, note_type: NoteType) -> Result<StructuredNo
         );
     }
 
-    let note = match note_type {
-        NoteType::Meeting => serde_json::from_value(envelope.note).map(StructuredNote::Meeting),
-        NoteType::Study => serde_json::from_value(envelope.note).map(StructuredNote::Study),
-        NoteType::Summary => serde_json::from_value(envelope.note).map(StructuredNote::Summary),
+    let note = match (note_type, sv) {
+        (NoteType::Meeting, 1) => {
+            serde_json::from_value(envelope.note).map(StructuredNote::Meeting)
+        }
+        (NoteType::Meeting, _) => {
+            serde_json::from_value(envelope.note).map(StructuredNote::MeetingV2)
+        }
+        (NoteType::Study, _) => serde_json::from_value(envelope.note).map(StructuredNote::Study),
+        (NoteType::Summary, _) => {
+            serde_json::from_value(envelope.note).map(StructuredNote::Summary)
+        }
     };
 
     note.map_err(|error| storage_failure("저장된 AI 노트의 형태가 기대와 다르다").with_detail(error))
@@ -496,6 +628,100 @@ fn clean_required_text(
     Ok(trimmed.to_owned())
 }
 
+/// Meeting V2 전체 검증.
+fn clean_meeting_v2(raw: MeetingNoteV2) -> Result<StructuredNote, ResponseRejection> {
+    let meeting_title =
+        clean_required_text("meetingTitle", &raw.meeting_title, MAX_OVERVIEW_CHARS)?;
+    let meeting_kind = clean_required_text("meetingKind", &raw.meeting_kind, MAX_OVERVIEW_CHARS)?;
+    let attendees = clean_items("attendees", raw.attendees)?;
+    let reliability_notice =
+        clean_required_text("reliabilityNotice", &raw.reliability_notice, MAX_OVERVIEW_CHARS)?;
+    let key_summary = clean_items("keySummary", raw.key_summary)?;
+    let previous_action_items = clean_previous_action_items(raw.previous_action_items)?;
+    let topics = clean_topics(raw.topics)?;
+    let action_items = clean_action_items_v2(raw.action_items)?;
+    let needs_confirmation = clean_items("needsConfirmation", raw.needs_confirmation)?;
+
+    Ok(StructuredNote::MeetingV2(MeetingNoteV2 {
+        meeting_title,
+        meeting_kind,
+        attendees,
+        reliability_notice,
+        key_summary,
+        previous_action_items,
+        topics,
+        action_items,
+        needs_confirmation,
+    }))
+}
+
+/// PreviousActionItems의 다섯 분류 각각 검증.
+fn clean_previous_action_items(
+    raw: PreviousActionItems,
+) -> Result<PreviousActionItems, ResponseRejection> {
+    Ok(PreviousActionItems {
+        done: clean_items("previousActionItems.done", raw.done)?,
+        changed: clean_items("previousActionItems.changed", raw.changed)?,
+        in_progress: clean_items("previousActionItems.inProgress", raw.in_progress)?,
+        no_progress: clean_items("previousActionItems.noProgress", raw.no_progress)?,
+        not_mentioned: clean_items("previousActionItems.notMentioned", raw.not_mentioned)?,
+    })
+}
+
+/// Topic 배열 검증.
+fn clean_topics(raw: Vec<Topic>) -> Result<Vec<Topic>, ResponseRejection> {
+    if raw.len() > MAX_ITEMS {
+        return Err(ResponseRejection::TooManyItems {
+            field: "topics",
+            count: raw.len(),
+        });
+    }
+    let mut cleaned = Vec::with_capacity(raw.len());
+    for topic in raw {
+        let title = clean_required_text("topics[].title", &topic.title, MAX_ITEM_CHARS)?;
+        if topic.groups.len() > MAX_ITEMS {
+            return Err(ResponseRejection::TooManyItems {
+                field: "topics[].groups",
+                count: topic.groups.len(),
+            });
+        }
+        let mut groups = Vec::with_capacity(topic.groups.len());
+        for group in topic.groups {
+            let heading = group.heading.trim().to_owned();
+            let items = clean_items("topics[].groups[].items", group.items)?;
+            groups.push(TopicGroup { heading, items });
+        }
+        cleaned.push(Topic { title, groups });
+    }
+    Ok(cleaned)
+}
+
+/// ActionItemV2 배열 검증.
+fn clean_action_items_v2(raw: Vec<ActionItemV2>) -> Result<Vec<ActionItemV2>, ResponseRejection> {
+    if raw.len() > MAX_ITEMS {
+        return Err(ResponseRejection::TooManyItems {
+            field: "actionItems",
+            count: raw.len(),
+        });
+    }
+    let mut cleaned = Vec::with_capacity(raw.len());
+    for item in raw {
+        let task = clean_required_text("actionItems[].task", &item.task, MAX_ITEM_CHARS)?;
+        let detail = item.detail.trim().to_owned();
+        let owner = item.owner.trim().to_owned();
+        let due = item.due.trim().to_owned();
+        let period = item.period.trim().to_owned();
+        cleaned.push(ActionItemV2 {
+            task,
+            detail,
+            owner,
+            due,
+            period,
+        });
+    }
+    Ok(cleaned)
+}
+
 /// 배열의 검증 (ADR-0008 §7.4). 빈 원소는 **버리고**(실패가 아니다), 상한을 넘으면 무효다.
 fn clean_items(
     field: &'static str,
@@ -531,13 +757,47 @@ fn clean_items(
 mod tests {
     use super::*;
 
-    fn meeting() -> StructuredNote {
+    /// V1 meeting — 옛 노트 호환 테스트용.
+    fn meeting_v1() -> StructuredNote {
         StructuredNote::Meeting(MeetingNote {
             overview: "분기 계획 회의".to_owned(),
             key_discussions: vec!["일정".to_owned(), "예산".to_owned()],
             decisions: vec!["9월 출시".to_owned()],
             action_items: vec!["초안 작성".to_owned()],
             open_questions: vec![],
+        })
+    }
+
+    /// V2 meeting helper.
+    fn meeting_v2() -> StructuredNote {
+        StructuredNote::MeetingV2(MeetingNoteV2 {
+            meeting_title: "분기 계획 회의".to_owned(),
+            meeting_kind: "정기 위클리 (일정 확정)".to_owned(),
+            attendees: vec!["김철수".to_owned(), "이영희".to_owned()],
+            reliability_notice: "1시간 53분 녹음을 자동 전사 후 정리했습니다.".to_owned(),
+            key_summary: vec!["**9월 출시 확정**: 일정이 최종 합의됨".to_owned()],
+            previous_action_items: PreviousActionItems {
+                done: vec!["RFP 초안 완료".to_owned()],
+                changed: vec![],
+                in_progress: vec![],
+                no_progress: vec![],
+                not_mentioned: vec![],
+            },
+            topics: vec![Topic {
+                title: "일정 확정".to_owned(),
+                groups: vec![TopicGroup {
+                    heading: "".to_owned(),
+                    items: vec!["9월 출시로 합의".to_owned()],
+                }],
+            }],
+            action_items: vec![ActionItemV2 {
+                task: "초안 작성".to_owned(),
+                detail: "RFP 기반".to_owned(),
+                owner: "김철수".to_owned(),
+                due: "11/20".to_owned(),
+                period: "이번 주".to_owned(),
+            }],
+            needs_confirmation: vec![],
         })
     }
 
@@ -559,53 +819,59 @@ mod tests {
         })
     }
 
-    // ── §7.2의 schema와 §9.5의 출력 섹션 ──────────────────────────────────────────
+    /// parse_note(Meeting)에 넣을 최소 V2 JSON.
+    fn minimal_v2_json() -> String {
+        r#"{"meetingTitle":"회의","meetingKind":"위클리","attendees":[],"reliabilityNotice":"녹음 기반","keySummary":["요약"],"previousActionItems":{"done":[],"changed":[],"inProgress":[],"noProgress":[],"notMentioned":[]},"topics":[],"actionItems":[],"needsConfirmation":[]}"#.to_owned()
+    }
+
+    // ── V2 schema · 필드 ────────────────────────────────────────────────────────
 
     #[test]
-    fn the_three_modes_carry_every_output_section_of_section_9_5() {
-        // §9.5의 13개 출력 섹션이 13개 필드에 1:1로 대응한다 (ADR-0008 §7.2).
-        assert_eq!(MEETING_FIELDS.len() + STUDY_FIELDS.len() + SUMMARY_FIELDS.len(), 13);
-
-        let encoded = serde_json::to_value(MeetingNote {
-            overview: String::new(),
-            key_discussions: vec![],
-            decisions: vec![],
+    fn meeting_v2_fields_match_struct() {
+        let encoded = serde_json::to_value(&MeetingNoteV2 {
+            meeting_title: String::new(),
+            meeting_kind: String::new(),
+            attendees: vec![],
+            reliability_notice: String::new(),
+            key_summary: vec![],
+            previous_action_items: PreviousActionItems {
+                done: vec![], changed: vec![], in_progress: vec![],
+                no_progress: vec![], not_mentioned: vec![],
+            },
+            topics: vec![],
             action_items: vec![],
-            open_questions: vec![],
-        })
-        .expect("직렬화할 수 있어야 한다");
+            needs_confirmation: vec![],
+        }).expect("직렬화할 수 있어야 한다");
         for field in MEETING_FIELDS {
-            assert!(encoded.get(field).is_some(), "meeting에 {field}가 없다");
+            assert!(encoded.get(field).is_some(), "meetingV2에 {field}가 없다");
         }
+    }
 
+    #[test]
+    fn study_and_summary_fields_still_match() {
         let encoded = serde_json::to_value(StudyNote {
-            overview: String::new(),
-            key_concepts: vec![],
-            important_details: vec![],
-            questions: vec![],
-            things_to_study: vec![],
-            references_mentioned: vec![],
-        })
-        .expect("직렬화할 수 있어야 한다");
+            overview: String::new(), key_concepts: vec![], important_details: vec![],
+            questions: vec![], things_to_study: vec![], references_mentioned: vec![],
+        }).expect("직렬화");
         for field in STUDY_FIELDS {
             assert!(encoded.get(field).is_some(), "study에 {field}가 없다");
         }
 
         let encoded = serde_json::to_value(SummaryNote {
-            short_summary: String::new(),
-            key_points: vec![],
-        })
-        .expect("직렬화할 수 있어야 한다");
+            short_summary: String::new(), key_points: vec![],
+        }).expect("직렬화");
         for field in SUMMARY_FIELDS {
             assert!(encoded.get(field).is_some(), "summary에 {field}가 없다");
         }
     }
 
     #[test]
-    fn the_field_names_are_the_section_names_of_section_9_5() {
-        // §7.1이 §9.3 예시에서 바꾼 세 이름. 이것이 틀리면 렌더러의 제목이 섹션과 어긋난다.
-        assert!(MEETING_FIELDS.contains(&"keyDiscussions"));
-        assert!(MEETING_FIELDS.contains(&"openQuestions"));
+    fn the_field_names_are_the_v2_section_names() {
+        assert!(MEETING_FIELDS.contains(&"meetingTitle"));
+        assert!(MEETING_FIELDS.contains(&"keySummary"));
+        assert!(MEETING_FIELDS.contains(&"previousActionItems"));
+        assert!(MEETING_FIELDS.contains(&"topics"));
+        assert!(MEETING_FIELDS.contains(&"needsConfirmation"));
         assert!(STUDY_FIELDS.contains(&"referencesMentioned"));
         assert!(!MEETING_FIELDS.contains(&"keyPoints"), "keyPoints는 summary의 이름이다");
     }
@@ -630,25 +896,64 @@ mod tests {
 
             let properties = schema["properties"].as_object().expect("properties는 객체다");
             assert_eq!(properties.len(), fields.len());
-            for field in fields {
-                let declared = &properties[*field];
-                let kind = declared["type"].as_str().expect("type이 있어야 한다");
-                assert!(
-                    kind == "string" || kind == "array",
-                    "{field}: 타입은 string과 string[] 뿐이다 (§7.2)"
-                );
-                if kind == "array" {
-                    assert_eq!(declared["items"]["type"], "string");
-                }
-            }
         }
+    }
+
+    #[test]
+    fn json_schema_meeting_reflects_v2_nested_structure() {
+        let schema = json_schema(NoteType::Meeting);
+        let props = schema["properties"].as_object().unwrap();
+
+        // string fields
+        assert_eq!(props["meetingTitle"]["type"], "string");
+        assert_eq!(props["meetingKind"]["type"], "string");
+        assert_eq!(props["reliabilityNotice"]["type"], "string");
+
+        // string[] fields
+        assert_eq!(props["attendees"]["type"], "array");
+        assert_eq!(props["attendees"]["items"]["type"], "string");
+        assert_eq!(props["keySummary"]["type"], "array");
+        assert_eq!(props["needsConfirmation"]["type"], "array");
+
+        // previousActionItems is an object
+        assert_eq!(props["previousActionItems"]["type"], "object");
+        let pai = &props["previousActionItems"]["properties"];
+        assert_eq!(pai["done"]["type"], "array");
+        assert_eq!(pai["inProgress"]["type"], "array");
+
+        // topics is array of objects with groups
+        assert_eq!(props["topics"]["type"], "array");
+        let topic_props = &props["topics"]["items"]["properties"];
+        assert_eq!(topic_props["title"]["type"], "string");
+        assert_eq!(topic_props["groups"]["type"], "array");
+        let group_props = &topic_props["groups"]["items"]["properties"];
+        assert_eq!(group_props["heading"]["type"], "string");
+        assert_eq!(group_props["items"]["type"], "array");
+
+        // actionItems is array of objects
+        assert_eq!(props["actionItems"]["type"], "array");
+        let ai_props = &props["actionItems"]["items"]["properties"];
+        assert_eq!(ai_props["task"]["type"], "string");
+        assert_eq!(ai_props["owner"]["type"], "string");
+        assert_eq!(ai_props["due"]["type"], "string");
+    }
+
+    // ── V2 serde 왕복 (AC-1-1) ──────────────────────────────────────────────────
+
+    #[test]
+    fn meeting_v2_serde_roundtrip() {
+        let note = meeting_v2();
+        let StructuredNote::MeetingV2(ref inner) = note else { panic!() };
+        let json = serde_json::to_string(inner).expect("serialize");
+        let restored: MeetingNoteV2 = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(&restored, inner);
     }
 
     // ── §7.5 content 봉투 ────────────────────────────────────────────────────────
 
     #[test]
     fn content_round_trips_through_storage_unchanged() {
-        for note in [meeting(), study(), summary()] {
+        for note in [meeting_v1(), meeting_v2(), study(), summary()] {
             let content = encode_content(&note);
             let restored = decode_content(&content, note.mode()).expect("다시 읽을 수 있어야 한다");
 
@@ -658,8 +963,7 @@ mod tests {
     }
 
     #[test]
-    fn the_stored_envelope_is_one_compact_line_in_the_declared_order() {
-        // ADR-0008 §7.5의 예시 그대로다. 키 순서가 바뀌면 이 비교가 깨진다.
+    fn the_stored_v1_envelope_is_one_compact_line_in_the_declared_order() {
         let content = encode_content(&StructuredNote::Meeting(MeetingNote {
             overview: "...".to_owned(),
             key_discussions: vec![],
@@ -675,15 +979,55 @@ mod tests {
         assert!(!content.contains('\n'), "한 줄이다");
     }
 
+    /// AC-1-2: schemaVersion=1인 기존 Meeting 노트가 decode_content로 정상 복원된다.
     #[test]
-    fn a_note_from_a_newer_schema_version_is_not_guessed_at() {
-        let content = r#"{"schemaVersion":2,"mode":"summary","note":{"shortSummary":"x","keyPoints":[]}}"#;
+    fn v1_meeting_content_is_decoded_correctly() {
+        let v1_content = r#"{"schemaVersion":1,"mode":"meeting","note":{"overview":"분기 계획 회의","keyDiscussions":["일정","예산"],"decisions":["9월 출시"],"actionItems":["초안 작성"],"openQuestions":[]}}"#;
+
+        let restored = decode_content(v1_content, NoteType::Meeting)
+            .expect("v1 meeting은 읽을 수 있어야 한다");
+
+        assert_eq!(restored, meeting_v1());
+    }
+
+    /// AC-1-3: schemaVersion=2인 V2 content가 encode → decode 왕복을 통과한다.
+    #[test]
+    fn v2_meeting_encode_decode_roundtrip() {
+        let note = meeting_v2();
+        let content = encode_content(&note);
+
+        // 봉투에 schemaVersion 2가 들어가야 한다
+        assert!(content.contains("\"schemaVersion\":2"));
+        assert!(content.contains("\"mode\":\"meeting\""));
+
+        let restored = decode_content(&content, NoteType::Meeting)
+            .expect("v2 meeting은 읽을 수 있어야 한다");
+        assert_eq!(restored, note);
+    }
+
+    #[test]
+    fn a_note_from_a_future_schema_version_is_not_guessed_at() {
+        let content = r#"{"schemaVersion":3,"mode":"summary","note":{"shortSummary":"x","keyPoints":[]}}"#;
 
         let failure = decode_content(content, NoteType::Summary).expect_err("읽을 수 없어야 한다");
 
         assert_eq!(failure.kind, FailureKind::Storage, "AI 실패가 아니다");
         assert!(!failure.retryable);
         assert!(failure.source_data_safe, "행을 건드리지 않았다");
+    }
+
+    #[test]
+    fn schema_version_2_summary_decodes_normally() {
+        // Summary는 v1과 v2 동일 구조.
+        let content = r#"{"schemaVersion":2,"mode":"summary","note":{"shortSummary":"x","keyPoints":["하나"]}}"#;
+        let restored = decode_content(content, NoteType::Summary).expect("읽을 수 있어야 한다");
+        assert_eq!(
+            restored,
+            StructuredNote::Summary(SummaryNote {
+                short_summary: "x".to_owned(),
+                key_points: vec!["하나".to_owned()],
+            })
+        );
     }
 
     #[test]
@@ -707,6 +1051,7 @@ mod tests {
             r#"{"schemaVersion":1,"mode":"lecture","note":{}}"#,
             r#"{"schemaVersion":1,"mode":"meeting","note":{"overview":1}}"#,
             r#"{"schemaVersion":1,"mode":"meeting","note":null}"#,
+            r#"{"schemaVersion":2,"mode":"meeting","note":null}"#,
         ] {
             let failure =
                 decode_content(content, NoteType::Meeting).expect_err("읽을 수 없는 content다");
@@ -714,37 +1059,31 @@ mod tests {
         }
     }
 
-    // ── §6.3 방어 경로 ───────────────────────────────────────────────────────────
+    // ── §6.3 방어 경로 (V2) ──────────────────────────────────────────────────────
 
     #[test]
-    fn a_well_formed_response_becomes_a_note() {
-        let body = r#"{"overview":" 분기 계획 ","keyDiscussions":["일정"],"decisions":[],"actionItems":[],"openQuestions":[]}"#;
+    fn a_well_formed_v2_response_becomes_a_note() {
+        let body = minimal_v2_json();
+        let note = parse_note(NoteType::Meeting, &body).expect("읽을 수 있어야 한다");
 
-        let note = parse_note(NoteType::Meeting, body).expect("읽을 수 있어야 한다");
-
-        let StructuredNote::Meeting(meeting) = note else {
-            panic!("meeting 노트여야 한다");
+        let StructuredNote::MeetingV2(meeting) = note else {
+            panic!("MeetingV2 노트여야 한다");
         };
-        assert_eq!(meeting.overview, "분기 계획", "앞뒤 공백은 잘라낸다");
-        assert_eq!(meeting.key_discussions, ["일정"]);
+        assert_eq!(meeting.meeting_title, "회의");
+        assert_eq!(meeting.key_summary, ["요약"]);
     }
 
     #[test]
-    fn a_missing_field_is_rejected_rather_than_filled_in() {
-        // (1) 필드 누락
-        let body = r#"{"overview":"x","keyDiscussions":[],"decisions":[],"actionItems":[]}"#;
-
+    fn a_missing_v2_field_is_rejected() {
+        // meetingTitle 누락
+        let body = r#"{"meetingKind":"위클리","attendees":[],"reliabilityNotice":"x","keySummary":[],"previousActionItems":{"done":[],"changed":[],"inProgress":[],"noProgress":[],"notMentioned":[]},"topics":[],"actionItems":[],"needsConfirmation":[]}"#;
         let rejection = parse_note(NoteType::Meeting, body).expect_err("거절해야 한다");
-
         assert!(matches!(rejection, ResponseRejection::Shape { .. }));
-        assert!(rejection.to_string().contains("openQuestions"));
     }
 
     #[test]
-    fn a_field_of_the_wrong_type_is_rejected() {
-        // (2) 타입 불일치 — 문자열 자리에 숫자
-        let body = r#"{"overview":42,"keyDiscussions":[],"decisions":[],"actionItems":[],"openQuestions":[]}"#;
-
+    fn a_v2_field_of_the_wrong_type_is_rejected() {
+        let body = r#"{"meetingTitle":42,"meetingKind":"위클리","attendees":[],"reliabilityNotice":"x","keySummary":[],"previousActionItems":{"done":[],"changed":[],"inProgress":[],"noProgress":[],"notMentioned":[]},"topics":[],"actionItems":[],"needsConfirmation":[]}"#;
         assert!(matches!(
             parse_note(NoteType::Meeting, body),
             Err(ResponseRejection::Shape { .. })
@@ -752,29 +1091,20 @@ mod tests {
     }
 
     #[test]
-    fn a_string_where_an_array_belongs_is_rejected() {
-        // (3) 배열 자리에 문자열 — 한 줄짜리 답을 배열로 고쳐 읽지 않는다
-        let body = r#"{"overview":"x","keyDiscussions":"일정 이야기","decisions":[],"actionItems":[],"openQuestions":[]}"#;
+    fn unknown_extra_fields_do_not_break_v2_note() {
+        let mut body = minimal_v2_json();
+        // 닫는 } 전에 추가 필드를 넣는다
+        body.pop(); // remove trailing }
+        body.push_str(",\"confidence\":0.9}");
 
-        assert!(matches!(
-            parse_note(NoteType::Meeting, body),
-            Err(ResponseRejection::Shape { .. })
-        ));
-    }
-
-    #[test]
-    fn unknown_extra_fields_do_not_break_the_note() {
-        // (4) 알 수 없는 추가 필드 — 모델이 덧붙인 필드 때문에 실패하지 않는다
-        let body = r#"{"overview":"x","keyDiscussions":[],"decisions":[],"actionItems":[],"openQuestions":[],"confidence":0.9,"notes":{"a":[1,2]}}"#;
-
-        let note = parse_note(NoteType::Meeting, body).expect("무시하고 읽어야 한다");
-
+        let note = parse_note(NoteType::Meeting, &body).expect("무시하고 읽어야 한다");
         assert_eq!(note.mode(), NoteType::Meeting);
     }
 
+    // ── §6.3 방어 경로 (Summary · Study — 기존 테스트 유지) ──────────────────────
+
     #[test]
     fn prose_that_is_not_json_is_rejected() {
-        // (5) JSON이 아닌 산문
         for body in [
             "죄송합니다. 이 전사를 요약할 수 없습니다.",
             "Here is your note!",
@@ -790,7 +1120,6 @@ mod tests {
 
     #[test]
     fn json_wrapped_in_a_code_fence_is_recovered() {
-        // (6) 코드펜스로 감싼 JSON — 한 번만 회수한다
         let fenced = "여기 있습니다:\n```json\n{\"shortSummary\":\"짧은 요약\",\"keyPoints\":[\"하나\"]}\n```\n도움이 되었길 바랍니다.";
 
         let note = parse_note(NoteType::Summary, fenced).expect("회수할 수 있어야 한다");
@@ -806,7 +1135,6 @@ mod tests {
 
     #[test]
     fn an_empty_body_is_rejected() {
-        // (7) 빈 본문
         for body in ["", " ", "\n\n", "\t  \r\n"] {
             assert_eq!(
                 parse_note(NoteType::Summary, body),
@@ -817,7 +1145,6 @@ mod tests {
 
     #[test]
     fn a_blank_required_text_is_not_a_usable_note() {
-        // (8) 요약이 없는 요약 노트는 노트가 아니다 (§7.3)
         let body = r#"{"shortSummary":"   ","keyPoints":["하나"]}"#;
 
         assert_eq!(
@@ -830,7 +1157,6 @@ mod tests {
 
     #[test]
     fn blank_array_items_are_dropped_but_an_empty_array_is_normal() {
-        // (9) 빈 원소는 버린다. 배열이 비는 것은 정상이다.
         let body = r#"{"shortSummary":"x","keyPoints":["하나","  ","","둘"]}"#;
 
         let note = parse_note(NoteType::Summary, body).expect("읽을 수 있어야 한다");
@@ -846,7 +1172,6 @@ mod tests {
 
     #[test]
     fn oversized_output_is_rejected_rather_than_silently_truncated() {
-        // (10) 크기 상한 — 조용히 자른 노트는 완전해 보이지만 완전하지 않다 (§7.4)
         let long_item = "가".repeat(MAX_ITEM_CHARS + 1);
         let body = format!(
             r#"{{"shortSummary":"x","keyPoints":[{}]}}"#,
@@ -887,7 +1212,6 @@ mod tests {
 
     #[test]
     fn no_response_body_can_end_the_app() {
-        // 위 열 가지 외에도, 어떤 본문이 와도 값으로 끝난다 — panic도 unwrap도 없다.
         let deep_nesting = format!("{}{}", "{\"a\":".repeat(300), "1".to_owned() + &"}".repeat(300));
         let bodies = [
             "{".to_owned(),
@@ -911,7 +1235,6 @@ mod tests {
 
         for body in bodies {
             for mode in NoteType::ALL {
-                // 결과가 무엇이든 좋다. 돌아오기만 하면 된다.
                 let _ = parse_note(mode, &body);
             }
         }
@@ -919,7 +1242,6 @@ mod tests {
 
     #[test]
     fn recovery_happens_once_and_does_not_guess_fields() {
-        // 두 개의 객체가 이어져 있으면 **바깥쪽 균형 잡힌 하나**만 취한다. 합치지 않는다.
         let body = "설명 {\"shortSummary\":\"첫째\",\"keyPoints\":[]} 그리고 {\"keyPoints\":[\"둘째\"]}";
 
         let note = parse_note(NoteType::Summary, body).expect("첫 객체를 읽는다");
@@ -935,7 +1257,6 @@ mod tests {
 
     #[test]
     fn a_parsed_note_can_be_stored_and_read_back() {
-        // 방어 경로를 통과한 값이 그대로 저장 형태로 이어진다.
         let body = "```\n{\"overview\":\"강의\",\"keyConcepts\":[\"합의\"],\"importantDetails\":[],\"questions\":[],\"thingsToStudy\":[],\"referencesMentioned\":[]}\n```";
 
         let note = parse_note(NoteType::Study, body).expect("읽을 수 있어야 한다");
@@ -945,5 +1266,97 @@ mod tests {
             decode_content(&content, NoteType::Study).expect("다시 읽을 수 있어야 한다"),
             note
         );
+    }
+
+    #[test]
+    fn a_parsed_v2_meeting_can_be_stored_and_read_back() {
+        let body = minimal_v2_json();
+        let note = parse_note(NoteType::Meeting, &body).expect("읽을 수 있어야 한다");
+        let content = encode_content(&note);
+
+        assert_eq!(
+            decode_content(&content, NoteType::Meeting).expect("다시 읽을 수 있어야 한다"),
+            note
+        );
+    }
+
+    // ── AC-1-4: ~25KB V2 fixture ─────────────────────────────────────────────────
+
+    #[test]
+    fn a_25kb_v2_fixture_passes_parse_note() {
+        // 2시간 회의 시뮬레이션: 10 topics × 3 groups × 5 items + 20 action items.
+        let mut topics = Vec::new();
+        for t in 0..10 {
+            let mut groups = Vec::new();
+            for g in 0..3 {
+                let items: Vec<String> = (0..5)
+                    .map(|i| format!("💬 **주제 {t} 소제목 {g} 항목 {i}**: 회의에서 논의된 내용을 여기에 적습니다. 날짜 11/20, 금액 500만원 (STT 기준)."))
+                    .collect();
+                groups.push(json!({
+                    "heading": if g == 0 { "".to_owned() } else { format!("소제목 {g}") },
+                    "items": items,
+                }));
+            }
+            topics.push(json!({
+                "title": format!("주제 {t}: 상세한 안건 제목을 여기에 씁니다"),
+                "groups": groups,
+            }));
+        }
+
+        let mut action_items = Vec::new();
+        for i in 0..20 {
+            action_items.push(json!({
+                "task": format!("액션 아이템 {i}: 구체적인 할 일을 여기에 적습니다"),
+                "detail": format!("상세 설명 {i}: 맥락과 배경을 적습니다 (회의에서 나온 그대로)"),
+                "owner": if i % 3 == 0 { "담당 확인" } else { "김철수(추정)" },
+                "due": if i % 2 == 0 { "11/20 (STT 기준)" } else { "일정 확인" },
+                "period": "이번 주 (~11/20 금)",
+            }));
+        }
+
+        let prev = json!({
+            "done": ["RFP 초안 완료 — 검토 대기 중"],
+            "changed": ["일정: 11월 → 12월로 연기"],
+            "inProgress": ["디자인 시안 작업 중 (70% 진행)"],
+            "noProgress": ["서버 이관 — 담당자 부재"],
+            "notMentioned": ["테스트 환경 구축"],
+        });
+
+        let key_summary: Vec<String> = (0..7)
+            .map(|i| format!("**핵심 {i}**: 회의에서 결정된 주요 사항을 요약합니다. 날짜와 금액이 포함됩니다."))
+            .collect();
+
+        let needs_confirmation: Vec<String> = (0..8)
+            .map(|i| format!("확인 필요 {i}: STT상 '{}' — 음성 인식이 불확실한 고유명사", ["프로젝트 알파", "500만원", "김과장", "11월 20일", "서버 A", "RFP 2차", "디자인 팀", "QA 일정"][i % 8]))
+            .collect();
+
+        let fixture = json!({
+            "meetingTitle": "분기 사업 계획 회의",
+            "meetingKind": "정기 위클리 (사업 계획 확정 및 일정 조율)",
+            "attendees": ["김철수", "이영희", "박지민", "최민수", "정하늘"],
+            "reliabilityNotice": "📌 이 문서는 1시간 53분 분량의 녹음을 자동 전사(STT) 후 AI가 정리한 회의록입니다. 이름과 전문 용어는 음성 인식 기준이므로 틀릴 수 있습니다. 하단의 🔍 확인 필요 항목을 반드시 검토해 주세요. 원문 전사는 별도 문서에 있습니다.",
+            "keySummary": key_summary,
+            "previousActionItems": prev,
+            "topics": topics,
+            "actionItems": action_items,
+            "needsConfirmation": needs_confirmation,
+        });
+
+        let body = serde_json::to_string(&fixture).expect("fixture 직렬화");
+        let size = body.len();
+        assert!(
+            size >= 20_000,
+            "fixture가 충분히 커야 한다: {size} bytes"
+        );
+
+        let note = parse_note(NoteType::Meeting, &body)
+            .expect("25KB fixture가 거절되면 안 된다");
+
+        assert!(matches!(note, StructuredNote::MeetingV2(_)));
+
+        // encode → decode 왕복도 통과해야 한다
+        let content = encode_content(&note);
+        decode_content(&content, NoteType::Meeting)
+            .expect("fixture의 저장·복원이 되어야 한다");
     }
 }

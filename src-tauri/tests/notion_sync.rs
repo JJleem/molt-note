@@ -217,7 +217,7 @@ impl Fixture {
             recording: &recording,
             transcript: &transcript,
             note: with_note,
-        })
+        }, true)
     }
 
     /// 전송 한 번. 실행 순서를 그대로 지난다.
@@ -240,6 +240,7 @@ impl Fixture {
             },
             waiter,
             confirmation,
+            true,
         )
     }
 
@@ -806,7 +807,7 @@ fn asking_for_the_status_answers_immediately_while_a_send_is_still_running() {
     );
 
     let accepted = sender
-        .start(recording_id.as_str(), Confirmation::NotAsked)
+        .start(recording_id.as_str(), Confirmation::NotAsked, true)
         .expect("접수된다");
     assert_eq!(
         accepted,
@@ -841,7 +842,7 @@ fn asking_for_the_status_answers_immediately_while_a_send_is_still_running() {
 
     // 이미 보내는 중이면 두 번째 시작은 거절된다 — 조용히 사라지지 않는다.
     let refused = sender
-        .start(recording_id.as_str(), Confirmation::NotAsked)
+        .start(recording_id.as_str(), Confirmation::NotAsked, true)
         .expect_err("한 번에 한 건이다");
     assert_eq!(refused.kind, FailureKind::InvalidInput);
 

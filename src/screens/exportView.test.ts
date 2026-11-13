@@ -67,6 +67,7 @@ function recording(overrides: Partial<Recording> = {}): Recording {
 
 const MEETING: MeetingNote = {
   mode: 'meeting',
+  schemaVersion: 1,
   overview: '이번 주 변환 작업 범위를 정했다.',
   keyDiscussions: ['PLY와 SOG 변환 순서'],
   decisions: ['PLY를 먼저 변환한다'],
@@ -115,6 +116,7 @@ function input(overrides: Partial<ExportPanelInput> = {}): ExportPanelInput {
     attempt: NO_EXPORT_ATTEMPT,
     // 자리를 여는 시도는 아직 하지 않았다 (`phase-prompt/05.6` 성공 기준 2).
     show: NO_SHOW_FILE_ATTEMPT,
+    includeTranscript: true,
     ...overrides,
   };
 }
@@ -155,7 +157,7 @@ describe('내보내기 자리가 놓이는 상태', () => {
     if (view.body.kind !== 'ready') {
       throw new Error('내보낼 수 있어야 한다');
     }
-    expect(view.body.start).toEqual({ kind: 'export', label: EXPORT_LABEL, recordingId: 'r-1' });
+    expect(view.body.start).toEqual({ kind: 'export', label: EXPORT_LABEL, recordingId: 'r-1', includeTranscript: true });
   });
 
   it('쓰는 중에는 그 사실만 말한다', () => {
@@ -358,7 +360,7 @@ describe('P-3 (1) AI provider 없이 Markdown export가 된다 (INV-8)', () => {
     // provider가 아니라 **이 화면이 건 '자리 열기' 한 번**이며, 담고 있는 것은 파일 경로
     // 하나다. 여는 데 실패해도 내보내기 상태는 그대로이므로 (아래 '자리를 여는 수단'),
     // 이 필드가 늘었다고 provider 없이 내보낼 수 있다는 사실이 흔들리지 않는다.
-    expect(Object.keys(input()).sort()).toEqual(['attempt', 'notes', 'recording', 'show']);
+    expect(Object.keys(input()).sort()).toEqual(['attempt', 'includeTranscript', 'notes', 'recording', 'show']);
   });
 
   // 값의 모양만 고정하면 "모듈 안에서 몰래 본다"는 경로가 남는다. 그래서 **모듈 원문에

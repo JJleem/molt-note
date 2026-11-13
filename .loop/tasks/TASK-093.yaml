@@ -1,0 +1,50 @@
+# Meeting v2 프롬프트 · promptVersion · 세그먼트 시각 입력
+# Runtime이 PLAN-20261113T071558Z 승인 시점에 생성했다 (proposal P2). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-093
+status: DONE
+
+request: |-
+  (1) src-tauri/src/ai/prompt.rs의 MEETING_PROMPT를 교체한다: docs/MEETING-NOTE-FORMAT.md의 구조와 규칙을 프롬프트에 넣고, V2 JSON 필드를 요구하며, '하지 않는 것' 규칙(전사에 없는 것을 만들지 않음, 불확실 표시, 풀 전사 불포함)을 포함한다. (2) PROMPT_VERSION_MEETING을 새 computed값으로 갱신한다(hash Gate가 강제한다). (3) 프롬프트 입력에 세그먼트 시각을 붙인다: src-tauri/src/ai/run.rs의 attempt에서 transcript.raw_text 대신 segments를 [HH:MM:SS] 텍스트 형식으로 조립한 문자열을 prompt::prepare와 TranscriptText에 넘긴다. segments가 비어 있으면 raw_text fallback. 조립 함수는 prompt.rs 또는 별도 순수 함수로 둔다(export/markdown.rs의 format_timestamp_ms를 재사용). (4) OUTPUT_RESERVE_TOKENS를 V2 기준 형식 크기에 맞게 올린다(26KB ÷ 2 chars/token ≈ 13K tokens → 최소 16384). 이 값 변경이 prepare의 input_tokens()에 미치는 영향을 테스트에서 확인한다. Study · Summary 프롬프트는 변경하지 않는다.
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-092
+
+stop_condition:
+  gates: [build, lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 3
+
+acceptance_criteria:
+  - id: AC-2-1
+    description: |-
+      prompt_version_is_bound_to_the_prompt_text 테스트가 새 PROMPT_VERSION_MEETING 값으로 통과한다
+    verification:
+      type: gate
+      ref: test
+  - id: AC-2-2
+    description: |-
+      segments가 있는 transcript로 prepare를 부르면 결과 prompt에 [HH:MM:SS] 형식 시각이 포함된다
+    verification:
+      type: gate
+      ref: test
+  - id: AC-2-3
+    description: |-
+      OUTPUT_RESERVE_TOKENS가 올라갔고, 25KB V2 fixture의 토큰 추정치가 새 예약보다 작다
+    verification:
+      type: gate
+      ref: test
+  - id: AC-2-4
+    description: |-
+      Study · Summary 프롬프트와 promptVersion은 변경되지 않았다
+    verification:
+      type: gate
+      ref: test
+
+evidence: []
+
+failure_memo: []

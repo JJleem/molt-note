@@ -1,0 +1,52 @@
+# Meeting v2 schema — Rust 순수 모듈
+# Runtime이 PLAN-20261113T071558Z 승인 시점에 생성했다 (proposal P1). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-092
+status: DONE
+
+request: |-
+  src-tauri/src/ai/note.rs에 Meeting v2의 struct와 필드를 만든다. Decisions 2의 필드 전체: meetingTitle, meetingKind, attendees, reliabilityNotice, keySummary, previousActionItems(done/changed/inProgress/noProgress/notMentioned — 각 string[]), topics(title + groups[heading + items]), actionItems(task/detail/owner/due/period — 전부 string), needsConfirmation. CONTENT_SCHEMA_VERSION을 2로 올린다. (1) MeetingNoteV2 struct와 그 안의 PreviousActionItems, Topic, TopicGroup, ActionItem을 serde Serialize/Deserialize로 선언한다. (2) parse_note의 Meeting 갈래가 schemaVersion 2일 때 V2를 읽도록 분기한다. (3) StructuredNote::MeetingV2(MeetingNoteV2)를 추가한다. (4) encode_content가 V2를 봉투에 담는다. (5) decode_content가 schemaVersion 1이면 기존 MeetingNote를, 2이면 MeetingNoteV2를 읽는다 — 옛 노트가 그대로 복원되는 것을 기존 테스트 + 새 단위 테스트로 확인한다. (6) json_schema(Meeting)를 V2 필드에 맞게 고친다. (7) MAX_ITEMS · MAX_ITEM_CHARS · MAX_OVERVIEW_CHARS와 새 필드의 상한을 검증하되, 기준 형식 26KB fixture가 거부되지 않게 상한을 조정한다. (8) MEETING_FIELDS 상수를 V2 필드 이름으로 교체한다. Study · Summary는 v1 그대로 둔다.
+
+execution:
+  role: impl
+
+stop_condition:
+  gates: [build, lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 3
+
+acceptance_criteria:
+  - id: AC-1-1
+    description: |-
+      MeetingNoteV2 struct가 Decisions 2의 필드 전부를 갖고 serde 왕복(serialize → deserialize)이 성공한다
+    verification:
+      type: gate
+      ref: test
+  - id: AC-1-2
+    description: |-
+      schemaVersion=1인 기존 Meeting 노트 content 문자열이 decode_content로 정상 복원된다 (옛 노트 호환)
+    verification:
+      type: gate
+      ref: test
+  - id: AC-1-3
+    description: |-
+      schemaVersion=2인 V2 content가 encode → decode 왕복을 통과한다
+    verification:
+      type: gate
+      ref: test
+  - id: AC-1-4
+    description: |-
+      약 25KB 크기의 V2 fixture가 parse_note를 통과하고 MAX_ITEMS/MAX_ITEM_CHARS에 걸리지 않는다
+    verification:
+      type: gate
+      ref: test
+  - id: AC-1-5
+    description: |-
+      json_schema(Meeting)이 V2의 중첩 구조를 반영한다
+    verification:
+      type: gate
+      ref: test
+
+evidence: []
+
+failure_memo: []

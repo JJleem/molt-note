@@ -1,0 +1,56 @@
+# 내보내기 Transcript 포함 선택
+# Runtime이 PLAN-20261113T071558Z 승인 시점에 생성했다 (proposal P6). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-097
+status: DONE
+
+request: |-
+  (1) Markdown export와 Notion sync에 Transcript 포함 여부를 선택하는 매개변수를 추가한다. src-tauri/src/export/markdown.rs의 render(또는 ExportDocument)가 include_transcript: bool을 받고, false이면 ## Transcript 섹션을 생략한다. (2) src-tauri/src/export/run.rs의 export 함수가 이 매개변수를 받아 render에 전달한다. (3) src-tauri/src/sync/run.rs의 send 함수도 같은 매개변수를 받아 render에 전달한다. (4) Tauri command 경계(commands/mod.rs)에 include_transcript 파라미터를 추가한다. (5) src/ipc/types.ts에 파라미터 타입을 반영한다. (6) AI 노트가 있는 Meeting 녹음의 기본값은 false(Transcript 미포함), AI 노트가 없으면 항상 true(INV-8). (7) src/screens/exportView.ts와 notionSyncView.ts에 선택 UI 상태를 추가한다 — AI 노트가 있을 때만 토글이 보이고, 기본은 '포함하지 않음'. (8) RecordingDetailScreen.tsx에서 이 선택을 command 호출에 전달한다.
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-096
+
+stop_condition:
+  gates: [build, lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 3
+
+acceptance_criteria:
+  - id: AC-6-1
+    description: |-
+      include_transcript=false로 render하면 출력에 ## Transcript가 없다
+    verification:
+      type: gate
+      ref: test
+  - id: AC-6-2
+    description: |-
+      include_transcript=true로 render하면 기존과 동일하게 ## Transcript가 있다
+    verification:
+      type: gate
+      ref: test
+  - id: AC-6-3
+    description: |-
+      AI 노트가 없을 때 내보내기·Notion 전송에서 Transcript는 항상 포함된다 (INV-8)
+    verification:
+      type: gate
+      ref: test
+  - id: AC-6-4
+    description: |-
+      Meeting 노트가 있을 때의 기본값이 Transcript 미포함이다
+    verification:
+      type: gate
+      ref: test
+  - id: AC-6-5
+    description: |-
+      build Gate가 command 파라미터 변경을 포함해 통과한다
+    verification:
+      type: gate
+      ref: build
+
+evidence: []
+
+failure_memo: []

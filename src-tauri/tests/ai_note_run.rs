@@ -416,8 +416,9 @@ fn only_the_transcript_text_is_handed_to_the_provider() {
     assert_eq!(calls.len(), 1, "한 번의 생성은 한 번의 호출이다");
     assert_eq!(calls[0].mode, NoteType::Summary);
     assert_eq!(
-        calls[0].transcript, "두 번째 전사 첫 문장 두 번째 전사 두 번째 문장",
-        "current Transcript의 텍스트가 그대로 간다 (§7.2)"
+        calls[0].transcript,
+        "[00:00:00] 두 번째 전사 첫 문장\n[00:00:01] 두 번째 전사 두 번째 문장",
+        "current Transcript의 segments가 [HH:MM:SS] 형식으로 간다"
     );
     assert_eq!(
         calls[0].context_tokens,
@@ -466,7 +467,7 @@ fn notes_from_different_transcripts_are_told_apart_by_transcript_id() {
     // 넘어간 입력 텍스트도 서로 다르다 — id만 다르게 적고 같은 것을 보낸 것이 아니다.
     let calls = provider.calls();
     assert_ne!(calls[0].transcript, calls[1].transcript);
-    assert!(calls[1].transcript.starts_with("첫 전사"));
+    assert!(calls[1].transcript.contains("첫 전사"));
 }
 
 #[test]

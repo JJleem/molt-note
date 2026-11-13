@@ -15,7 +15,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::ai::note::{decode_content, MeetingNote, StructuredNote, StudyNote, SummaryNote};
+use crate::ai::note::{
+    decode_content, MeetingNote, MeetingNoteV2, StructuredNote, StudyNote, SummaryNote,
+};
 use crate::ai::provider::{Availability, ProviderDescriptor};
 use crate::audio::{
     CaptureReport, InputDevice, LevelReading, LevelVerdict, SessionState, SessionSummary,
@@ -855,7 +857,10 @@ impl AiNoteStatusPayload {
 
 /// 노트 본문 — mode에 따라 다른 필드를 갖는 **한 값**이다 (§9.5 · ADR-0008 §7.1 · §7.3).
 ///
-/// `{"mode": "meeting", "overview": ..., ...}` 모양으로 나간다. 화면은 `mode`로 갈라 읽는다.
+/// `{"mode": "meeting", "schemaVersion": 2, ...}` 모양으로 나간다.
+///
+/// V1 Meeting과 V2 Meeting 모두 `mode: "meeting"`이며, frontend는 `schemaVersion`으로
+/// V1(`1`)과 V2(`2`)를 구분한다. Study · Summary는 `schemaVersion: 2`다.
 ///
 /// **세 mode를 옵셔널 필드 하나로 합치지 않는다** — 합치면 "Meeting인데 `thingsToStudy`가 있는"
 /// 값이 타입 수준에서 가능해진다 (ADR-0008 §7.3).
@@ -864,18 +869,57 @@ impl AiNoteStatusPayload {
 /// 하나다 — 그 이름들은 **§9.5의 출력 섹션 이름 13개**이며 그것을 정한 자리는 거기 하나다
 /// (ADR-0008 §7.1). 같은 13개를 두 곳에 적으면 한쪽만 고쳐졌을 때 저장된 노트와 화면이
 /// 조용히 어긋난다. 그 타입들에는 벤더가 없다 (INV-9).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(tag = "mode", rename_all = "camelCase")]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StructuredNotePayload {
     Meeting(MeetingNote),
+    MeetingV2(MeetingNoteV2),
     Study(StudyNote),
     Summary(SummaryNote),
+}
+
+impl Serialize for StructuredNotePayload {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        // `mode` + `schemaVersion` + inner struct fields를 하나의 flat object로 직렬화한다.
+        // V1 Meeting과 V2 Meeting 모두 `mode: "meeting"` — schemaVersion으로 구분한다.
+        let mut value = match self {
+            Self::Meeting(inner) => serde_json::to_value(inner),
+            Self::MeetingV2(inner) => serde_json::to_value(inner),
+            Self::Study(inner) => serde_json::to_value(inner),
+            Self::Summary(inner) => serde_json::to_value(inner),
+        }
+        .map_err(serde::ser::Error::custom)?;
+
+        let obj = value.as_object_mut().ok_or_else(|| {
+            serde::ser::Error::custom("note must be an object")
+        })?;
+
+        let (mode, schema_version) = match self {
+            Self::Meeting(_) => ("meeting", 1u32),
+            Self::MeetingV2(_) => ("meeting", 2),
+            Self::Study(_) => ("study", 2),
+            Self::Summary(_) => ("summary", 2),
+        };
+
+        // 순서를 보장하기 위해 새 map을 만든다: mode → schemaVersion → 나머지 필드.
+        let mut ordered = serde_json::Map::with_capacity(obj.len() + 2);
+        ordered.insert("mode".to_owned(), serde_json::Value::String(mode.to_owned()));
+        ordered.insert(
+            "schemaVersion".to_owned(),
+            serde_json::Value::Number(schema_version.into()),
+        );
+        for (key, val) in obj.iter() {
+            ordered.insert(key.clone(), val.clone());
+        }
+
+        serde_json::Value::Object(ordered).serialize(serializer)
+    }
 }
 
 impl From<StructuredNote> for StructuredNotePayload {
     fn from(note: StructuredNote) -> Self {
         match note {
             StructuredNote::Meeting(note) => Self::Meeting(note),
+            StructuredNote::MeetingV2(note) => Self::MeetingV2(note),
             StructuredNote::Study(note) => Self::Study(note),
             StructuredNote::Summary(note) => Self::Summary(note),
         }

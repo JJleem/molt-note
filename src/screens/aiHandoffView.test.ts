@@ -185,6 +185,7 @@ function readyProvider(): AiProviderStatus {
 
 const MEETING: MeetingNote = {
   mode: 'meeting',
+  schemaVersion: 1,
   overview: '이번 주 변환 작업 범위를 정했다.',
   keyDiscussions: ['PLY와 SOG 변환 순서'],
   decisions: ['PLY를 먼저 변환한다'],

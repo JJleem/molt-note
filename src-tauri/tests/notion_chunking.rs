@@ -98,7 +98,7 @@ fn rendered(duration_ms: i64, segment_count: i64) -> String {
         recording: &recording,
         transcript: &transcript,
         note: None,
-    })
+    }, true)
 }
 
 /// chunk 하나의 block unit 수 — ADR-0009 §6.2가 정한 대용값과 같은 방식으로 센다.

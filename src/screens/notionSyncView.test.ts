@@ -98,7 +98,7 @@ function needsConfirmation(reason: NotionConfirmReason, message: string): Failur
 }
 
 function input(overrides: Partial<NotionPanelInput> = {}): NotionPanelInput {
-  return { recording: recording(), sync: null, live: null, ...overrides };
+  return { recording: recording(), sync: null, live: null, includeTranscript: true, notes: [], ...overrides };
 }
 
 const EVERY_STATUS: readonly ProcessingStatus[] = ['none', 'pending', 'running', 'done', 'failed'];

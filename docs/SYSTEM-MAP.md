@@ -3,7 +3,7 @@
 이 문서는 프로젝트의 **최상위 지도**다. 상세 구현 문서가 아니라 진입점이다.
 상세는 §8의 문서로 넘긴다.
 
-> **현재 상태: Phase 5.8까지 engineering DONE. 그 뒤 2026-09-08의 변경들은 Runtime을
+> **현재 상태: Phase 5.10까지 engineering DONE. 그 뒤 2026-09-08의 변경들은 Runtime을
 > 거치지 않았다 (§5.9).**
 >
 > ⚠️ **2026-09-08은 이 저장소가 Runtime 밖에서 하루를 보낸 날이다.** Phase 5.9의 Plan은
@@ -96,6 +96,8 @@
 >   `docs/PHASE-5.6-HUMAN-REVIEW.md`)를 §1 · §2 · §3 · §4 · §5 · §6 · §7 · §8 · §9에 반영했다.
 >   **위 Phase 5.7 줄과 그때의 "부분 완료" 서술은 지우지 않았다** — 이 Phase가 왜 두 번에 나눠
 >   끝났는지가 그 기록에 남아 있다. **Human Review는 실행되지 않았다**
+> - **2026-11-13 Phase 5.10 engineering DONE** — Meeting v2 schema · Transcript 포함 선택 반영
+>   (§9.5 · §11). `docs/MEETING-NOTE-FORMAT.md` 상태를 구현됨으로 갱신
 
 ---
 
@@ -911,6 +913,17 @@ Task 9개(TASK-076 ~ TASK-084).
 
 C-6과 **녹음 시점의 마이크 게인을 앱이 조정할 것인가**는 서로 다른 결정이다 — 후자는 녹음 엔진
 경계의 문제이며 `ADR-0003` §16이 이 Phase의 범위 밖으로 보류했다.
+
+### Phase 5.10 — Meeting Note Format · 2026-11-13 · **engineering DONE**
+
+Meeting 모드 AI 노트가 팀 회의록 형식(`docs/MEETING-NOTE-FORMAT.md`)으로 나온다.
+content schema v2: `meetingTitle` · `meetingKind` · `attendees` · `reliabilityNotice` ·
+`keySummary` · `previousActionItems` · `topics` · `actionItems`(owner · due) · `needsConfirmation`.
+
+옛 Meeting v1 노트는 그대로 읽히고 그대로 렌더된다.
+
+내보내기(§11)와 Notion 전송: AI 노트가 있으면 Transcript 포함 여부를 고른다. Meeting 노트의
+기본값은 넣지 않는 것이다. AI 노트가 없으면 Transcript는 언제나 들어간다 (INV-8).
 
 ### Phase 6 — Cross-platform Validation & Hardening · **PLANNED**
 ---

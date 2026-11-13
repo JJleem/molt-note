@@ -31,6 +31,7 @@
  */
 import { toFailure, type Failure } from '../ipc/failure';
 import type {
+  AiNote,
   NotionConfirmation,
   NotionSendStatus,
   NotionSync,
@@ -83,6 +84,8 @@ export interface NotionSendAction {
   readonly kind: 'send' | 'resume' | 'newPage' | 'retry';
   readonly label: string;
   readonly recordingId: string;
+  /** Transcript를 포함할지. AI 노트가 있을 때만 `false`가 될 수 있다. */
+  readonly includeTranscript: boolean;
   /**
    * 이 동작이 싣는 확인 (ADR-0009 §8.3).
    *
@@ -126,33 +129,36 @@ const CONFIRM_HEADLINE: Record<NotionConfirmReason, string> = {
   outcomeUnknown: '지난 전송이 끝나지 않았고 그 결과를 알 수 없다.',
 };
 
-function sendAction(recordingId: string): NotionSendAction {
+function sendAction(recordingId: string, includeTranscript: boolean): NotionSendAction {
   return {
     kind: 'send',
     label: SEND_LABEL,
     recordingId,
     confirmation: 'notAsked',
     outcomeText: NEW_PAGE_OUTCOME,
+    includeTranscript,
   };
 }
 
-function resumeAction(recordingId: string): NotionSendAction {
+function resumeAction(recordingId: string, includeTranscript: boolean): NotionSendAction {
   return {
     kind: 'resume',
     label: '같은 페이지에 이어서 보내기',
     recordingId,
     confirmation: 'notAsked',
     outcomeText: RESUME_OUTCOME,
+    includeTranscript,
   };
 }
 
-function retryAction(recordingId: string): NotionSendAction {
+function retryAction(recordingId: string, includeTranscript: boolean): NotionSendAction {
   return {
     kind: 'retry',
     label: '전송 다시 시도',
     recordingId,
     confirmation: 'notAsked',
     outcomeText: RETRY_OUTCOME,
+    includeTranscript,
   };
 }
 
@@ -162,13 +168,14 @@ function retryAction(recordingId: string): NotionSendAction {
  * 이것만이 `confirmation: 'newPage'`를 싣는다 — 사용자가 무슨 일이 일어나는지 읽고 이 버튼을
  * 누른 것이 곧 확인이다.
  */
-function newPageAction(recordingId: string, reason: NotionConfirmReason): NotionSendAction {
+function newPageAction(recordingId: string, reason: NotionConfirmReason, includeTranscript: boolean): NotionSendAction {
   return {
     kind: 'newPage',
     label: '새 Notion 페이지 만들기',
     recordingId,
     confirmation: 'newPage',
     outcomeText: CONFIRM_OUTCOME[reason],
+    includeTranscript,
   };
 }
 
@@ -391,11 +398,19 @@ export type NotionPanelBody =
  * 본문과 나란히 **언제나 보이는 것 둘**이 있다 — 이 녹음의 Notion 상태(§7)와, 무엇이
  * 전송되는가(INV-5 · INV-6)다. 본문이 어느 상태든 그 둘은 남는다.
  */
+/** Transcript 포함 여부 토글 — export와 같은 규칙이다. */
+export interface NotionTranscriptToggle {
+  readonly visible: boolean;
+  readonly includeTranscript: boolean;
+}
+
 export interface NotionPanelView {
   /** 목록과 **같은 규칙으로 만든** 상태 표시 (§7 · 요구 9). 아직 읽지 못했으면 `null`이다. */
   readonly status: RecordingStatusBadge | null;
   readonly contents: NotionSendContents;
   readonly body: NotionPanelBody;
+  /** Transcript 포함 토글. AI 노트가 없으면 `null`이다. */
+  readonly transcriptToggle: NotionTranscriptToggle | null;
 }
 
 /** {@link notionPanel}이 보는 사실 전부. */
@@ -412,6 +427,14 @@ export interface NotionPanelInput {
   readonly sync: NotionSync | null;
   /** 이 앱이 켜진 뒤의 전송 한 건. 아직 물어보지 못했으면 `null`이다. */
   readonly live: NotionSendStatus | null;
+  /**
+   * Transcript를 포함할지 사용자가 선택한 값.
+   *
+   * AI 노트가 있을 때만 의미가 있다. AI 노트가 없으면 이 값과 무관하게 항상 포함된다 (INV-8).
+   */
+  readonly includeTranscript: boolean;
+  /** current Transcript의 저장된 노트. AI 노트 유무를 판별하기 위한 값이다. */
+  readonly notes: readonly AiNote[] | null;
 }
 
 /**
@@ -431,11 +454,18 @@ export interface NotionPanelInput {
  * 전송은 이 자리와 아무 상관이 없으므로 보지 않는다.
  */
 export function notionPanel(input: NotionPanelInput): NotionPanelView {
-  const { recording, sync, live } = input;
+  const { recording, sync, live, includeTranscript, notes } = input;
 
   if (recording === null) {
-    return { status: null, contents: SEND_CONTENTS, body: { kind: 'loading' } };
+    return { status: null, contents: SEND_CONTENTS, body: { kind: 'loading' }, transcriptToggle: null };
   }
+
+  // AI 노트가 있으면 사용자가 Transcript를 빼고 보낼 수 있다. 없으면 항상 포함 (INV-8).
+  const hasAiNote = notes !== null && notes.length > 0;
+  const effectiveInclude = hasAiNote ? includeTranscript : true;
+  const transcriptToggle: NotionTranscriptToggle | null = hasAiNote
+    ? { visible: true, includeTranscript: effectiveInclude }
+    : null;
 
   // 다른 녹음의 사실은 이 자리에 들어오지 않는다 — 화면이 새 녹음으로 옮겨 가는 동안 앞
   // 녹음의 페이지 식별자가 잠깐이라도 보이면, 그것은 사실이 아닌 것을 보여주는 일이다.
@@ -446,7 +476,8 @@ export function notionPanel(input: NotionPanelInput): NotionPanelView {
   return {
     status: statusBadge('Notion', badgeStatus(recording, mine)),
     contents: SEND_CONTENTS,
-    body: panelBody(recording, stored, mine, progress),
+    body: panelBody(recording, stored, mine, progress, effectiveInclude),
+    transcriptToggle,
   };
 }
 
@@ -479,16 +510,17 @@ function panelBody(
   sync: NotionSync | null,
   mine: NotionSendStatus | null,
   progress: NotionProgress | null,
+  includeTranscript: boolean,
 ): NotionPanelBody {
   // 1. 지금 이 녹음에 대해 벌어지고 있는 일. 저장된 값이 이것을 덮지 않는다.
   if (mine?.state === 'running') {
     return { kind: 'sending', text: SENDING_TEXT, progress };
   }
   if (mine?.state === 'done') {
-    return sentBody(recording.id, mine.pageId, sync, progress, mine.createdPage);
+    return sentBody(recording.id, mine.pageId, sync, progress, mine.createdPage, includeTranscript);
   }
   if (mine?.state === 'failed') {
-    return afterFailure(recording.id, mine.failure, sync, progress);
+    return afterFailure(recording.id, mine.failure, sync, progress, includeTranscript);
   }
 
   // 2. 저장된 상태 (§7). 앱을 다시 켠 뒤에도 남아 있는 사실이다.
@@ -496,11 +528,11 @@ function panelBody(
     return { kind: 'sending', text: SENDING_TEXT, progress };
   }
   if (recording.notionStatus === 'done') {
-    return sentBody(recording.id, sync?.pageId ?? null, sync, progress, false);
+    return sentBody(recording.id, sync?.pageId ?? null, sync, progress, false, includeTranscript);
   }
   if (recording.notionStatus === 'failed') {
     // 마지막 시도가 실패한 채로 남아 있다. 이 앱이 그 시도를 하지 않았으므로 이유는 모른다.
-    return afterFailure(recording.id, null, sync, progress);
+    return afterFailure(recording.id, null, sync, progress, includeTranscript);
   }
 
   // 3. 보낼 재료 (§7.2).
@@ -508,7 +540,7 @@ function panelBody(
     return { kind: 'nothingToSend', text: NOTHING_TO_SEND_TEXT, hint: NOTHING_TO_SEND_HINT };
   }
 
-  return { kind: 'ready', text: NOT_SENT_TEXT, send: sendAction(recording.id) };
+  return { kind: 'ready', text: NOT_SENT_TEXT, send: sendAction(recording.id, includeTranscript) };
 }
 
 function sentBody(
@@ -517,6 +549,7 @@ function sentBody(
   sync: NotionSync | null,
   progress: NotionProgress | null,
   createdPage: boolean,
+  includeTranscript: boolean,
 ): NotionPanelBody {
   return {
     kind: 'sent',
@@ -528,7 +561,7 @@ function sentBody(
     createdPage,
     progress,
     // 또 보내는 것은 **새 페이지를 만드는 일**이며, 그 사실을 누르기 전에 말한다 (§8.3).
-    again: newPageAction(recordingId, 'alreadySent'),
+    again: newPageAction(recordingId, 'alreadySent', includeTranscript),
   };
 }
 
@@ -544,6 +577,7 @@ function afterFailure(
   failure: Failure | null,
   sync: NotionSync | null,
   progress: NotionProgress | null,
+  includeTranscript: boolean,
 ): NotionPanelBody {
   const reason = confirmReason(failure);
   if (reason !== null) {
@@ -555,7 +589,7 @@ function afterFailure(
       text: failure?.message ?? CONFIRM_OUTCOME[reason],
       preservedNotice: SEND_PRESERVED_NOTICE,
       progress,
-      confirm: newPageAction(recordingId, reason),
+      confirm: newPageAction(recordingId, reason, includeTranscript),
     };
   }
 
@@ -569,7 +603,7 @@ function afterFailure(
     resolution: FAILURE_RESOLUTION[cause],
     progress,
     // 이어 보낼 수 있는 상태면 이어 보낸다 — **중복 페이지가 생기지 않는다** (§8.2).
-    retry: canResume(sync) ? resumeAction(recordingId) : retryAction(recordingId),
+    retry: canResume(sync) ? resumeAction(recordingId, includeTranscript) : retryAction(recordingId, includeTranscript),
   };
 }
 

@@ -183,7 +183,7 @@ impl Fixture {
     }
 
     fn export(&self, recording_id: &RecordingId) -> Result<ExportedFilePayload, Failure> {
-        self.exporter.export(recording_id.as_str())
+        self.exporter.export(recording_id.as_str(), true)
     }
 
     /// 저장된 것 전부를 한 값으로 찍는다. **실패 전후를 그대로 비교하기 위한 것이다** (INV-3).
@@ -469,7 +469,7 @@ fn a_write_that_fails_is_a_domain_failure_that_leaves_the_stored_data_untouched(
     let before = fixture.snapshot(&recording_id);
     let missing = fixture.exports_dir().join("없는-자리");
 
-    let failure = export::run::export(&fixture.connection(), &missing, &recording_id)
+    let failure = export::run::export(&fixture.connection(), &missing, &recording_id, true)
         .expect_err("쓸 수 없는 자리에는 만들지 못한다");
 
     assert_eq!(failure.kind, FailureKind::Storage);
@@ -489,7 +489,7 @@ fn a_recording_that_is_not_there_is_refused_without_creating_a_file() {
 
     let failure = fixture
         .exporter
-        .export("없는-녹음")
+        .export("없는-녹음", true)
         .expect_err("없는 녹음은 내보낼 수 없다");
 
     assert_eq!(failure.kind, FailureKind::InvalidInput);

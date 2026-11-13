@@ -58,7 +58,8 @@ use molt_note_lib::domain::{
     RecordingId, Settings, Transcript, TranscriptId, TranscriptSegment,
 };
 use molt_note_lib::export::markdown::{
-    render, ExportDocument, MEETING_SECTIONS, STUDY_SECTIONS, SUMMARY_SECTIONS, TRANSCRIPT_SECTION,
+    render, ExportDocument, MEETING_V1_SECTIONS, STUDY_SECTIONS, SUMMARY_SECTIONS,
+    TRANSCRIPT_SECTION,
 };
 use molt_note_lib::notion::testing::{StubReply, StubRequest, StubServer, CREATED_PAGE_ID};
 use molt_note_lib::notion::{
@@ -258,12 +259,12 @@ impl Fixture {
             recording: &recording,
             transcript: &transcript,
             note,
-        })
+        }, true)
     }
 
     /// 파일로 나가는 출구.
     fn export(&self, recording_id: &RecordingId) -> Result<ExportedFilePayload, Failure> {
-        self.exporter.export(recording_id.as_str())
+        self.exporter.export(recording_id.as_str(), true)
     }
 
     /// Notion으로 나가는 출구. 실행 순서를 그대로 지난다.
@@ -285,6 +286,7 @@ impl Fixture {
             },
             &RecordedWaits::new(),
             confirmation,
+            true,
         )
     }
 
@@ -485,7 +487,7 @@ fn a_recording_with_no_ai_note_at_all_goes_out_both_doors_as_one_and_the_same_do
     // 없는 AI 섹션의 빈 껍데기를 남기지 않는다 — 있는 것은 제목 · 메타 · Transcript다.
     assert!(file_body.starts_with("# 3DGS Study #04\n"), "{file_body}");
     assert!(file_body.contains(&format!("## {TRANSCRIPT_SECTION}\n")), "{file_body}");
-    for section in MEETING_SECTIONS
+    for section in MEETING_V1_SECTIONS
         .iter()
         .chain(STUDY_SECTIONS.iter())
         .chain(SUMMARY_SECTIONS.iter())
@@ -918,7 +920,7 @@ fn a_token_that_actually_sent_a_recording_is_nowhere_in_the_database_or_in_any_f
         Arc::new(RecordedWaits::new()),
     );
     sender
-        .start(recording_id.as_str(), Confirmation::NotAsked)
+        .start(recording_id.as_str(), Confirmation::NotAsked, true)
         .expect("접수된다");
     match wait_for(&sender) {
         NotionSendStatus::Done { page_id, .. } => assert_eq!(page_id, CREATED_PAGE_ID),
@@ -933,7 +935,7 @@ fn a_token_that_actually_sent_a_recording_is_nowhere_in_the_database_or_in_any_f
         Arc::new(RecordedWaits::new()),
     );
     refusing
-        .start(recording_id.as_str(), Confirmation::NewPage)
+        .start(recording_id.as_str(), Confirmation::NewPage, true)
         .expect("접수된다");
     let failure = match wait_for(&refusing) {
         NotionSendStatus::Failed { failure, .. } => failure,
@@ -1114,7 +1116,7 @@ fn both_renderers_consume_the_neutral_note_and_never_the_vendors_own_shape() {
 
         // 그 문서의 섹션 제목은 §9.5의 이름 그대로다 — 벤더 응답의 필드 이름이 아니다.
         let sections = match note.mode() {
-            NoteType::Meeting => MEETING_SECTIONS.as_slice(),
+            NoteType::Meeting => MEETING_V1_SECTIONS.as_slice(),
             NoteType::Study => STUDY_SECTIONS.as_slice(),
             NoteType::Summary => SUMMARY_SECTIONS.as_slice(),
         };

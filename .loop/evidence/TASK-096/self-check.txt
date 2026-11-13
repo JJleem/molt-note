@@ -1,0 +1,8 @@
+Self-check (advisory)
+Gates: build, lint, test
+
+build: PASS  exit=0  1.9s
+lint: PASS  exit=0  4.3s
+test: PASS  exit=0  45.3s
+
+Self-check: all gates passed

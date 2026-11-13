@@ -172,8 +172,9 @@ impl GrowingWav {
         read_exact(&mut file, &mut bytes, &self.path)?;
 
         let samples: Vec<i16> = bytes
-            .chunks_exact(2)
-            .map(|pair| i16::from_le_bytes([pair[0], pair[1]]))
+            .as_chunks::<2>().0
+            .iter()
+            .map(|pair| i16::from_le_bytes(*pair))
             .collect();
 
         audio_input::from_interleaved(&self.path, &samples, self.channels, self.sample_rate_hz)

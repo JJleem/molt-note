@@ -1,0 +1,8 @@
+Self-check (advisory — the runtime reruns gates independently after the worker finishes)
+Gates: build, lint, test
+
+build: PASS  exit=0  1.7s
+lint: PASS  exit=0  2.6s
+test: PASS  exit=0  18.1s
+
+Self-check: all gates passed

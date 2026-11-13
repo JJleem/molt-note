@@ -387,9 +387,9 @@ mod tests {
     fn the_declared_prompt_versions_are_untouched() {
         // 이 경로는 promptVersion을 만들지도 저장하지도 않지만 (§6.4), 상수를 고치면 이미
         // 저장된 provenance가 거짓이 된다 — 값이 그대로인지 여기서도 본다.
-        assert_eq!(PROMPT_VERSION_MEETING, "v1.meeting.5c6b8a90");
-        assert_eq!(PROMPT_VERSION_STUDY, "v1.study.2cfad9a0");
-        assert_eq!(PROMPT_VERSION_SUMMARY, "v1.summary.beca7d6c");
+        assert_eq!(PROMPT_VERSION_MEETING, "v1.meeting.54529c96");
+        assert_eq!(PROMPT_VERSION_STUDY, "v1.study.2cfad6a0");
+        assert_eq!(PROMPT_VERSION_SUMMARY, "v1.summary.beca7e6c");
     }
 
     #[test]
@@ -769,7 +769,7 @@ mod tests {
             transcript: &transcript,
             note: None,
         };
-        let markdown = crate::export::markdown::render(&document);
+        let markdown = crate::export::markdown::render(&document, true);
         assert!(markdown.contains("\n### 00:00:03\n안녕하세요. 오늘은 3DGS를 봅니다.\n"));
         assert!(!markdown.contains("00:00:03 안녕하세요"));
     }
@@ -812,7 +812,7 @@ mod tests {
             transcript: &transcript,
             note: None,
         };
-        assert!(text.len() < crate::export::markdown::render(&document).len());
+        assert!(text.len() < crate::export::markdown::render(&document, true).len());
     }
 
     // ── MH-4 · MH-6 ──────────────────────────────────────────────────────────────

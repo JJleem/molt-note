@@ -14,13 +14,17 @@
 import { describe, expect, it } from 'vitest';
 import type { Failure, FailureKind } from '../ipc/failure';
 import type {
+  ActionItemV2,
   AiNote,
   AiNoteStatus,
   AiProviderStatus,
   MeetingNote,
+  MeetingNoteV2,
+  PreviousActionItems,
   Recording,
   StudyNote,
   SummaryNote,
+  Topic,
   Transcript,
 } from '../ipc/types';
 import {
@@ -122,6 +126,7 @@ function failure(kind: FailureKind, overrides: Partial<Failure> = {}): Failure {
 
 const MEETING: MeetingNote = {
   mode: 'meeting',
+  schemaVersion: 1,
   overview: '이번 주 변환 작업 범위를 정했다.',
   keyDiscussions: ['PLY와 SOG 변환 순서'],
   decisions: ['PLY를 먼저 변환한다'],
@@ -129,8 +134,60 @@ const MEETING: MeetingNote = {
   openQuestions: [],
 };
 
+const PREV_ACTIONS: PreviousActionItems = {
+  done: ['CI 파이프라인 구축'],
+  changed: [],
+  inProgress: ['API 문서화'],
+  noProgress: [],
+  notMentioned: [],
+};
+
+const EMPTY_PREV_ACTIONS: PreviousActionItems = {
+  done: [],
+  changed: [],
+  inProgress: [],
+  noProgress: [],
+  notMentioned: [],
+};
+
+const TOPICS: readonly Topic[] = [
+  {
+    title: '배포 전략',
+    groups: [
+      { heading: '현재 상태', items: ['스테이징 환경 구축 완료'] },
+      { heading: '결정 사항', items: ['블루-그린 배포 적용'] },
+    ],
+  },
+  {
+    title: '코드 리뷰 프로세스',
+    groups: [
+      { heading: '문제점', items: ['리뷰 대기 시간이 길다'] },
+    ],
+  },
+];
+
+const ACTION_ITEMS_V2: readonly ActionItemV2[] = [
+  { task: '배포 스크립트 작성', detail: '', owner: '김철수', due: '11/20', period: '' },
+  { task: '리뷰 가이드 초안', detail: '', owner: '이영희', due: '11/22', period: '' },
+];
+
+const MEETING_V2: MeetingNoteV2 = {
+  mode: 'meeting',
+  schemaVersion: 2,
+  meetingTitle: '주간 기술 회의',
+  meetingKind: '정기 회의',
+  attendees: ['김철수', '이영희'],
+  reliabilityNotice: 'AI 요약이며 원문 확인이 필요하다.',
+  keySummary: ['배포 전략을 블루-그린으로 결정', '코드 리뷰 대기 시간 개선 논의'],
+  previousActionItems: PREV_ACTIONS,
+  topics: TOPICS,
+  actionItems: ACTION_ITEMS_V2,
+  needsConfirmation: ['배포 일정 최종 확인'],
+};
+
 const STUDY: StudyNote = {
   mode: 'study',
+  schemaVersion: 2,
   overview: '3D Gaussian Splatting의 표현 방식을 정리했다.',
   keyConcepts: ['Gaussian primitive'],
   importantDetails: ['SH 계수는 색을 방향에 따라 표현한다'],
@@ -141,6 +198,7 @@ const STUDY: StudyNote = {
 
 const SUMMARY: SummaryNote = {
   mode: 'summary',
+  schemaVersion: 2,
   shortSummary: '변환 파이프라인 순서를 정하고 확인 항목을 나눴다.',
   keyPoints: ['PLY 먼저', 'SOG 확인'],
 };
@@ -194,7 +252,7 @@ describe('mode 선택 (§9.5)', () => {
   it('고르기 전에 무엇이 나오는지 알 수 있다 (§9.5의 섹션)', () => {
     const [meeting, , summary] = noteModeChoices('meeting');
     expect(meeting.sections).toBe(
-      '개요 · 논의한 것 · 정해진 것 · 할 일 · 남은 질문',
+      '핵심 요약 · 지난 액션 아이템 · 주제별 섹션 · 액션 아이템 · 확인 필요',
     );
     expect(summary.sections).toBe('짧은 요약 · 핵심');
   });
@@ -269,6 +327,209 @@ describe('Structured Note → UI (§9.3 · §9.5)', () => {
     expect(view).not.toHaveProperty('content');
     expect(view).not.toHaveProperty('markdown');
     expect(view).not.toHaveProperty('rawText');
+  });
+});
+
+describe('V2 Meeting → noteSections (AC-4-1 · AC-4-2 · AC-4-3)', () => {
+  it('V2 fixture가 기준 형식의 섹션 순서를 만든다 (AC-4-1)', () => {
+    const sections = noteSections(MEETING_V2);
+    expect(sections.map((s) => s.title)).toEqual([
+      '핵심 요약',
+      '지난 액션 아이템',
+      '배포 전략',
+      '코드 리뷰 프로세스',
+      '액션 아이템',
+      '확인 필요',
+    ]);
+  });
+
+  it('핵심 요약은 list 섹션이다', () => {
+    const sections = noteSections(MEETING_V2);
+    expect(sections[0].kind).toBe('list');
+    expect(sections[0].items).toEqual(MEETING_V2.keySummary);
+  });
+
+  it('지난 액션 아이템은 grouped 섹션이다 — 비지 않은 분류만 있다', () => {
+    const sections = noteSections(MEETING_V2);
+    const prev = sections[1];
+    expect(prev.kind).toBe('grouped');
+    expect(prev.groups.map((g) => g.heading)).toEqual(['완료', '진행 중']);
+    expect(prev.groups[0].items).toEqual(['CI 파이프라인 구축']);
+    expect(prev.groups[1].items).toEqual(['API 문서화']);
+  });
+
+  it('주제별 섹션은 grouped이고 groups에 소제목·항목이 있다', () => {
+    const sections = noteSections(MEETING_V2);
+    const deployTopic = sections[2];
+    expect(deployTopic.kind).toBe('grouped');
+    expect(deployTopic.title).toBe('배포 전략');
+    expect(deployTopic.groups).toHaveLength(2);
+    expect(deployTopic.groups[0].heading).toBe('현재 상태');
+    expect(deployTopic.groups[0].items).toEqual(['스테이징 환경 구축 완료']);
+  });
+
+  it('액션 아이템에 담당과 기한이 들어간다', () => {
+    const sections = noteSections(MEETING_V2);
+    const ai = sections.find((s) => s.title === '액션 아이템')!;
+    expect(ai.kind).toBe('list');
+    expect(ai.items[0]).toContain('김철수');
+    expect(ai.items[0]).toContain('11/20');
+    expect(ai.items[1]).toContain('이영희');
+  });
+
+  it('V1 Meeting fixture가 기존과 동일한 5섹션을 만든다 — 회귀 없음 (AC-4-2)', () => {
+    const sections = noteSections(MEETING);
+    expect(sections.map((s) => s.title)).toEqual([
+      '개요',
+      '논의한 것',
+      '정해진 것',
+      '할 일',
+      '남은 질문',
+    ]);
+    expect(sections[0].kind).toBe('text');
+    expect(sections[0].text).toBe('이번 주 변환 작업 범위를 정했다.');
+  });
+
+  it('previousActionItems가 전부 비면 해당 섹션이 결과에 없다 (AC-4-3)', () => {
+    const v2Empty: MeetingNoteV2 = { ...MEETING_V2, previousActionItems: EMPTY_PREV_ACTIONS };
+    const sections = noteSections(v2Empty);
+    const titles = sections.map((s) => s.title);
+    expect(titles).not.toContain('지난 액션 아이템');
+    // 나머지 순서는 유지된다.
+    expect(titles[0]).toBe('핵심 요약');
+    expect(titles[1]).toBe('배포 전략');
+  });
+});
+
+// ── AC-8-1: ~25KB V2 fixture의 앱 noteSections 통과 (E2E 검증의 TS 구간) ──────
+
+describe('large V2 Meeting fixture → noteSections (AC-8-1 · AC-8-2)', () => {
+  // 2시간 분량 회의를 모사하는 큰 fixture — Rust 쪽 meeting_v2_e2e.rs와 같은 구조.
+  const LARGE_PREV: PreviousActionItems = {
+    done: ['RFP 초안 완성 — 마케팅팀 검토 대기 중 (김철수)', '스테이징 환경 API 배포 완료 (박지민)', 'QA 테스트 시나리오 문서 v1 작성 완료 (정하늘)'],
+    changed: ['일정: 디자인 시스템 전환 11월 → 12월로 연기', '범위: 모바일 앱 리뉴얼을 v2에서 빼고 v3로 이동'],
+    inProgress: ['프론트엔드 성능 최적화 작업 중', '사용자 인터뷰 진행 중 — 12/20명 완료', 'CI/CD 파이프라인 개선 50% 진행'],
+    noProgress: ['서버 이관 사전 조사 — 담당자 부재', '접근성 감사 — 외부 업체 계약 지연'],
+    notMentioned: ['테스트 환경 분리 구축 계획', '기술 블로그 작성'],
+  };
+
+  const LARGE_TOPICS: readonly Topic[] = [
+    { title: 'Q4 제품 로드맵 점검', groups: [
+      { heading: '일정 확정', items: ['MVP 출시 9월 30일 확정', '베타 테스트 10월 15일~'] },
+      { heading: '리소스 배분', items: ['프론트엔드 성능 최적화 우선', '외주 디자이너 10월 투입'] },
+    ]},
+    { title: '디자인 시스템 v2 전환', groups: [
+      { heading: '', items: ['디자인 토큰 표준화 2주 추가 필요', 'Storybook 문서화 60% 완료'] },
+      { heading: '마이그레이션', items: ['화면별 전환 진행', '공존 기간 최대 3주', '가이드 다음 주 공유'] },
+    ]},
+    { title: '백엔드 API 리팩토링', groups: [
+      { heading: '성과', items: ['REST→GraphQL 전환 완료', '응답 시간 30% 개선'] },
+      { heading: '남은 작업', items: ['레거시 REST 11월 말 폐기', 'subscription 11월 구현'] },
+      { heading: '우려', items: ['N+1 쿼리 문제 발견 — DataLoader 필요'] },
+    ]},
+    { title: 'QA 자동화 전략', groups: [
+      { heading: '현황', items: ['커버리지 72%, E2E 15개만 자동화', 'Playwright 도입 검토 중'] },
+      { heading: '목표', items: ['12월 말 90% 달성', '회귀 테스트 45분→20분'] },
+    ]},
+    { title: 'VOC 분석', groups: [
+      { heading: '분석 결과', items: ['153건: 기능 요청 67, 버그 42, UX 31, 기타 13'] },
+      { heading: '우선순위', items: ['상위 20건 선정', '심각도1 버그 3건 핫픽스'] },
+    ]},
+    { title: '인프라 및 DevOps', groups: [
+      { heading: '클라우드 이관', items: ['AWS→GCP 이관 Q1으로 연기'] },
+      { heading: 'CI/CD', items: ['빌드 12분→8분 캐싱 전략', '환경 설정 IaC 계획'] },
+    ]},
+  ];
+
+  const LARGE_ACTIONS: readonly ActionItemV2[] = Array.from({ length: 16 }, (_, i) => ({
+    task: `액션 아이템 ${i + 1}: 구체적 할 일`,
+    detail: `상세 설명 ${i + 1}`,
+    owner: ['김철수', '이영희', '박지민', '최민수', '정하늘'][i % 5],
+    due: `11/${13 + (i % 15)}`,
+    period: i < 8 ? '이번 주' : '다음 주',
+  }));
+
+  const LARGE_V2: MeetingNoteV2 = {
+    mode: 'meeting',
+    schemaVersion: 2,
+    meetingTitle: '2026년 4분기 사업 전략 및 로드맵 정기 검토 회의',
+    meetingKind: '정기 위클리 (사업 계획 확정 및 일정 조율)',
+    attendees: ['김철수 (PM)', '이영희 (디자인 리드)', '박지민 (백엔드)', '최민수 (프론트엔드)', '정하늘 (QA)'],
+    reliabilityNotice: '1시간 53분 분량의 녹음을 자동 전사(STT) 후 AI가 정리한 회의록입니다.',
+    keySummary: [
+      '9월 출시 확정 — MVP를 9월 말까지',
+      '디자인 시스템 v2 전환 — 11월까지 전면 적용',
+      '백엔드 API 리팩토링 완료 — 응답 30% 개선',
+      'QA 자동화 커버리지 확대 — 12월 말 90%',
+      '고객 피드백 상위 20건 11월 스프린트 반영',
+      '인프라 이관 내년 Q1로 연기',
+      '시니어 백엔드 채용 12월까지',
+    ],
+    previousActionItems: LARGE_PREV,
+    topics: LARGE_TOPICS,
+    actionItems: LARGE_ACTIONS,
+    needsConfirmation: [
+      '프로젝트 알파 명칭 — 프로젝트 앱타일 수도 있음',
+      '5,000만원 정확한지 — 5천만원과 5백만원 구분 불명확',
+      '이영희 리드 — 영희 씨와 이 리드가 같은 사람인지 추정',
+      '베타 테스트 10월 15일 — 10월 5일로도 들림',
+      'Playwright — 플레이라이트 등 여러 형태로 전사됨',
+      'AWS 비용 850만원 — 팔백오십과 팔십오 혼동 가능',
+    ],
+  };
+
+  it('큰 V2 fixture가 noteSections를 통과하고 올바른 섹션 구조를 만든다 (AC-8-1)', () => {
+    const sections = noteSections(LARGE_V2);
+
+    // 기본 섹션이 있다.
+    expect(sections.length).toBeGreaterThanOrEqual(10);
+
+    // 첫 섹션은 핵심 요약.
+    expect(sections[0].title).toBe('핵심 요약');
+    expect(sections[0].kind).toBe('list');
+    expect(sections[0].items).toHaveLength(7);
+  });
+
+  it('섹션 순서가 기준 형식을 따른다: 핵심 요약 → 지난 액션 아이템 → topics → 액션 아이템 → 확인 필요 (AC-8-2)', () => {
+    const titles = noteSections(LARGE_V2).map((s) => s.title);
+
+    expect(titles[0]).toBe('핵심 요약');
+    expect(titles[1]).toBe('지난 액션 아이템');
+    // topics 6개
+    expect(titles[2]).toBe('Q4 제품 로드맵 점검');
+    expect(titles[3]).toBe('디자인 시스템 v2 전환');
+    expect(titles[4]).toBe('백엔드 API 리팩토링');
+    expect(titles[5]).toBe('QA 자동화 전략');
+    expect(titles[6]).toBe('VOC 분석');
+    expect(titles[7]).toBe('인프라 및 DevOps');
+    // 마지막 둘
+    expect(titles[8]).toBe('액션 아이템');
+    expect(titles[9]).toBe('확인 필요');
+  });
+
+  it('previousActionItems의 비지 않은 분류 5개가 모두 grouped 섹션에 있다', () => {
+    const sections = noteSections(LARGE_V2);
+    const prev = sections[1];
+    expect(prev.kind).toBe('grouped');
+    expect(prev.groups.map((g) => g.heading)).toEqual([
+      '완료', '변경됨', '진행 중', '진전 없음', '언급 없음',
+    ]);
+    expect(prev.groups[0].items).toHaveLength(3);
+    expect(prev.groups[1].items).toHaveLength(2);
+  });
+
+  it('액션 아이템 16+개가 list 섹션에 전부 있다', () => {
+    const sections = noteSections(LARGE_V2);
+    const ai = sections.find((s) => s.title === '액션 아이템')!;
+    expect(ai.kind).toBe('list');
+    expect(ai.items.length).toBeGreaterThanOrEqual(16);
+  });
+
+  it('확인 필요 항목 6개가 list 섹션에 전부 있다', () => {
+    const sections = noteSections(LARGE_V2);
+    const nc = sections.find((s) => s.title === '확인 필요')!;
+    expect(nc.kind).toBe('list');
+    expect(nc.items).toHaveLength(6);
   });
 });
 

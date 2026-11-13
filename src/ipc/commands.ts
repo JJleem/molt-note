@@ -365,8 +365,8 @@ export function getAiNote(aiNoteId: string): Promise<AiNote | null> {
  * **어디에 만들어지는지는 화면이 정하지 않는다.** 자리를 아는 것은 backend 하나이며 (INV-10),
  * 그래서 만들어진 파일의 전체 경로가 함께 온다 — 사용자가 파일을 찾지 못하는 상태로 두지 않는다.
  */
-export function exportMarkdown(recordingId: string): Promise<ExportedFile> {
-  return call<ExportedFile>('export_markdown', { recordingId });
+export function exportMarkdown(recordingId: string, includeTranscript?: boolean): Promise<ExportedFile> {
+  return call<ExportedFile>('export_markdown', { recordingId, includeTranscript: includeTranscript ?? null });
 }
 
 /**
@@ -501,10 +501,12 @@ export function showSavedFile(path: string): Promise<void> {
 export function startNotionSync(
   recordingId: string,
   confirmation?: NotionConfirmation,
+  includeTranscript?: boolean,
 ): Promise<NotionSendStatus> {
   return call<NotionSendStatus>('start_notion_sync', {
     recordingId,
     confirmation: confirmation ?? null,
+    includeTranscript: includeTranscript ?? null,
   });
 }
 

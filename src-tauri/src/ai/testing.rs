@@ -30,7 +30,10 @@ use std::sync::Mutex;
 
 use crate::domain::{Failure, NoteType};
 
-use super::note::{parse_note, MeetingNote, StructuredNote, StudyNote, SummaryNote};
+use super::note::{
+    parse_note, ActionItemV2, MeetingNoteV2, PreviousActionItems, StructuredNote, StudyNote,
+    SummaryNote, Topic, TopicGroup,
+};
 use super::provider::{
     model_unavailable, rejected_response, unreachable, Availability, Locality, NoteAiProvider,
     NoteGeneration, NoteRequest, ProviderDescriptor, AI_PROVIDER_FAILURE_KINDS,
@@ -239,12 +242,34 @@ impl NoteAiProvider for FakeNoteAiProvider {
 /// 그 mode의 유효한 표본 노트. 고정 값이며 실제 생성 결과가 아니다.
 pub fn sample_note(mode: NoteType) -> StructuredNote {
     match mode {
-        NoteType::Meeting => StructuredNote::Meeting(MeetingNote {
-            overview: "다음 분기 일정과 남은 과제를 정리한 회의".to_owned(),
-            key_discussions: vec!["일정 조정".to_owned(), "남은 과제".to_owned()],
-            decisions: vec!["다음 주에 다시 정리한다".to_owned()],
-            action_items: vec!["일정 초안 작성".to_owned()],
-            open_questions: vec!["담당자는 누구인가".to_owned()],
+        NoteType::Meeting => StructuredNote::MeetingV2(MeetingNoteV2 {
+            meeting_title: "분기 계획 회의".to_owned(),
+            meeting_kind: "정기 위클리".to_owned(),
+            attendees: vec!["김철수".to_owned()],
+            reliability_notice: "녹음 기반 자동 전사 후 정리".to_owned(),
+            key_summary: vec!["일정 조정".to_owned(), "남은 과제".to_owned()],
+            previous_action_items: PreviousActionItems {
+                done: vec![],
+                changed: vec![],
+                in_progress: vec![],
+                no_progress: vec![],
+                not_mentioned: vec![],
+            },
+            topics: vec![Topic {
+                title: "일정 확인".to_owned(),
+                groups: vec![TopicGroup {
+                    heading: "".to_owned(),
+                    items: vec!["다음 주에 다시 정리한다".to_owned()],
+                }],
+            }],
+            action_items: vec![ActionItemV2 {
+                task: "일정 초안 작성".to_owned(),
+                detail: "".to_owned(),
+                owner: "담당 확인".to_owned(),
+                due: "일정 확인".to_owned(),
+                period: "이번 주".to_owned(),
+            }],
+            needs_confirmation: vec!["담당자는 누구인가".to_owned()],
         }),
         NoteType::Study => StructuredNote::Study(StudyNote {
             overview: "회의에서 다룬 개념 정리".to_owned(),
@@ -268,6 +293,7 @@ pub fn sample_note(mode: NoteType) -> StructuredNote {
 pub fn sample_note_text(mode: NoteType) -> String {
     let encoded = match sample_note(mode) {
         StructuredNote::Meeting(note) => serde_json::to_string(&note),
+        StructuredNote::MeetingV2(note) => serde_json::to_string(&note),
         StructuredNote::Study(note) => serde_json::to_string(&note),
         StructuredNote::Summary(note) => serde_json::to_string(&note),
     };

@@ -99,12 +99,13 @@ pub fn send(
     destination: &Destination<'_>,
     waiter: &dyn Waiter,
     confirmation: Confirmation,
+    include_transcript: bool,
 ) -> Result<Sent, Failure> {
     // 상태를 쓸 대상이 실재하는지부터 본다. 없는 Recording에 대해서는 아무것도 쓰지 않는다.
     let recording = store::load_recording(connection, recording_id)?
         .ok_or_else(|| unknown_recording(recording_id))?;
 
-    let document = document_of(connection, &recording)?;
+    let document = document_of(connection, &recording, include_transcript)?;
     let chunks = split_markdown(&document.markdown).map_err(cannot_split)?;
     if chunks.is_empty() {
         // 렌더러는 언제나 제목 줄을 내므로 정상적으로는 오지 않는다. 그래도 빈 요청을 만들어
@@ -161,7 +162,7 @@ struct Document {
 }
 
 /// 저장소에서 읽어 보낼 문서를 만든다. **읽기뿐이다.**
-fn document_of(connection: &Connection, recording: &Recording) -> Result<Document, Failure> {
+fn document_of(connection: &Connection, recording: &Recording, include_transcript: bool) -> Result<Document, Failure> {
     // 기본 입력은 `current_transcript_id`가 가리키는 Transcript다 (§7.2). **다른 version을
     // 추측해서 고르지 않는다.**
     let Some(transcript_id) = recording.current_transcript_id.clone() else {
@@ -174,11 +175,14 @@ fn document_of(connection: &Connection, recording: &Recording) -> Result<Documen
     // 같은 Recording의 파일과 페이지가 서로 다른 노트를 담지 않는다.
     let note = crate::export::run::latest_note(connection, &transcript.id)?;
 
-    let markdown = render(&ExportDocument {
-        recording,
-        transcript: &transcript,
-        note: note.as_ref(),
-    });
+    let markdown = render(
+        &ExportDocument {
+            recording,
+            transcript: &transcript,
+            note: note.as_ref(),
+        },
+        include_transcript,
+    );
     let fingerprint = content_fingerprint(&markdown);
 
     Ok(Document {

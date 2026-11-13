@@ -512,7 +512,7 @@ fn the_ai_request_lands_in_the_same_exports_directory_under_its_own_name() {
 
     let markdown = fixture
         .exporter
-        .export(recording_id.as_str())
+        .export(recording_id.as_str(), true)
         .expect("Markdown export가 성공해야 한다");
     let ai_request = fixture
         .export_ai_request(&recording_id, NoteType::Study)

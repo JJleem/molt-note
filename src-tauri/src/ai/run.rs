@@ -159,17 +159,22 @@ fn attempt(
     let transcript = store::load_transcript(connection, transcript_id)?
         .ok_or_else(|| dangling_transcript(transcript_id))?;
 
+    // segments가 있으면 [HH:MM:SS] 시각을 붙여 프롬프트 입력을 만든다.
+    // 비어 있으면 raw_text fallback.
+    let input_text =
+        prompt::segments_to_timestamped_text(&transcript.segments, &transcript.raw_text);
+
     // 보내기 전에 크기를 판정한다 (ADR-0008 §8.2-3). 넘치면 **요청을 보내지 않고** 자르지도
     // 않는다. 여기서 만들어진 프롬프트 문자열 자체는 쓰이지 않는다 — 실제 요청 본문을 만드는
     // 것은 adapter이며 (INV-9), 이 자리가 필요한 것은 크기 판정과 `promptVersion` 둘이다.
     // 둘을 같은 함수에서 얻으므로 저장되는 버전은 **크기를 잰 그 프롬프트의 버전**이다.
-    let prepared = prompt::prepare(mode, &transcript.raw_text, budget)
+    let prepared = prompt::prepare(mode, &input_text, budget)
         .map_err(|overflow| input_too_large(&overflow))?;
 
     // 계약에 실리는 것은 전사 **텍스트**뿐이다 — 오디오를 가리킬 자리가 타입에 없다 (INV-6).
     let generation = provider.generate_note(&NoteRequest {
         mode,
-        transcript: TranscriptText::new(&transcript.raw_text),
+        transcript: TranscriptText::new(&input_text),
         context_budget: budget,
     })?;
 

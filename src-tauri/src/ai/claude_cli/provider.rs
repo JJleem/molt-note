@@ -247,7 +247,7 @@ mod tests {
         }
     }
 
-    const NOTE_JSON: &str = r#"{"overview":"개요","keyDiscussions":["하나"],"decisions":[],"actionItems":[],"openQuestions":[]}"#;
+    const NOTE_JSON: &str = r#"{"meetingTitle":"개요","meetingKind":"위클리","attendees":[],"reliabilityNotice":"녹음 기반","keySummary":["하나"],"previousActionItems":{"done":[],"changed":[],"inProgress":[],"noProgress":[],"notMentioned":[]},"topics":[],"actionItems":[],"needsConfirmation":[]}"#;
 
     fn generate(runner: Arc<FakeRunner>, model: &str) -> Result<NoteGeneration, Failure> {
         let provider = ClaudeCliProvider::new(model.to_owned(), runner);

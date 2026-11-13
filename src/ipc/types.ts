@@ -542,19 +542,75 @@ export interface AiNoteStatus {
 }
 
 /**
- * Meeting 노트의 본문 (§9.5: Overview · Key Discussions · Decisions · Action Items ·
+ * Meeting 노트의 본문 — V1 (§9.5: Overview · Key Discussions · Decisions · Action Items ·
  * Open Questions).
  *
  * **배열이 비어 있는 것은 정상이다** — "결정된 것이 없었다"는 실제 결과이며, 화면이 그것을
  * 실패로 그리지 않는다 (docs/ADR-0008-note-ai-provider.md §7.3).
+ *
+ * `schemaVersion`이 `1`이면 이 모양이다. V2는 {@link MeetingNoteV2}다.
  */
 export interface MeetingNote {
   readonly mode: 'meeting';
+  readonly schemaVersion: 1;
   readonly overview: string;
   readonly keyDiscussions: readonly string[];
   readonly decisions: readonly string[];
   readonly actionItems: readonly string[];
   readonly openQuestions: readonly string[];
+}
+
+/**
+ * 🔁 지난주 액션 아이템 진행 상황 — 다섯 분류 각각 `string[]`.
+ * 전부 비면 렌더러가 섹션을 그리지 않는다.
+ */
+export interface PreviousActionItems {
+  readonly done: readonly string[];
+  readonly changed: readonly string[];
+  readonly inProgress: readonly string[];
+  readonly noProgress: readonly string[];
+  readonly notMentioned: readonly string[];
+}
+
+/** 주제별 섹션의 하위 묶음 — `**굵은 소제목**` + 글머리표. */
+export interface TopicGroup {
+  readonly heading: string;
+  readonly items: readonly string[];
+}
+
+/** 주제 하나 — `## N. <title>`, 안에 여러 {@link TopicGroup}. */
+export interface Topic {
+  readonly title: string;
+  readonly groups: readonly TopicGroup[];
+}
+
+/** ✅ 액션 아이템 하나 — task/detail/owner/due/period 전부 string. */
+export interface ActionItemV2 {
+  readonly task: string;
+  readonly detail: string;
+  readonly owner: string;
+  readonly due: string;
+  readonly period: string;
+}
+
+/**
+ * Meeting 노트의 본문 — V2 (`docs/MEETING-NOTE-FORMAT.md`의 팀 회의록 형식).
+ *
+ * `schemaVersion`이 `2`이면 이 모양이다. V1은 {@link MeetingNote}다.
+ * `mode`는 V1과 같은 `'meeting'`이며, frontend는 `schemaVersion`으로 V1/V2를 구분한다.
+ */
+export interface MeetingNoteV2 {
+  readonly mode: 'meeting';
+  readonly schemaVersion: 2;
+  readonly meetingTitle: string;
+  readonly meetingKind: string;
+  readonly attendees: readonly string[];
+  readonly reliabilityNotice: string;
+  readonly keySummary: readonly string[];
+  readonly previousActionItems: PreviousActionItems;
+  readonly topics: readonly Topic[];
+  readonly actionItems: readonly ActionItemV2[];
+  readonly needsConfirmation: readonly string[];
 }
 
 /**
@@ -564,6 +620,7 @@ export interface MeetingNote {
  */
 export interface StudyNote {
   readonly mode: 'study';
+  readonly schemaVersion: number;
   readonly overview: string;
   readonly keyConcepts: readonly string[];
   readonly importantDetails: readonly string[];
@@ -576,6 +633,7 @@ export interface StudyNote {
 /** Summary 노트의 본문 (§9.5: Short Summary · Key Points). */
 export interface SummaryNote {
   readonly mode: 'summary';
+  readonly schemaVersion: number;
   readonly shortSummary: string;
   readonly keyPoints: readonly string[];
 }
@@ -589,7 +647,7 @@ export interface SummaryNote {
  * **provider 중립 데이터다** (§9.3 · INV-9) — 어느 벤더가 만들었든 이 모양이며, 렌더링은 한
  * 방향으로만 흐른다: `StructuredNote → 화면`.
  */
-export type StructuredNote = MeetingNote | StudyNote | SummaryNote;
+export type StructuredNote = MeetingNote | MeetingNoteV2 | StudyNote | SummaryNote;
 
 /**
  * 저장된 AI 노트 하나 (§7 · §7.3). **derived data이며 언제든 다시 만들 수 있다.**

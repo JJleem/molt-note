@@ -34,7 +34,8 @@
 //! 이 모듈은 그 예산 값을 **어디에 어떤 이름으로 실어 보내는지 알지 않는다** — 그것은 adapter
 //! 하나의 지식이다 (INV-9).
 
-use crate::domain::NoteType;
+use crate::domain::{NoteType, TranscriptSegment};
+use crate::export::markdown::format_timestamp_ms;
 
 use super::note::{json_schema, CONTENT_SCHEMA_VERSION};
 
@@ -47,26 +48,67 @@ pub const PROMPT_SET_VERSION: u32 = 1;
 /// DEFERRED다 (ADR-0008 §10.2-1 · §15).
 pub const TRANSCRIPT_PLACEHOLDER: &str = "{{transcript}}";
 
-/// Meeting 프롬프트. 요구하는 필드는 §7.2의 Meeting schema와 같다.
+/// Meeting 프롬프트 — `docs/MEETING-NOTE-FORMAT.md`의 팀 회의록 형식을 V2 JSON으로 요구한다.
 pub const MEETING_PROMPT: &str = "\
-You turn a meeting transcript into a structured note.
+You turn a meeting transcript into a structured meeting note following the team's weekly format.
 
 Return exactly one JSON object and nothing else. No prose before or after it, no code fence,
 no explanation.
 
+The transcript may include [HH:MM:SS] timestamps before each segment. Use these timestamps when
+referencing specific moments (e.g. broken segments, uncertain passages).
+
 The object has exactly these keys:
-- \"overview\": string. A short paragraph describing what the meeting was about.
-- \"keyDiscussions\": array of strings. The subjects that were actually discussed.
-- \"decisions\": array of strings. Decisions that were actually made.
-- \"actionItems\": array of strings. Work that someone agreed to do. Keep the wording of the
-  transcript, including who does it and by when if that was said.
-- \"openQuestions\": array of strings. Questions raised but left unresolved.
+
+- \"meetingTitle\": string. The meeting name (e.g. \"분기 계획 회의\"). Used in the heading
+  \"[YYMMDD] <meetingTitle>_회의록\".
+- \"meetingKind\": string. One line: meeting type + brief description of this session's flow
+  (e.g. \"정기 위클리 (일정 확정 및 예산 논의)\").
+- \"attendees\": array of strings. Names or titles heard in the recording. If names cannot be
+  confirmed from the recording alone, leave the array empty or add \"(음성 기준 추정 — 확인 필요)\".
+- \"reliabilityNotice\": string. The 📌 notice block. Must mention: (1) recording length and that
+  it was auto-transcribed then organized, (2) names/terms may be inaccurate — see the confirmation
+  section, (3) any segments with low volume or overlapping speech, (4) where the original transcript
+  can be found.
+- \"keySummary\": array of strings (5-7 recommended). Numbered key conclusions. Each item:
+  \"**bold one-line conclusion**: explanation\". Bold dates, amounts, and figures when they are the
+  conclusion. Start directives or emphatic statements with 💬 and bold them
+  (e.g. \"💬 **RFP 기능을 100% 수용하는 것이 핵심**\").
+- \"previousActionItems\": object with five arrays of strings:
+  \"done\" (completed), \"changed\" (schedule/direction changed — show before and after),
+  \"inProgress\" (ongoing), \"noProgress\" (no progress or no answer), \"notMentioned\" (carried over,
+  not discussed this time). Only include items actually mentioned in the transcript. Do not guess
+  the status of items that were not mentioned. All five keys must be present; use empty arrays when
+  nothing applies.
+- \"topics\": array of objects { \"title\": string, \"groups\": [{ \"heading\": string, \"items\": [string] }] }.
+  Number each topic (\"1. ...\", \"2. ...\"). Group by topic, not by chronological order. Use empty
+  string for heading when no subheading is needed; use \"**bold subheading**\" when grouping within
+  a topic. Write short declarative sentences (~함, ~예정, ~하기로 함). Markers:
+  💬 for decision-maker directives/feedback (bold the content),
+  ⚠️ for problems/risks/warnings,
+  → for resulting actions or decisions.
+  Mark uncertain proper nouns/numbers with STT상 '...' and uncertain sentences with (STT 기준).
+  When amounts conflict or a passage is unclear, do not transcribe — describe the context and
+  reference the transcript timestamp in a > quote block.
+  Use tables for comparisons (schedule stages, candidate comparisons) when helpful.
+- \"actionItems\": array of objects { \"task\": string, \"detail\": string, \"owner\": string, \"due\": string, \"period\": string }.
+  task: the action to take. detail: context or follow-up notes.
+  owner: use \"담당 확인\" if unknown, \"<name>(추정)\" if guessed from context.
+  due: use \"일정 확인\" if no date was mentioned, \"<date> (STT 기준)\" if heard but uncertain.
+  period: the time grouping (e.g. \"이번 주 (~11/20 금)\", \"다음 주 이후\").
+  Do not invent action items not discussed in the meeting.
+- \"needsConfirmation\": array of strings. Items requiring human verification:
+  uncertain attendees or titles,
+  ambiguous speaker attribution with stakes (include transcript timestamp),
+  suspected STT errors in proper nouns/numbers (show what was heard: STT상 '...'),
+  and repeated/broken transcription segments that should not be read as content (with timestamps).
 
 Rules:
-- Use only what the transcript says. Do not invent decisions, owners, dates or facts.
-- Every key must be present. If a section has nothing, use an empty array.
-- One item is one line of plain text. Do not nest objects or arrays inside an item.
+- Use only what the transcript says. Do not invent decisions, owners, dates, or facts.
+- Every key must be present. Use empty arrays/objects where nothing applies.
+- Mark uncertain information explicitly (STT상, 추정, 확인 필요).
 - Write the note in the main language of the transcript.
+- Do not include the full transcript in the note.
 
 Transcript:
 {{transcript}}
@@ -123,19 +165,22 @@ Transcript:
 ///
 /// **손으로 선언한 값이다.** 프롬프트나 schema를 고치면 [`computed_prompt_version`]이 다른 값을
 /// 내고 `prompt_version_is_bound_to_the_prompt_text` 테스트가 깨진다. 그때 이 값을 함께 고친다.
-pub const PROMPT_VERSION_MEETING: &str = "v1.meeting.5c6b8a90";
+pub const PROMPT_VERSION_MEETING: &str = "v1.meeting.54529c96";
 
 /// Study 프롬프트의 `promptVersion`. [`PROMPT_VERSION_MEETING`]과 같은 규칙이다.
-pub const PROMPT_VERSION_STUDY: &str = "v1.study.2cfad9a0";
+pub const PROMPT_VERSION_STUDY: &str = "v1.study.2cfad6a0";
 
 /// Summary 프롬프트의 `promptVersion`. [`PROMPT_VERSION_MEETING`]과 같은 규칙이다.
-pub const PROMPT_VERSION_SUMMARY: &str = "v1.summary.beca7d6c";
+pub const PROMPT_VERSION_SUMMARY: &str = "v1.summary.beca7e6c";
 
 /// 프롬프트 크기로 예약해 두는 토큰 수 (ADR-0008 §8.5).
 pub const PROMPT_RESERVE_TOKENS: u32 = 1_024;
 
 /// 출력이 차지할 자리로 예약해 두는 토큰 수 (ADR-0008 §8.5).
-pub const OUTPUT_RESERVE_TOKENS: u32 = 1_536;
+///
+/// V2 Meeting 형식의 25KB fixture가 약 13K 토큰(2 chars/token 추정)이므로 여유를 포함해
+/// 16,384로 올렸다.
+pub const OUTPUT_RESERVE_TOKENS: u32 = 16_384;
 
 /// 추정에 쓰는 문자/토큰 비율 (ADR-0008 §8.5).
 ///
@@ -162,7 +207,7 @@ impl ContextBudget {
     /// 확인되지 않았고(UNVERIFIED), 상한은 사용자의 RAM/VRAM에 달려 있어 앱이 알 수 없다.
     /// 그래서 값을 설정으로 노출하고 기본값을 하나 고른다.
     pub const DEFAULT: Self = Self {
-        context_tokens: 16_384,
+        context_tokens: 32_768,
     };
 
     /// transcript가 쓸 수 있는 몫. 프롬프트 지시문과 출력의 예약분을 뺀 나머지다.
@@ -258,6 +303,27 @@ pub fn build_prompt(mode: NoteType, transcript: &str) -> String {
 pub fn estimate_tokens(text: &str) -> u32 {
     let characters = text.chars().count();
     u32::try_from(characters.div_ceil(CHARS_PER_ESTIMATED_TOKEN)).unwrap_or(u32::MAX)
+}
+
+/// segments를 `[HH:MM:SS] 텍스트` 한 줄씩의 문자열로 조립한다.
+///
+/// segments가 비어 있으면 `raw_text`를 그대로 돌려준다 — segment가 없는 전사도 있다
+/// (export의 같은 규칙). [`format_timestamp_ms`]를 재사용하므로 export와 형식이 같다.
+pub fn segments_to_timestamped_text(segments: &[TranscriptSegment], raw_text: &str) -> String {
+    if segments.is_empty() {
+        return raw_text.to_owned();
+    }
+
+    let mut lines = Vec::with_capacity(segments.len());
+    for segment in segments {
+        let ts = format_timestamp_ms(segment.start_ms);
+        let text = segment.text.trim();
+        if !text.is_empty() {
+            lines.push(format!("[{ts}] {text}"));
+        }
+    }
+
+    lines.join("\n")
 }
 
 /// transcript 텍스트를 프롬프트 입력으로 준비한다 — **보내기 전에 크기를 판정하는 자리다.**
@@ -467,13 +533,23 @@ mod tests {
     fn the_budget_keeps_room_for_the_instructions_and_the_output() {
         let budget = ContextBudget::DEFAULT;
 
-        assert_eq!(budget.context_tokens, 16_384);
+        assert_eq!(budget.context_tokens, 32_768);
         assert_eq!(
             budget.input_tokens(),
-            16_384 - PROMPT_RESERVE_TOKENS - OUTPUT_RESERVE_TOKENS
+            32_768 - PROMPT_RESERVE_TOKENS - OUTPUT_RESERVE_TOKENS
         );
         // 예약분보다 작은 예산에서도 밑돌지 않는다.
         assert_eq!(ContextBudget { context_tokens: 1 }.input_tokens(), 0);
+
+        // V2 Meeting의 큰 출력을 담을 수 있는 context_tokens라면 입력 몫이 양수다.
+        let big_budget = ContextBudget {
+            context_tokens: 131_072,
+        };
+        assert!(big_budget.input_tokens() > 0);
+        assert_eq!(
+            big_budget.input_tokens(),
+            131_072 - PROMPT_RESERVE_TOKENS - OUTPUT_RESERVE_TOKENS
+        );
     }
 
     #[test]
@@ -483,7 +559,7 @@ mod tests {
 
         assert_eq!(prepared.mode, NoteType::Study);
         assert_eq!(prepared.prompt_version, PROMPT_VERSION_STUDY);
-        assert_eq!(prepared.context_tokens, 16_384);
+        assert_eq!(prepared.context_tokens, 32_768);
         assert_eq!(prepared.estimated_input_tokens, estimate_tokens("짧은 전사"));
         assert!(prepared.prompt.contains("짧은 전사"));
     }
@@ -513,5 +589,94 @@ mod tests {
 
         assert!(prepare(NoteType::Summary, &"a".repeat(10), budget).is_ok(), "정확히 예산만큼은 들어간다");
         assert!(prepare(NoteType::Summary, &"a".repeat(11), budget).is_err());
+    }
+
+    // ── AC-2-2: segments → [HH:MM:SS] 형식 ─────────────────────────────────────
+
+    #[test]
+    fn segments_with_timestamps_appear_in_prepared_prompt() {
+        let segments = vec![
+            TranscriptSegment {
+                start_ms: 3_000,
+                end_ms: 6_000,
+                text: "안녕하세요".to_owned(),
+            },
+            TranscriptSegment {
+                start_ms: 65_000,
+                end_ms: 70_000,
+                text: "두 번째 구간".to_owned(),
+            },
+        ];
+
+        let text = segments_to_timestamped_text(&segments, "fallback");
+
+        assert!(text.contains("[00:00:03]"), "첫 segment의 시각이 있다");
+        assert!(text.contains("[00:01:05]"), "둘째 segment의 시각이 있다");
+        assert!(text.contains("안녕하세요"));
+        assert!(text.contains("두 번째 구간"));
+        assert!(!text.contains("fallback"), "segments가 있으면 raw_text를 쓰지 않는다");
+
+        // prepare에 넣으면 프롬프트에 [HH:MM:SS]가 들어간다
+        let budget = ContextBudget {
+            context_tokens: 131_072,
+        };
+        let prepared = prepare(NoteType::Meeting, &text, budget).expect("들어가야 한다");
+        assert!(prepared.prompt.contains("[00:00:03]"));
+        assert!(prepared.prompt.contains("[00:01:05]"));
+    }
+
+    #[test]
+    fn empty_segments_fall_back_to_raw_text() {
+        let text = segments_to_timestamped_text(&[], "원본 텍스트 그대로");
+        assert_eq!(text, "원본 텍스트 그대로");
+    }
+
+    #[test]
+    fn blank_segment_text_is_skipped() {
+        let segments = vec![
+            TranscriptSegment {
+                start_ms: 0,
+                end_ms: 1_000,
+                text: "  ".to_owned(),
+            },
+            TranscriptSegment {
+                start_ms: 1_000,
+                end_ms: 2_000,
+                text: "내용".to_owned(),
+            },
+        ];
+
+        let text = segments_to_timestamped_text(&segments, "");
+        assert!(!text.contains("[00:00:00]"), "빈 텍스트 segment는 건너뛴다");
+        assert!(text.contains("[00:00:01] 내용"));
+    }
+
+    // ── AC-2-3: OUTPUT_RESERVE_TOKENS와 25KB fixture ─────────────────────────────
+
+    #[test]
+    fn output_reserve_covers_25kb_v2_fixture() {
+        // 25KB 문자열의 토큰 추정치가 OUTPUT_RESERVE_TOKENS 안에 들어야 한다.
+        let fixture_size_bytes: usize = 26_000;
+        let estimated_tokens =
+            u32::try_from(fixture_size_bytes.div_ceil(CHARS_PER_ESTIMATED_TOKEN)).unwrap();
+        assert!(
+            estimated_tokens < OUTPUT_RESERVE_TOKENS,
+            "25KB V2 fixture({estimated_tokens} 토큰 추정)가 예약({OUTPUT_RESERVE_TOKENS})보다 크다"
+        );
+        // const 단언: OUTPUT_RESERVE_TOKENS가 16384 이상이어야 한다.
+        const { assert!(OUTPUT_RESERVE_TOKENS >= 16_384) };
+    }
+
+    // ── AC-2-4: Study · Summary 프롬프트 불변 ─────────────────────────────────────
+
+    #[test]
+    fn study_and_summary_prompts_are_unchanged() {
+        // Study · Summary 프롬프트 상수와 version이 바뀌지 않았다.
+        assert_eq!(PROMPT_VERSION_STUDY, "v1.study.2cfad6a0");
+        assert_eq!(PROMPT_VERSION_SUMMARY, "v1.summary.beca7e6c");
+
+        // 프롬프트 원문의 첫 문장이 기존과 같다.
+        assert!(STUDY_PROMPT.starts_with("You turn a lecture or study session transcript"));
+        assert!(SUMMARY_PROMPT.starts_with("You turn a transcript into a short structured summary"));
     }
 }

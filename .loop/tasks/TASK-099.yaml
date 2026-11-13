@@ -1,0 +1,47 @@
+# V2 대형 fixture · end-to-end 검증 테스트
+# Runtime이 PLAN-20261113T071558Z 승인 시점에 생성했다 (proposal P8). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-099
+status: DONE
+
+request: |-
+  실제 provider 호출 없이 V2 Meeting의 end-to-end를 검증하는 테스트를 만든다. (1) 약 25KB의 지어낸 2시간 분량 회의 V2 응답 fixture를 테스트 안에 만든다: 핵심 요약 7개, previousActionItems 각 분류 2~3개, topics 5~6개(각 2~3 group), actionItems 15+개(두 기간), needsConfirmation 5+개. (2) 이 fixture가 parse_note → encode_content → decode_content → Markdown render → 앱 noteSections를 **모두** 통과하는 것을 하나의 테스트 흐름으로 확인한다. (3) Markdown 출력이 기준 형식의 섹션 순서와 이모지를 포함하는지 문자열 패턴으로 확인한다. (4) 크기 상한(MAX_ITEMS · MAX_ITEM_CHARS · OUTPUT_RESERVE_TOKENS)이 이 fixture를 거부하지 않는 것을 확인한다.
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-093
+  - TASK-095
+  - TASK-096
+  - TASK-097
+
+stop_condition:
+  gates: [build, lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 3
+
+acceptance_criteria:
+  - id: AC-8-1
+    description: |-
+      25KB V2 fixture가 parse → encode → decode → Markdown render → 앱 render를 모두 통과한다
+    verification:
+      type: gate
+      ref: test
+  - id: AC-8-2
+    description: |-
+      Markdown 출력에 🔑·🔁·✅·🔍 섹션이 기준 형식 순서로 존재한다
+    verification:
+      type: gate
+      ref: test
+  - id: AC-8-3
+    description: |-
+      크기 상한이 이 fixture를 거부하지 않는다
+    verification:
+      type: gate
+      ref: test
+
+evidence: []
+
+failure_memo: []

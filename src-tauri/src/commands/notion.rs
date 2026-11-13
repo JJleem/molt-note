@@ -153,6 +153,7 @@ impl NotionSender {
         &self,
         recording_id: &str,
         confirmation: Confirmation,
+        include_transcript: bool,
     ) -> Result<NotionSendStatus, Failure> {
         let app_data_dir = self.app_data_dir.as_ref().map_err(Clone::clone)?.clone();
 
@@ -178,7 +179,7 @@ impl NotionSender {
         // 자물쇠를 놓고 나서 스레드를 만든다 — 시작하는 쪽이 자물쇠를 쥔 채로 남지 않게 한다.
         drop(state);
 
-        self.spawn(recording_id.to_string(), confirmation, app_data_dir);
+        self.spawn(recording_id.to_string(), confirmation, include_transcript, app_data_dir);
         Ok(running)
     }
 
@@ -290,7 +291,7 @@ impl NotionSender {
     ///
     /// 스레드는 **결과를 상태 한 값에 남기는 것 말고는 아무것도 하지 않는다.** 화면에 직접
     /// 알리지 않으므로 창이 닫히거나 화면이 바뀌어도 이 스레드가 향할 곳을 잃지 않는다.
-    fn spawn(&self, recording_id: String, confirmation: Confirmation, app_data_dir: AppDataDirectory) {
+    fn spawn(&self, recording_id: String, confirmation: Confirmation, include_transcript: bool, app_data_dir: AppDataDirectory) {
         let transport = Arc::clone(&self.transport);
         let secrets = Arc::clone(&self.secrets);
         let waiter = Arc::clone(&self.waiter);
@@ -301,6 +302,7 @@ impl NotionSender {
                 &app_data_dir,
                 &recording_id,
                 confirmation,
+                include_transcript,
                 transport,
                 secrets.as_ref(),
                 waiter.as_ref(),
@@ -354,6 +356,7 @@ fn send_one(
     app_data_dir: &AppDataDirectory,
     recording_id: &str,
     confirmation: Confirmation,
+    include_transcript: bool,
     transport: Arc<dyn HttpTransport>,
     secrets: &dyn SecretStore,
     waiter: &dyn Waiter,
@@ -382,6 +385,7 @@ fn send_one(
         },
         waiter,
         confirmation,
+        include_transcript,
     )
 }
 
@@ -571,7 +575,7 @@ mod tests {
         };
 
         let failure = sender
-            .start("rec-1", Confirmation::NotAsked)
+            .start("rec-1", Confirmation::NotAsked, true)
             .expect_err("자리를 모르면 보낼 수 없다");
 
         assert_eq!(failure.kind, FailureKind::Storage);

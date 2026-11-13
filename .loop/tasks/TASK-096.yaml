@@ -1,0 +1,44 @@
+# Markdown 렌더러 — V2 Meeting 섹션
+# Runtime이 PLAN-20261113T071558Z 승인 시점에 생성했다 (proposal P5). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-096
+status: DONE
+
+request: |-
+  src-tauri/src/export/markdown.rs의 note_sections 함수를 V2 Meeting에 대응시킨다. StructuredNote::MeetingV2일 때 기준 형식의 섹션 순서로 Markdown을 만든다: 머리말(meetingTitle·meetingKind·attendees·reliabilityNotice) → 🔑 핵심 요약 → 🔁 지난 액션 아이템(전부 비면 생략) → 주제별 ## 섹션(소제목은 **굵은** 소제목, 아래 글머리표) → ✅ 액션 아이템(기간별 그룹, 항목마다 담당·날짜) → 🔍 확인 필요. MEETING_SECTIONS 상수를 V2에 맞게 교체하거나 V2 전용 상수를 둔다. V1 Meeting은 기존 렌더 그대로 유지. 같은 V2 fixture가 render를 통과해 기대한 Markdown 문자열이 나오는 테스트를 추가한다.
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-092
+
+stop_condition:
+  gates: [build, lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 3
+
+acceptance_criteria:
+  - id: AC-5-1
+    description: |-
+      V2 fixture로 render한 Markdown이 기준 형식의 섹션 순서·이모지·구조를 따른다
+    verification:
+      type: gate
+      ref: test
+  - id: AC-5-2
+    description: |-
+      V1 Meeting fixture의 Markdown 출력이 기존과 동일하다 (회귀 없음)
+    verification:
+      type: gate
+      ref: test
+  - id: AC-5-3
+    description: |-
+      previousActionItems가 전부 비면 🔁 섹션이 Markdown에 나타나지 않는다
+    verification:
+      type: gate
+      ref: test
+
+evidence: []
+
+failure_memo: []

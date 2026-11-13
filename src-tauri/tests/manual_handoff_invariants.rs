@@ -845,7 +845,7 @@ fn mh7_four_failures_leave_the_database_bytes_and_the_exported_files_untouched()
     let note = fixture.generate_note(&kept, NoteType::Study);
     fixture
         .exporter
-        .export(kept.as_str())
+        .export(kept.as_str(), true)
         .expect("Markdown export가 성공해야 한다");
     fixture
         .export_ai_request(&kept, NoteType::Study)

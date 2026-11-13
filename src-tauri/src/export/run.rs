@@ -59,6 +59,7 @@ pub fn export(
     connection: &Connection,
     directory: &Path,
     recording_id: &RecordingId,
+    include_transcript: bool,
 ) -> Result<WrittenFile, Failure> {
     // 내보낼 대상과 **current가 가리키는** Transcript를 읽는다 (§7.2). 다른 version을
     // 추측해서 고르지 않는다.
@@ -72,11 +73,14 @@ pub fn export(
     // **없는 것이 정상이다** (INV-8). 여기서 provider를 묻지 않고, 노트를 만들지도 않는다.
     let note = latest_note(connection, &transcript.id)?;
 
-    let markdown = render(&ExportDocument {
-        recording: &recording,
-        transcript: &transcript,
-        note: note.as_ref(),
-    });
+    let markdown = render(
+        &ExportDocument {
+            recording: &recording,
+            transcript: &transcript,
+            note: note.as_ref(),
+        },
+        include_transcript,
+    );
     let file_name = export_file_name(&recording.created_at, &recording.title);
 
     file::write_new(directory, &file_name, &markdown)

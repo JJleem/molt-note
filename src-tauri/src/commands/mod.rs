@@ -1310,8 +1310,9 @@ pub fn get_ai_note(
 pub fn export_markdown(
     exporter: State<'_, Exporter>,
     recording_id: String,
+    include_transcript: Option<bool>,
 ) -> Result<ExportedFilePayload, Failure> {
-    exporter.export(&recording_id)
+    exporter.export(&recording_id, include_transcript.unwrap_or(true))
 }
 
 /// 고른 mode에 맞는 **Manual 프롬프트**를 돌려준다 — 사람이 자기 AI 채팅에 붙여 넣을
@@ -1440,10 +1441,11 @@ pub fn start_notion_sync(
     sender: State<'_, NotionSender>,
     recording_id: String,
     confirmation: Option<String>,
+    include_transcript: Option<bool>,
 ) -> Result<NotionSendStatusPayload, Failure> {
     let confirmation = notion::parse_confirmation(confirmation.as_deref())?;
 
-    Ok(sender.start(&recording_id, confirmation)?.into())
+    Ok(sender.start(&recording_id, confirmation, include_transcript.unwrap_or(true))?.into())
 }
 
 /// 지금 Notion 전송이 어떤 상태인지 묻는다. **전송이 도는 동안에도 즉시 답한다.**

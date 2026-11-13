@@ -579,6 +579,22 @@ Provider abstraction을 실제로 검증하는 데 필요한 최소 범위만 �
 | **Study** | Overview · Key Concepts · Important Details · Questions · Things to Study · References Mentioned |
 | **Summary** | Short Summary · Key Points |
 
+**Meeting content schema v2** (Phase 5.10 · `CONTENT_SCHEMA_VERSION` 2):
+
+| 필드 | 타입 | 설명 |
+| --- | --- | --- |
+| `meetingTitle` | `string` | 회의명 — 제목 `[YYMMDD] <회의명>_회의록`에 쓰인다 |
+| `meetingKind` | `string` | 유형 한 줄 (회의 종류 + 흐름) |
+| `attendees` | `string[]` | 들린 이름·호칭. 확정 못 하면 비워도 된다 |
+| `reliabilityNotice` | `string` | 📌 안내 문구 본문 |
+| `keySummary` | `string[]` | 🔑 핵심 요약 (5~7개 권장) |
+| `previousActionItems` | `object` | 🔁 — `done` · `changed` · `inProgress` · `noProgress` · `notMentioned` (각 `string[]`) |
+| `topics` | `object[]` | `{ title, groups: [{ heading, items }] }` — 주제별 섹션 |
+| `actionItems` | `object[]` | `{ task, detail, owner, due, period }` — 담당 모르면 `"담당 확인"`, 기한 모르면 `"일정 확인"` |
+| `needsConfirmation` | `string[]` | 🔍 확인 필요 — 참석자·호칭·고유명사·반복 인식 구간 |
+
+§7.3을 Meeting v2에 한해 개정했다 — 한 단계의 객체 중첩(`previousActionItems` · `topics` · `actionItems`)을 허용한다. Study · Summary는 v1 flat 구조 그대로다. 옛 Meeting v1 노트는 그대로 읽히고 그대로 렌더된다 (§7.5).
+
 ### 9.6 규칙
 
 - AI 실패는 transcript와 recording에 어떤 영향도 주지 않는다 (INV-3).

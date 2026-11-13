@@ -1,0 +1,40 @@
+# ADR-0008 §7.3 개정 기록
+# Runtime이 PLAN-20261113T071558Z 승인 시점에 생성했다 (proposal P7). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-098
+status: DONE
+
+request: |-
+  docs/ADR-0008-note-ai-provider.md에 §7.3 개정 기록을 추가한다. (1) Meeting v2에 한해 한 단계 객체 중첩을 허용한다는 사실. (2) 담당·기한을 필드로 받되 모르면 '담당 확인'·'일정 확인'을 강제하고 추정은 '(추정)'으로 드러낸다는 규칙. (3) 추출 정확도는 여전히 UNVERIFIED라는 표시. (4) Study · Summary는 v1 그대로라는 사실. 소스·설정·테스트는 건드리지 않는다.
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-092
+
+stop_condition:
+  gates: [build, lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 1
+
+acceptance_criteria:
+  - id: AC-7-1
+    description: |-
+      ADR-0008에 §7.3 개정 기록이 존재하고, 무엇이 바뀌었고 무엇이 UNVERIFIED인지 적혀 있다
+    verification:
+      type: verifier
+      instruction: |-
+        docs/ADR-0008-note-ai-provider.md에서 개정 기록을 찾아 (1) Meeting v2 객체 중첩 허용 (2) 담당/기한 필드화 (3) UNVERIFIED 표시 (4) Study·Summary v1 유지가 모두 언급되는지 확인한다.
+  - id: AC-7-2
+    description: |-
+      소스·설정·테스트 파일이 이 Task에서 변경되지 않았다
+    verification:
+      type: verifier
+      instruction: |-
+        이 Task의 diff에 src-tauri/ · src/ · tests/ · package.json · Cargo.toml이 포함되지 않는지 확인한다.
+
+evidence: []
+
+failure_memo: []
