@@ -3092,3 +3092,77 @@ PLAN-20260908T011945Z   duration 629,666 ms = 629.7초   timed_out false
 
 ⚠️ **이 Plan은 승인되지 않았다.** 운영자가 2026-09-08에 Runtime 경로를 중단하고 직접
 구현으로 전환했다 — 그 뒤의 변경은 Runtime을 거치지 않았다.
+
+---
+
+## OBS-029 — Worker가 401(OAuth 토큰 폐기)로 끝났는데 프로세스가 30분을 더 살아 `TIMEOUT`으로 분류됐고, 회복 힌트가 "탐색을 줄여라"였다
+
+- **Date**: 2026-11-13
+- **Phase / Goal**: Phase 5.10 — Meeting Note Format (`phase-prompt/05.10-meeting-note-format.md`)
+- **Plan ID**: `PLAN-20261113T071558Z` · **Plan execution**: `PLANEXEC-20261113T092952Z`
+- **Task / Run**: `TASK-096` · attempt 1 `RUN-20261113T080328Z-TASK-096` (실패) → attempt 2 `RUN-20261113T084218Z-TASK-096` (DONE)
+- **Runtime stage**: worker
+- **Command**: `loopctl execute-plan PLAN-20261113T071558Z`
+
+### 관측된 사실
+
+`runtime-envelope.json` (attempt 1):
+
+```text
+process: exit_code null · signal SIGKILL · timed_out true · timeout_seconds 1800
+duration_ms 2,329,520 (38.8분 — 1800s timeout 뒤 kill까지 포함)
+observed_changes: 0 files
+tokens: output 2,886
+```
+
+같은 run의 `stdout.log` 마지막 결과 줄:
+
+```text
+"is_error":true, "duration_ms":2329045, "duration_api_ms":64927, "num_turns":10,
+"result":"Failed to authenticate. API Error: 401 ... OAuth access token has been revoked."
+```
+
+**API를 쓴 시간은 약 65초였다.** 나머지 약 38분은 인증 실패 뒤 아무것도 하지 않은 채 남아 있던
+시간이다.
+
+Runtime의 판정:
+
+```text
+diagnosis.json     failure_class TIMEOUT · retryable true · recommended_action RETRY_WITH_HINT
+failure-memo.json  recovery_hint "Spend less time exploring. Decide on the smallest change ...
+                                  and write the result file early rather than at the very end."
+```
+
+attempt 2는 같은 Task를 6분 만에 통과했다 (Gate·Verifier PASS) — 그 사이에 토큰이 갱신됐다.
+
+### 기대한 동작
+
+- 인증 실패(401)는 **provider/환경 실패**로 분류된다. Worker의 작업 방식 문제가 아니다.
+- 그 사실이 stdout의 결과 줄에 이미 있으므로, Runtime이 그것을 읽어 **즉시** 실패로 끝낸다.
+- 회복 힌트가 Worker에게 "탐색을 줄여라"라고 말하지 않는다 — 다음 attempt의 Worker를
+  존재하지 않는 문제 쪽으로 몰아간다.
+
+### Impact
+
+- 38.8분 대기 (Plan 전체 129분의 30%).
+- 잘못된 회복 힌트가 attempt 2의 context에 들어갔다. 이번에는 결과에 해가 없었지만, 큰 Task에서
+  "가장 작은 변경"을 강요하면 Acceptance를 덜 채운 결과로 이어질 수 있다 (미검증).
+
+### 관련
+
+OBS-026 — 429(사용 한도)가 `PROCESS_CRASH`로 분류됐다. **provider 쪽 실패가 Worker 실패로
+분류되는 두 번째 사례다** (원인 코드는 다름: 429 → 즉시 종료 / 401 → 종료하지 않고 대기).
+
+### Possible improvement (미검증 · 제안일 뿐이다)
+
+1. Worker stdout의 결과 줄에서 `is_error` + 인증/한도 오류를 읽어 `PROVIDER_AUTH` ·
+   `PROVIDER_LIMIT` 같은 별도 failure class로 둔다. Worker 회복 힌트를 붙이지 않는다.
+2. `duration_api_ms`가 wall time의 극히 일부인데 timeout으로 끝났다면 "Worker가 오래 일했다"가
+   아니라 "멈춰 있었다"로 본다.
+
+**Field-Test Principle에 따라 지금 Runtime을 고치지 않는다.** provider 실패 오분류는 OBS-026과
+합쳐 2회다.
+
+### Status
+
+**OPEN** — 1회 (OBS-026과 같은 계열로는 2회).
