@@ -47,6 +47,8 @@ export interface RecordingHeader {
   readonly recordedAtLabel: string;
   /** Rust가 만든 값 그대로. */
   readonly durationLabel: string;
+  /** 캡처 도중 문제가 있었지만 파일은 온전했을 때의 경고. 대부분은 `null`이다. */
+  readonly captureWarning: string | null;
 }
 
 /**
@@ -121,6 +123,7 @@ export function loadedRecordingDetail(
     recordedAtLabel: formatRecordedAt(recording.createdAt, options),
     // Rust가 보낸 값을 그대로 쓴다. 여기서 다시 계산하지 않는다.
     durationLabel: recording.durationLabel,
+    captureWarning: recording.captureWarning,
   };
 
   if (missingAudio.some((missing) => missing.recordingId === recording.id)) {

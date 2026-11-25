@@ -660,6 +660,7 @@ mod tests {
             transcription_status: ProcessingStatus::Done,
             ai_status: ProcessingStatus::None,
             notion_status: ProcessingStatus::None,
+            capture_warning: None,
         }
     }
 

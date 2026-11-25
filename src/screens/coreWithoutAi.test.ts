@@ -68,6 +68,7 @@ function recording(overrides: Partial<Recording> = {}): Recording {
     transcriptionStatus: 'done',
     aiStatus: 'none',
     notionStatus: 'none',
+    captureWarning: null,
     ...overrides,
   };
 }
@@ -199,6 +200,7 @@ function stopped(): StoppedRecording {
       byteSize: 100_832_044,
       durationMs: 3_151_000,
       durationLabel: '52:31',
+      warning: null,
     },
   };
 }
@@ -275,11 +277,16 @@ describe('녹음은 AI를 알지 않는다 (INV-8)', () => {
     const requested = requestedAction(INITIAL_RECORDING, 'stop');
     const saved = savedRecording(requested, stopped());
 
-    expect(saved.saved).toEqual({ id: 'r-1', title: '3DGS Study #04', durationLabel: '52:31' });
+    expect(saved.saved).toEqual({
+      id: 'r-1',
+      title: '3DGS Study #04',
+      durationLabel: '52:31',
+      captureWarning: null,
+    });
     expect(saved.trouble).toBeNull();
     expect(saved.busy).toBe(false);
     // 저장 결과에 AI가 실려 있지 않다 — 정지의 성공이 AI에 걸려 있지 않다는 뜻이다.
-    expect(Object.keys(saved.saved ?? {}).sort()).toEqual(['durationLabel', 'id', 'title']);
+    expect(Object.keys(saved.saved ?? {}).sort()).toEqual(['captureWarning', 'durationLabel', 'id', 'title']);
   });
 });
 

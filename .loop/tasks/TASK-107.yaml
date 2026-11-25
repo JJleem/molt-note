@@ -1,0 +1,46 @@
+# UI에 경고를 표시한다
+# Runtime이 PLAN-20261116T005546Z 승인 시점에 생성했다 (proposal P7). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-107
+status: DONE
+
+request: |-
+  (1) src/screens/RecordingDetailScreen.tsx(또는 해당 화면)에서 recording.captureWarning이 있으면 눈에 띄는 경고 배너를 보여준다. 메시지는 Rust에서 이미 만든 문장을 그대로 쓴다. (2) 정지 직후 결과에 warning이 있으면 Recording 화면의 상태 영역이나 toast 등으로 사용자에게 알린다. 구체적 표현은 기존 UI 패턴을 따른다. (3) Recordings 목록에서 경고가 있는 녹음에 시각적 표시를 추가한다(아이콘이나 뱃지).
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-103
+
+stop_condition:
+  gates: [build, lint]
+  requires_verifier: true
+  max_consecutive_failures: 3
+
+acceptance_criteria:
+  - id: AC1
+    description: |-
+      Recording Detail에서 captureWarning이 있을 때 경고 메시지가 렌더된다
+    verification:
+      type: verifier
+      instruction: |-
+        RecordingDetailScreen 코드에서 captureWarning 조건부 렌더링을 확인한다
+  - id: AC2
+    description: |-
+      captureWarning이 없으면 경고가 보이지 않는다
+    verification:
+      type: verifier
+      instruction: |-
+        null/undefined captureWarning일 때 경고 요소가 렌더되지 않음을 코드에서 확인한다
+  - id: AC3
+    description: |-
+      build와 lint가 통과한다
+    verification:
+      type: gate
+      ref: lint
+
+evidence: []
+
+failure_memo: []

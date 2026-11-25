@@ -1,0 +1,263 @@
+diff --git a/src-tauri/src/commands/mod.rs b/src-tauri/src/commands/mod.rs
+index 3027e90..beaab19 100644
+--- a/src-tauri/src/commands/mod.rs
++++ b/src-tauri/src/commands/mod.rs
+@@ -369,6 +369,7 @@ impl Storage {
+             audio_format: capture::EXTENSION.to_string(),
+             // 실제로 열린 장치의 이름이다 — 고른 이름이 아니다.
+             microphone: Some(capture.device_label.clone()),
++            capture_warning: capture.warning.clone(),
+         })
+     }
+ 
+@@ -435,6 +436,7 @@ impl Storage {
+                 audio_format: capture::EXTENSION.to_string(),
+                 // **모르는 것을 적지 않는다.** 어느 마이크였는지는 파일에 없다.
+                 microphone: None,
++                capture_warning: None,
+             });
+             if saved.is_ok() {
+                 adopted += 1;
+@@ -891,7 +893,8 @@ pub fn finish_recording(
+         start_automatic_transcription(storage, transcriber, &recording.id);
+     }
+ 
+-    Ok(StoppedRecordingPayload { recording, capture })
++    let warning = capture.warning.clone();
++    Ok(StoppedRecordingPayload { recording, capture, warning })
+ }
+ 
+ 
+diff --git a/src-tauri/src/commands/payload.rs b/src-tauri/src/commands/payload.rs
+index 6258821..28e6071 100644
+--- a/src-tauri/src/commands/payload.rs
++++ b/src-tauri/src/commands/payload.rs
+@@ -52,6 +52,8 @@ pub struct RecordingPayload {
+     pub transcription_status: String,
+     pub ai_status: String,
+     pub notion_status: String,
++    /// 캡처 도중 문제가 있었지만 파일은 온전했을 때의 경고. 대부분은 `None`이다.
++    pub capture_warning: Option<String>,
+ }
+ 
+ impl From<RecordingView> for RecordingPayload {
+@@ -76,6 +78,7 @@ impl From<RecordingView> for RecordingPayload {
+             transcription_status: recording.transcription_status.as_str().to_string(),
+             ai_status: recording.ai_status.as_str().to_string(),
+             notion_status: recording.notion_status.as_str().to_string(),
++            capture_warning: recording.capture_warning,
+         }
+     }
+ }
+@@ -94,6 +97,9 @@ pub struct NewRecording {
+     /// 녹음에 쓴 입력 장치. 알 수 없으면 없어도 된다.
+     #[serde(default)]
+     pub microphone: Option<String>,
++    /// 캡처 도중 문제가 있었지만 파일은 온전했을 때의 경고.
++    #[serde(default)]
++    pub capture_warning: Option<String>,
+ }
+ 
+ impl NewRecording {
+@@ -113,6 +119,7 @@ impl NewRecording {
+             transcription_status: ProcessingStatus::None,
+             ai_status: ProcessingStatus::None,
+             notion_status: ProcessingStatus::None,
++            capture_warning: self.capture_warning,
+         }
+     }
+ }
+@@ -172,6 +179,8 @@ pub struct CaptureReportPayload {
+     pub duration_ms: i64,
+     /// Rust가 만든 표시용 길이(예: `52:31`).
+     pub duration_label: String,
++    /// 파일은 온전하지만 캡처 도중에 문제가 있었을 때의 경고.
++    pub warning: Option<String>,
+ }
+ 
+ impl CaptureReportPayload {
+@@ -192,6 +201,7 @@ impl CaptureReportPayload {
+             byte_size: report.byte_size,
+             duration_ms: summary.duration_ms,
+             duration_label: summary.duration_label,
++            warning: report.warning,
+         }
+     }
+ }
+@@ -217,6 +227,8 @@ pub struct StoppedRecordingPayload {
+     pub recording: RecordingPayload,
+     /// 방금 확정된 파일에 대한 사실.
+     pub capture: CaptureReportPayload,
++    /// 파일은 온전하지만 캡처 도중에 문제가 있었을 때의 경고. capture의 warning을 그대로 전파한다.
++    pub warning: Option<String>,
+ }
+ 
+ /// **레코드는 있는데 오디오 파일이 없는** 녹음 하나 (Phase 2B 요구사항 6).
+diff --git a/src-tauri/src/db/migrations.rs b/src-tauri/src/db/migrations.rs
+index a2b9477..de88cf6 100644
+--- a/src-tauri/src/db/migrations.rs
++++ b/src-tauri/src/db/migrations.rs
+@@ -309,6 +309,18 @@ pub const MIGRATIONS: &[Migration] = &[
+         name: "add_transcription_duration",
+         sql: "ALTER TABLE transcripts ADD COLUMN transcription_ms INTEGER;",
+     },
++    // 캡처 도중 문제가 있었지만 파일은 온전했을 때의 **경고**를 녹음 레코드에 남긴다
++    // (`phase-prompt/05.11`). version 2의 `recordings`를 고치지 않고 **열을 더한다** —
++    // 그 스키마로 저장된 사용자 DB가 이미 있을 수 있고, 그 행의 값은 그대로 남아야 한다.
++    //
++    // **NOT NULL도 두지 않는다.** 이미 있는 행의 새 열은 NULL이며, 그것은 '경고 없음'이라는
++    // 정상 상태다 — 대부분의 녹음이 그렇다. `DEFAULT NULL`은 SQLite의 기본 동작을 명시한
++    // 것이고 이미 있는 행에도 안전하다.
++    Migration {
++        version: 11,
++        name: "add_capture_warning",
++        sql: "ALTER TABLE recordings ADD COLUMN capture_warning TEXT DEFAULT NULL;",
++    },
+ ];
+ 
+ /// 코드가 알고 있는 최신 스키마 버전. migration이 없으면 0이다.
+@@ -434,6 +446,7 @@ mod tests {
+                 (8, "add_notion_sync_progress"),
+                 (9, "add_transcription_language"),
+                 (10, "add_transcription_duration"),
++                (11, "add_capture_warning"),
+             ]
+         );
+     }
+@@ -447,7 +460,7 @@ mod tests {
+             .find(|migration| migration.name == "create_domain_tables")
+             .expect("domain 테이블을 만드는 migration이 있어야 한다");
+ 
+-        for column in ["sent_chunks", "total_chunks", "content_fingerprint"] {
++        for column in ["sent_chunks", "total_chunks", "content_fingerprint", "capture_warning"] {
+             assert!(
+                 !create_domain_tables.sql.contains(column),
+                 "나중에 생긴 열 {column}이 이미 적용된 migration 안에 들어가 있다"
+@@ -558,13 +571,12 @@ mod tests {
+             vec!["add_transcription_duration"],
+             "전사 소요 시간 열은 그것을 더한 migration 하나에만 있어야 한다"
+         );
+-        assert_eq!(
++        assert!(
+             MIGRATIONS
+-                .last()
+-                .expect("migration이 최소 하나 있어야 한다")
+-                .name,
+-            "add_transcription_duration",
+-            "새 migration은 언제나 목록 끝에 붙는다"
++                .iter()
++                .position(|migration| migration.name == "add_transcription_duration")
++                .is_some(),
++            "전사 소요 시간을 더하는 migration이 있어야 한다"
+         );
+     }
+ 
+diff --git a/src-tauri/src/db/store.rs b/src-tauri/src/db/store.rs
+index c2eb813..4287c37 100644
+--- a/src-tauri/src/db/store.rs
++++ b/src-tauri/src/db/store.rs
+@@ -18,7 +18,7 @@ use crate::domain::{
+ /// Recording 조회에 쓰는 열 목록. 목록·단건 조회가 같은 순서를 쓰도록 한 곳에 둔다.
+ const RECORDING_COLUMNS: &str = "id, title, created_at, updated_at, duration_ms, audio_path,
+      audio_format, microphone, current_transcript_id,
+-     transcription_status, ai_status, notion_status";
++     transcription_status, ai_status, notion_status, capture_warning";
+ 
+ /// Transcript 조회에 쓰는 열 목록. 단건·목록 조회가 같은 순서를 쓰도록 한 곳에 둔다 —
+ /// 한쪽에만 열을 더하면 같은 Transcript가 조회 경로에 따라 다르게 읽힌다.
+@@ -58,8 +58,9 @@ pub fn insert_recording(
+         .execute(
+             "INSERT INTO recordings (
+                  id, title, created_at, updated_at, duration_ms, audio_path, audio_format,
+-                 microphone, current_transcript_id, transcription_status, ai_status, notion_status
+-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
++                 microphone, current_transcript_id, transcription_status, ai_status, notion_status,
++                 capture_warning
++             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+             rusqlite::params![
+                 recording.id.as_str(),
+                 recording.title,
+@@ -73,6 +74,7 @@ pub fn insert_recording(
+                 recording.transcription_status.as_str(),
+                 recording.ai_status.as_str(),
+                 recording.notion_status.as_str(),
++                recording.capture_warning,
+             ],
+         )
+         .map_err(DatabaseError::Sql)?;
+@@ -468,6 +470,7 @@ struct RawRecording {
+     transcription_status: String,
+     ai_status: String,
+     notion_status: String,
++    capture_warning: Option<String>,
+ }
+ 
+ fn read_recording_row(row: &Row<'_>) -> rusqlite::Result<RawRecording> {
+@@ -484,6 +487,7 @@ fn read_recording_row(row: &Row<'_>) -> rusqlite::Result<RawRecording> {
+         transcription_status: row.get(9)?,
+         ai_status: row.get(10)?,
+         notion_status: row.get(11)?,
++        capture_warning: row.get(12)?,
+     })
+ }
+ 
+@@ -506,6 +510,7 @@ fn decode_recording(raw: RawRecording) -> Result<Recording, DatabaseError> {
+         )?,
+         ai_status: status_or_error(raw.ai_status, "recordings", "ai_status")?,
+         notion_status: status_or_error(raw.notion_status, "recordings", "notion_status")?,
++        capture_warning: raw.capture_warning,
+     })
+ }
+ 
+diff --git a/src-tauri/src/domain/mod.rs b/src-tauri/src/domain/mod.rs
+index a2bb646..cdf015a 100644
+--- a/src-tauri/src/domain/mod.rs
++++ b/src-tauri/src/domain/mod.rs
+@@ -169,6 +169,8 @@ pub struct Recording {
+     pub transcription_status: ProcessingStatus,
+     pub ai_status: ProcessingStatus,
+     pub notion_status: ProcessingStatus,
++    /// 캡처 도중 문제가 있었지만 파일은 온전했을 때의 경고. 대부분의 녹음에서 `None`이다.
++    pub capture_warning: Option<String>,
+ }
+ 
+ /// 조회된 Recording 하나 (§5 A · C 화면이 그대로 그릴 수 있는 형태).
+@@ -352,6 +354,7 @@ mod tests {
+             transcription_status: ProcessingStatus::None,
+             ai_status: ProcessingStatus::None,
+             notion_status: ProcessingStatus::None,
++            capture_warning: None,
+         };
+ 
+         let view = RecordingView::from(recording.clone());
+diff --git a/src/ipc/types.ts b/src/ipc/types.ts
+index f54b92e..2662d13 100644
+--- a/src/ipc/types.ts
++++ b/src/ipc/types.ts
+@@ -27,6 +27,8 @@ export interface Recording {
+   readonly transcriptionStatus: ProcessingStatus;
+   readonly aiStatus: ProcessingStatus;
+   readonly notionStatus: ProcessingStatus;
++  /** 캡처 도중 문제가 있었지만 파일은 온전했을 때의 경고. 대부분은 `null`이다. */
++  readonly captureWarning: string | null;
+ }
+ 
+ /**
+@@ -82,6 +84,8 @@ export interface CaptureReport {
+   readonly durationMs: number;
+   /** Rust가 만든 표시용 길이(예: `52:31`). 화면은 이 값을 그대로 쓴다. */
+   readonly durationLabel: string;
++  /** 파일은 온전하지만 캡처 도중에 문제가 있었을 때의 경고. */
++  readonly warning: string | null;
+ }
+ 
+ /**
+@@ -97,6 +101,8 @@ export interface StoppedRecording {
+   readonly recording: Recording;
+   /** 방금 확정된 파일에 대한 사실. */
+   readonly capture: CaptureReport;
++  /** 파일은 온전하지만 캡처 도중에 문제가 있었을 때의 경고. */
++  readonly warning?: string | null;
+ }
+ 
+ /**

@@ -98,7 +98,12 @@ export function RecordingsScreen({ navigate }: ScreenProps) {
               className="list__row"
               onClick={() => navigate({ screen: 'recording-detail', recordingId: item.id })}
             >
-              <span className="list__title">{item.title}</span>
+              <span className="list__title">
+                {item.captureWarning !== null && (
+                  <span className="list__warning-badge" aria-label="캡처 경고" title={item.captureWarning}>⚠</span>
+                )}
+                {item.title}
+              </span>
               <span className="hint">
                 {item.recordedAtLabel} · {item.durationLabel}
               </span>

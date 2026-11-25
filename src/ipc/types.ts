@@ -27,6 +27,8 @@ export interface Recording {
   readonly transcriptionStatus: ProcessingStatus;
   readonly aiStatus: ProcessingStatus;
   readonly notionStatus: ProcessingStatus;
+  /** 캡처 도중 문제가 있었지만 파일은 온전했을 때의 경고. 대부분은 `null`이다. */
+  readonly captureWarning: string | null;
 }
 
 /**
@@ -82,6 +84,8 @@ export interface CaptureReport {
   readonly durationMs: number;
   /** Rust가 만든 표시용 길이(예: `52:31`). 화면은 이 값을 그대로 쓴다. */
   readonly durationLabel: string;
+  /** 파일은 온전하지만 캡처 도중에 문제가 있었을 때의 경고. */
+  readonly warning: string | null;
 }
 
 /**
@@ -97,6 +101,8 @@ export interface StoppedRecording {
   readonly recording: Recording;
   /** 방금 확정된 파일에 대한 사실. */
   readonly capture: CaptureReport;
+  /** 파일은 온전하지만 캡처 도중에 문제가 있었을 때의 경고. */
+  readonly warning?: string | null;
 }
 
 /**

@@ -144,6 +144,11 @@ pub struct CaptureReport {
     pub format: CaptureFormat,
     /// 확정된 파일의 크기(byte). 파일시스템에서 읽은 값이며 계산한 값이 아니다.
     pub byte_size: u64,
+    /// 파일은 온전하지만 캡처 도중에 문제가 있었을 때의 경고.
+    ///
+    /// 장치 정지가 실패했더라도 파일이 확정됐으면 그 사실을 여기에 담고 `Ok`를 돌려준다 —
+    /// 이미 녹음된 것을 실패로 버리지 않는다.
+    pub warning: Option<String>,
 }
 
 /// 파일에 쓰는 쪽으로 흘러가는 것.
@@ -369,20 +374,16 @@ impl ActiveCapture {
             )
             .with_source_data_at_risk()),
         };
+
+        // 4. 파일 확정이 실패하면 어떤 경고도 의미가 없다 — 파일이 온전하지 않으므로 Err다.
         written?;
 
-        // 4. 끊긴 캡처도 그때까지의 소리는 파일에 남아 확정됐다. 어디에 남았는지 함께 알린다 —
-        //    실패했다는 이유로 이미 녹음된 것을 사용자에게서 숨기지 않는다 (INV-1).
-        if let Err(failure) = stopped {
-            return Err(Failure {
-                message: format!(
-                    "{} 그때까지 녹음된 파일은 남아 있다: {}",
-                    failure.message,
-                    output_path.display()
-                ),
-                ..failure
-            });
-        }
+        // 5. 파일은 온전하다. 장치 정지가 실패했더라도 이미 녹음된 것을 버리지 않는다 —
+        //    그 사실은 경고로 분리한다.
+        let warning = match stopped {
+            Err(failure) => Some(failure.message),
+            Ok(()) => None,
+        };
 
         let byte_size = file_size(&output_path)?;
         Ok(CaptureReport {
@@ -390,6 +391,7 @@ impl ActiveCapture {
             output_path,
             format,
             byte_size,
+            warning,
         })
     }
 }
@@ -898,5 +900,113 @@ mod tests {
         assert!(!failure.message.is_empty(), "보여줄 문장이 있어야 한다");
         assert!(failure.source_data_safe, "아무것도 쓰지 못했다");
         assert!(failure.detail.is_some());
+    }
+
+    /// stop_device가 실패해도 파일이 온전하면 경고와 함께 Ok를 돌려준다 (AC1).
+    #[test]
+    fn stop_device_err_with_writer_ok_produces_warning_instead_of_err() {
+        let temp = TempDir::new("device-warning");
+        let path = temp.path().join("capture.wav");
+        let format = CaptureFormat::pcm_16bit(16_000, 1);
+        let file = WavFile::create(&path, format).expect("파일을 만들 수 있어야 한다");
+
+        let (sender, receiver) = sync_channel::<Packet>(SAMPLE_QUEUE_CAPACITY);
+        sender
+            .send(Packet::Samples(vec![1_000; 512]))
+            .expect("보낼 수 있어야 한다");
+
+        let level = Arc::new(Mutex::new(InputLevel::new()));
+        let measured = Arc::clone(&level);
+        let writer = std::thread::spawn(move || drain(receiver, file, &measured));
+
+        let capture = ActiveCapture {
+            device_label: "test".to_string(),
+            format,
+            output_path: path,
+            stop_device: Box::new(|| {
+                Err(Failure::retryable(
+                    FailureKind::AudioDevice,
+                    "00:05 무렵 일부 구간이 유실됐을 수 있다",
+                ))
+            }),
+            packets: sender,
+            level: Arc::new(Mutex::new(InputLevel::new())),
+            writer,
+        };
+
+        let report = capture.stop().expect("경고와 함께 성공해야 한다");
+        assert!(report.warning.is_some(), "경고가 있어야 한다");
+        assert!(
+            report.warning.as_ref().unwrap().contains("00:05"),
+            "경과 시간이 포함되어야 한다: {:?}",
+            report.warning
+        );
+        assert!(report.byte_size > 0, "파일이 확정됐어야 한다");
+    }
+
+    /// writer가 실패하면 stop_device 결과와 무관하게 Err를 돌려준다 (AC2).
+    #[test]
+    fn writer_err_still_returns_err() {
+        let temp = TempDir::new("writer-err");
+        let path = temp.path().join("capture.wav");
+        let format = CaptureFormat::pcm_16bit(16_000, 1);
+        // stop이 file_size를 읽기 전에 실패하므로 파일이 없어도 된다.
+        // 그러나 writer가 Err를 돌려주는 경로를 만들기 위해 빈 파일을 둔다.
+        fs::write(&path, []).expect("사전 조건");
+
+        let (sender, receiver) = sync_channel::<Packet>(SAMPLE_QUEUE_CAPACITY);
+
+        let writer = std::thread::spawn(move || -> Result<(), Failure> {
+            for _ in receiver {}
+            Err(Failure::permanent(FailureKind::Storage, "파일 확정 실패").with_source_data_at_risk())
+        });
+
+        let capture = ActiveCapture {
+            device_label: "test".to_string(),
+            format,
+            output_path: path,
+            stop_device: Box::new(|| {
+                Err(Failure::retryable(FailureKind::AudioDevice, "장치 오류"))
+            }),
+            packets: sender,
+            level: Arc::new(Mutex::new(InputLevel::new())),
+            writer,
+        };
+
+        let err = capture
+            .stop()
+            .expect_err("writer 실패는 여전히 Err이어야 한다");
+        assert_eq!(err.kind, FailureKind::Storage, "writer의 실패가 올라온다");
+    }
+
+    /// 정상 정지에서는 경고가 없다.
+    #[test]
+    fn a_clean_stop_has_no_warning() {
+        let temp = TempDir::new("clean-stop");
+        let path = temp.path().join("capture.wav");
+        let format = CaptureFormat::pcm_16bit(16_000, 1);
+        let file = WavFile::create(&path, format).expect("파일");
+
+        let (sender, receiver) = sync_channel::<Packet>(SAMPLE_QUEUE_CAPACITY);
+        sender
+            .send(Packet::Samples(vec![1_000; 512]))
+            .expect("보낼 수 있어야 한다");
+
+        let level = Arc::new(Mutex::new(InputLevel::new()));
+        let measured = Arc::clone(&level);
+        let writer = std::thread::spawn(move || drain(receiver, file, &measured));
+
+        let capture = ActiveCapture {
+            device_label: "test".to_string(),
+            format,
+            output_path: path,
+            stop_device: Box::new(|| Ok(())),
+            packets: sender,
+            level: Arc::new(Mutex::new(InputLevel::new())),
+            writer,
+        };
+
+        let report = capture.stop().expect("성공해야 한다");
+        assert_eq!(report.warning, None, "정상 정지에는 경고가 없다");
     }
 }

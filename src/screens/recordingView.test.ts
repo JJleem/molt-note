@@ -127,6 +127,7 @@ const RECORD: Recording = {
   transcriptionStatus: 'none',
   aiStatus: 'none',
   notionStatus: 'none',
+  captureWarning: null,
 };
 
 const STOPPED: StoppedRecording = {
@@ -142,6 +143,7 @@ const STOPPED: StoppedRecording = {
     byteSize: 302_496_044,
     durationMs: 3_151_000,
     durationLabel: '52:31',
+    warning: null,
   },
 };
 
@@ -556,7 +558,12 @@ describe('제목과 저장된 녹음', () => {
     // 그래서 그 녹음은 Recordings 목록에도 있다.
     const view = savedRecording(editedTitle(recording(), '3DGS Study #04'), STOPPED);
 
-    expect(view.saved).toEqual({ id: RECORD.id, title: RECORD.title, durationLabel: '52:31' });
+    expect(view.saved).toEqual({
+      id: RECORD.id,
+      title: RECORD.title,
+      durationLabel: '52:31',
+      captureWarning: null,
+    });
     expect(view.busy).toBe(false);
     expect(view.trouble).toBeNull();
   });

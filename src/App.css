@@ -1119,6 +1119,27 @@ p.loading {
   color: var(--text);
 }
 
+/* 캡처 도중 문제가 있었지만 파일은 온전했을 때의 경고 배너 (TASK-107).
+   Rust가 만든 문장을 그대로 보여준다 — 정지 직후와 상세 화면 모두에 쓰인다. */
+
+.capture-warning {
+  max-width: 520px;
+  margin: var(--space-2) 0 var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--warning);
+  border-radius: var(--radius);
+  font-size: var(--type-body);
+  color: var(--warning);
+}
+
+/* 목록 항목의 경고 표시 (TASK-107).
+   제목 왼쪽에 놓인다 — 색으로만 말하지 않고 문자로도 말한다 (요구 12). */
+
+.list__warning-badge {
+  margin-right: var(--space-1);
+  color: var(--warning);
+}
+
 /*
  * 녹음 모드 (§22). **주 조작보다 작다** — 무엇을 녹음할지는 시작하기 전에 한 번 고르는
  * 값이고, 화면을 지배하는 것은 여전히 상태 · 경과 시간 · 네 버튼이다 (§19).

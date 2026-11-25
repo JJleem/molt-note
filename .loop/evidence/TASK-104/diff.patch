@@ -1,0 +1,4 @@
+Files changed:
+- src-tauri/src/log.rs (NEW) — write_event module with best-effort append, ISO-8601 timestamp, unit tests
+- src-tauri/src/lib.rs — added `pub mod log;`
+- src-tauri/src/commands/mod.rs — added `app_data_root()` getter on Storage; modified finish_recording to log stop failure, save_capture failure, and capture warning

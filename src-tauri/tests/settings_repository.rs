@@ -29,7 +29,25 @@ static COUNTER: AtomicUsize = AtomicUsize::new(0);
 ///
 /// 참조 무결성 절은 적지 않는다. 여기 없는 `recordings`를 가리키게 하려는 것이 아니라,
 /// **열을 더하는 migration이 대상을 찾을 수 있게 하는 것**이 이 fixture의 전부다.
-const LEGACY_DOMAIN_TABLES: &str = "CREATE TABLE IF NOT EXISTS notion_syncs (
+const LEGACY_DOMAIN_TABLES: &str = "CREATE TABLE IF NOT EXISTS recordings (
+         id                    TEXT    PRIMARY KEY,
+         title                 TEXT    NOT NULL,
+         created_at            TEXT    NOT NULL,
+         updated_at            TEXT    NOT NULL,
+         duration_ms           INTEGER NOT NULL,
+         audio_path            TEXT    NOT NULL,
+         audio_format          TEXT    NOT NULL,
+         microphone            TEXT,
+         current_transcript_id TEXT,
+         transcription_status  TEXT    NOT NULL
+             CHECK (transcription_status IN ('none','pending','running','done','failed')),
+         ai_status             TEXT    NOT NULL
+             CHECK (ai_status IN ('none','pending','running','done','failed')),
+         notion_status         TEXT    NOT NULL
+             CHECK (notion_status IN ('none','pending','running','done','failed'))
+     );
+
+     CREATE TABLE IF NOT EXISTS notion_syncs (
          recording_id TEXT PRIMARY KEY,
          page_id      TEXT,
          synced_at    TEXT,

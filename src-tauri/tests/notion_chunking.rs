@@ -55,6 +55,7 @@ fn recording(duration_ms: i64) -> Recording {
         transcription_status: ProcessingStatus::Done,
         ai_status: ProcessingStatus::None,
         notion_status: ProcessingStatus::None,
+        capture_warning: None,
     }
 }
 

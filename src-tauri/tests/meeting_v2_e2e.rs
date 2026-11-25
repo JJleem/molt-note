@@ -371,6 +371,7 @@ fn recording() -> Recording {
         transcription_status: ProcessingStatus::Done,
         ai_status: ProcessingStatus::Done,
         notion_status: ProcessingStatus::None,
+        capture_warning: None,
     }
 }
 

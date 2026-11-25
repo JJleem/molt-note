@@ -52,6 +52,8 @@ pub struct RecordingPayload {
     pub transcription_status: String,
     pub ai_status: String,
     pub notion_status: String,
+    /// 캡처 도중 문제가 있었지만 파일은 온전했을 때의 경고. 대부분은 `None`이다.
+    pub capture_warning: Option<String>,
 }
 
 impl From<RecordingView> for RecordingPayload {
@@ -76,6 +78,7 @@ impl From<RecordingView> for RecordingPayload {
             transcription_status: recording.transcription_status.as_str().to_string(),
             ai_status: recording.ai_status.as_str().to_string(),
             notion_status: recording.notion_status.as_str().to_string(),
+            capture_warning: recording.capture_warning,
         }
     }
 }
@@ -94,6 +97,9 @@ pub struct NewRecording {
     /// 녹음에 쓴 입력 장치. 알 수 없으면 없어도 된다.
     #[serde(default)]
     pub microphone: Option<String>,
+    /// 캡처 도중 문제가 있었지만 파일은 온전했을 때의 경고.
+    #[serde(default)]
+    pub capture_warning: Option<String>,
 }
 
 impl NewRecording {
@@ -113,6 +119,7 @@ impl NewRecording {
             transcription_status: ProcessingStatus::None,
             ai_status: ProcessingStatus::None,
             notion_status: ProcessingStatus::None,
+            capture_warning: self.capture_warning,
         }
     }
 }
@@ -172,6 +179,8 @@ pub struct CaptureReportPayload {
     pub duration_ms: i64,
     /// Rust가 만든 표시용 길이(예: `52:31`).
     pub duration_label: String,
+    /// 파일은 온전하지만 캡처 도중에 문제가 있었을 때의 경고.
+    pub warning: Option<String>,
 }
 
 impl CaptureReportPayload {
@@ -192,6 +201,7 @@ impl CaptureReportPayload {
             byte_size: report.byte_size,
             duration_ms: summary.duration_ms,
             duration_label: summary.duration_label,
+            warning: report.warning,
         }
     }
 }
@@ -217,6 +227,8 @@ pub struct StoppedRecordingPayload {
     pub recording: RecordingPayload,
     /// 방금 확정된 파일에 대한 사실.
     pub capture: CaptureReportPayload,
+    /// 파일은 온전하지만 캡처 도중에 문제가 있었을 때의 경고. capture의 warning을 그대로 전파한다.
+    pub warning: Option<String>,
 }
 
 /// **레코드는 있는데 오디오 파일이 없는** 녹음 하나 (Phase 2B 요구사항 6).

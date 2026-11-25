@@ -77,6 +77,7 @@ fn save(app_data_dir: &AppDataDirectory, title: &str) -> Recording {
         transcription_status: ProcessingStatus::None,
         ai_status: ProcessingStatus::None,
         notion_status: ProcessingStatus::None,
+        capture_warning: None,
     };
     store::insert_recording(&connection, &recording).expect("저장할 수 있어야 한다");
     recording

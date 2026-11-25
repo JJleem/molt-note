@@ -1,0 +1,45 @@
+# 파일 로그 모듈을 만든다
+# Runtime이 PLAN-20261116T005546Z 승인 시점에 생성했다 (proposal P4). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-104
+status: DONE
+
+request: |-
+  src-tauri/src/log.rs(또는 적절한 위치)에 앱 데이터 디렉터리의 로그 파일에 append하는 모듈을 만든다. (1) pub fn write_event(app_data_dir: &Path, event: &str) — 시각(ISO-8601 UTC)과 event 문자열을 한 줄로 append한다. 파일이 없으면 만든다. 쓰지 못해도 앱을 죽이지 않는다(best-effort). (2) 오디오·전사 내용은 절대 로그에 쓰지 않는다(INV-6 취지). (3) finish_recording에서: 정지 실패 시 실패 내용을, 경고가 있을 때 경고 내용을, save_capture 실패 시 그 사실을 로그에 남긴다. (4) 로그 파일 이름은 molt-note-events.log로 한다.
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-102
+
+stop_condition:
+  gates: [build, test]
+  requires_verifier: true
+  max_consecutive_failures: 3
+
+acceptance_criteria:
+  - id: AC1
+    description: |-
+      write_event가 파일에 시각과 메시지를 append한다
+    verification:
+      type: gate
+      ref: test
+  - id: AC2
+    description: |-
+      쓰지 못해도 panic하지 않는다
+    verification:
+      type: gate
+      ref: test
+  - id: AC3
+    description: |-
+      finish_recording의 실패·경고·DB저장실패 세 경우에 로그가 남는다
+    verification:
+      type: verifier
+      instruction: |-
+        finish_recording 코드에서 세 경우 각각에 write_event 호출이 있는지 확인한다
+
+evidence: []
+
+failure_memo: []

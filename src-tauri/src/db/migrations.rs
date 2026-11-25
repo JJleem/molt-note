@@ -309,6 +309,18 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "add_transcription_duration",
         sql: "ALTER TABLE transcripts ADD COLUMN transcription_ms INTEGER;",
     },
+    // 캡처 도중 문제가 있었지만 파일은 온전했을 때의 **경고**를 녹음 레코드에 남긴다
+    // (`phase-prompt/05.11`). version 2의 `recordings`를 고치지 않고 **열을 더한다** —
+    // 그 스키마로 저장된 사용자 DB가 이미 있을 수 있고, 그 행의 값은 그대로 남아야 한다.
+    //
+    // **NOT NULL도 두지 않는다.** 이미 있는 행의 새 열은 NULL이며, 그것은 '경고 없음'이라는
+    // 정상 상태다 — 대부분의 녹음이 그렇다. `DEFAULT NULL`은 SQLite의 기본 동작을 명시한
+    // 것이고 이미 있는 행에도 안전하다.
+    Migration {
+        version: 11,
+        name: "add_capture_warning",
+        sql: "ALTER TABLE recordings ADD COLUMN capture_warning TEXT DEFAULT NULL;",
+    },
 ];
 
 /// 코드가 알고 있는 최신 스키마 버전. migration이 없으면 0이다.
@@ -434,6 +446,7 @@ mod tests {
                 (8, "add_notion_sync_progress"),
                 (9, "add_transcription_language"),
                 (10, "add_transcription_duration"),
+                (11, "add_capture_warning"),
             ]
         );
     }
@@ -447,7 +460,7 @@ mod tests {
             .find(|migration| migration.name == "create_domain_tables")
             .expect("domain 테이블을 만드는 migration이 있어야 한다");
 
-        for column in ["sent_chunks", "total_chunks", "content_fingerprint"] {
+        for column in ["sent_chunks", "total_chunks", "content_fingerprint", "capture_warning"] {
             assert!(
                 !create_domain_tables.sql.contains(column),
                 "나중에 생긴 열 {column}이 이미 적용된 migration 안에 들어가 있다"
@@ -558,13 +571,12 @@ mod tests {
             vec!["add_transcription_duration"],
             "전사 소요 시간 열은 그것을 더한 migration 하나에만 있어야 한다"
         );
-        assert_eq!(
+        assert!(
             MIGRATIONS
-                .last()
-                .expect("migration이 최소 하나 있어야 한다")
-                .name,
-            "add_transcription_duration",
-            "새 migration은 언제나 목록 끝에 붙는다"
+                .iter()
+                .position(|migration| migration.name == "add_transcription_duration")
+                .is_some(),
+            "전사 소요 시간을 더하는 migration이 있어야 한다"
         );
     }
 

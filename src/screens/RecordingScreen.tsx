@@ -478,6 +478,11 @@ export function RecordingScreen({ navigate }: ScreenProps) {
           <p className="empty">
             {view.saved.title} · {view.saved.durationLabel}
           </p>
+          {view.saved.captureWarning !== null && (
+            <p className="capture-warning" role="alert">
+              {view.saved.captureWarning}
+            </p>
+          )}
           <button
             type="button"
             className="btn btn--secondary"

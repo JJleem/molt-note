@@ -876,6 +876,12 @@ export function RecordingDetailScreen({ route, goBack }: ScreenProps) {
         {recording.recordedAtLabel} · {recording.durationLabel}
       </p>
 
+      {recording.captureWarning !== null && (
+        <p className="capture-warning" role="alert">
+          {recording.captureWarning}
+        </p>
+      )}
+
       {view.kind === 'playable' ? (
         <div className="detail__player">
           {/* 파일은 asset protocol로 흐른다. 주소를 만드는 것은 ipc 모듈의 일이다. */}

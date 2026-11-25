@@ -18,6 +18,7 @@
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::{Duration, Instant};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
@@ -26,10 +27,16 @@ use crate::audio::devices::{catalog, selection_keys, ObservedInputDevice};
 use crate::audio::system_devices::name_of;
 use crate::domain::{Failure, FailureKind};
 
-/// 캡처 도중에 일어난 사건. 정지할 때 사용자에게 전달된다.
+/// 캡처 도중에 일어난 사건을 담는 슬롯.
 ///
 /// 오디오 콜백은 실패를 돌려줄 곳이 없다 — 그래서 여기에 적어 두고 정지 시점에 꺼낸다.
-type Interrupted = Arc<Mutex<Option<Failure>>>;
+/// 녹음 시작 시각도 함께 두어 사건 발생의 경과 시간을 구한다.
+struct InterruptSlot {
+    started_at: Instant,
+    event: Option<(Failure, Duration)>,
+}
+
+type Interrupted = Arc<Mutex<InterruptSlot>>;
 
 /// 이 기기의 실제 입력 장치를 `cpal`로 연다.
 #[derive(Debug, Default, Clone, Copy)]
@@ -37,7 +44,10 @@ pub struct SystemSampleSource;
 
 impl SampleSource for SystemSampleSource {
     fn open(&self, device_key: &str, samples: SampleSink) -> Result<OpenCapture, Failure> {
-        let interrupted: Interrupted = Arc::new(Mutex::new(None));
+        let interrupted: Interrupted = Arc::new(Mutex::new(InterruptSlot {
+            started_at: Instant::now(),
+            event: None,
+        }));
 
         // 스트림을 소유할 스레드와 주고받는 두 통로: 열린 결과와 정지 신호.
         let (ready_sender, ready) = mpsc::channel::<Result<(String, CaptureFormat), Failure>>();
@@ -100,8 +110,17 @@ impl SampleSource for SystemSampleSource {
                     ));
                 }
                 match interrupted.lock() {
-                    Ok(mut slot) => match slot.take() {
-                        Some(failure) => Err(failure),
+                    Ok(mut slot) => match slot.event.take() {
+                        Some((failure, elapsed)) => {
+                            let hhmm = format_elapsed_hhmm(elapsed);
+                            Err(Failure {
+                                message: format!("{hhmm} 무렵 일부 구간이 유실됐을 수 있다"),
+                                detail: failure.detail.or(Some(failure.message)),
+                                kind: failure.kind,
+                                source_data_safe: failure.source_data_safe,
+                                retryable: failure.retryable,
+                            })
+                        }
                         None => Ok(()),
                     },
                     Err(_) => Err(Failure::retryable(
@@ -281,12 +300,23 @@ fn deliver(samples: &SampleSink, interrupted: &Interrupted, chunk: Vec<i16>) {
 
 /// 캡처 도중의 사건을 적어 둔다. **먼저 일어난 것 하나만 남긴다** —
 /// 같은 사건이 콜백마다 반복돼도 사용자에게 필요한 것은 한 문장이다.
+///
+/// 녹음 시작 기준 경과 시간도 함께 기록한다.
 fn note(interrupted: &Interrupted, failure: Failure) {
     if let Ok(mut slot) = interrupted.lock() {
-        if slot.is_none() {
-            *slot = Some(failure);
+        if slot.event.is_none() {
+            let elapsed = slot.started_at.elapsed();
+            slot.event = Some((failure, elapsed));
         }
     }
+}
+
+/// 경과 시간을 `HH:MM` 형식으로.
+fn format_elapsed_hhmm(duration: Duration) -> String {
+    let total_secs = duration.as_secs();
+    let hours = total_secs / 3600;
+    let minutes = (total_secs % 3600) / 60;
+    format!("{hours:02}:{minutes:02}")
 }
 
 /// 32-bit 실수 샘플 하나를 16-bit PCM으로. 범위를 벗어난 값은 잘라 낸다.
@@ -308,6 +338,14 @@ mod tests {
         assert_eq!(to_i16(0.0), 0);
         assert_eq!(to_i16(1.0), i16::MAX);
         assert_eq!(to_i16(-1.0), -i16::MAX);
+    }
+
+    #[test]
+    fn elapsed_time_formats_as_zero_padded_hours_and_minutes() {
+        assert_eq!(format_elapsed_hhmm(Duration::from_secs(0)), "00:00");
+        assert_eq!(format_elapsed_hhmm(Duration::from_secs(5 * 60 + 30)), "00:05");
+        assert_eq!(format_elapsed_hhmm(Duration::from_secs(3600 + 120)), "01:02");
+        assert_eq!(format_elapsed_hhmm(Duration::from_secs(36_000)), "10:00");
     }
 
     #[test]

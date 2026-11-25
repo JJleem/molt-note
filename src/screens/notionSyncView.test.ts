@@ -53,6 +53,7 @@ function recording(overrides: Partial<Recording> = {}): Recording {
     transcriptionStatus: 'done',
     aiStatus: 'none',
     notionStatus: 'none',
+    captureWarning: null,
     ...overrides,
   };
 }

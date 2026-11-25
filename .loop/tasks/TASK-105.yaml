@@ -1,0 +1,46 @@
+# 고아 입양의 created_at을 파일 이름 시각에서 가져온다
+# Runtime이 PLAN-20261116T005546Z 승인 시점에 생성했다 (proposal P5). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-105
+status: DONE
+
+request: |-
+  Storage::adopt_orphaned_recordings에서 created_at을 현재 시각(store::now) 대신 파일 이름에서 추출한 시각으로 쓴다. (1) capture-<unix초>.wav 패턴에서 unix 초를 파싱하는 순수 함수를 만든다(예: fn parse_capture_timestamp(filename: &str) -> Option<u64>). (2) 파싱 성공 시 그 unix 초를 ISO-8601 UTC 문자열로 변환하여 created_at으로 쓴다. (3) 파싱 실패 시 기존처럼 현재 시각을 쓴다(되살리지 않는 것보다 낫다). (4) Storage::insert에 created_at을 override할 수 있는 경로를 만들거나, adopt 전용 insert를 만든다.
+
+execution:
+  role: impl
+
+stop_condition:
+  gates: [build, test]
+  requires_verifier: false
+  max_consecutive_failures: 3
+
+acceptance_criteria:
+  - id: AC1
+    description: |-
+      parse_capture_timestamp이 capture-1794535932.wav에서 1794535932를 돌려준다
+    verification:
+      type: gate
+      ref: test
+  - id: AC2
+    description: |-
+      파일 이름이 패턴에 맞지 않으면 None이다
+    verification:
+      type: gate
+      ref: test
+  - id: AC3
+    description: |-
+      입양된 레코드의 created_at이 파일 이름의 시각이다(현재 시각이 아니다)
+    verification:
+      type: gate
+      ref: test
+  - id: AC4
+    description: |-
+      build와 기존 테스트가 통과한다
+    verification:
+      type: gate
+      ref: build
+
+evidence: []
+
+failure_memo: []

@@ -76,6 +76,8 @@ export interface SavedRecording {
   readonly title: string;
   /** Rust가 만든 표시용 길이. 화면은 이 값을 그대로 쓴다. */
   readonly durationLabel: string;
+  /** 캡처 도중 문제가 있었지만 파일은 온전했을 때의 경고. 대부분은 `null`이다. */
+  readonly captureWarning: string | null;
 }
 
 /** 화면이 backend에 보내는 요청. 실패가 어느 요청의 것인지 구분하는 데 쓴다. */
@@ -568,6 +570,7 @@ export function savedRecording(view: RecordingView, stopped: StoppedRecording): 
       title: stopped.recording.title,
       // Rust가 만든 값 그대로다. 여기서 길이를 다시 계산하지 않는다.
       durationLabel: stopped.recording.durationLabel,
+      captureWarning: stopped.warning ?? null,
     },
   };
 }

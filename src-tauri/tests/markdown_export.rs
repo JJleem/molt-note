@@ -115,6 +115,7 @@ impl Fixture {
             transcription_status: ProcessingStatus::Done,
             ai_status: ProcessingStatus::None,
             notion_status: ProcessingStatus::None,
+            capture_warning: None,
         };
         store::insert_recording(&self.connection(), &recording).expect("사전 조건: 녹음을 저장한다");
 

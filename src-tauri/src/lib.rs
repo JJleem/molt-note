@@ -4,6 +4,7 @@ pub mod commands;
 pub mod db;
 pub mod domain;
 pub mod export;
+pub mod log;
 pub mod net;
 pub mod notion;
 pub mod platform;

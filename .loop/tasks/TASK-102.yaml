@@ -1,0 +1,45 @@
+# Recorder::stop과 finish_recording이 경고를 전파한다
+# Runtime이 PLAN-20261116T005546Z 승인 시점에 생성했다 (proposal P2). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-102
+status: DONE
+
+request: |-
+  commands::Recorder::stop을 바꾼다. (1) capture.stop()이 Ok(report)를 돌려주면 report.warning이 있든 없든 finalized::verify를 진행한다. verify도 통과하면 CaptureReportPayload에 warning을 포함해 Ok를 돌려준다. (2) CaptureReportPayload에 warning: Option<String> 필드를 추가한다. (3) finish_recording에서 recorder.stop()이 Ok이면 save_capture로 진행하고, StoppedRecordingPayload에도 warning: Option<String>을 추가한다. capture의 warning을 그대로 전파한다. (4) frontend IPC 타입(src/ipc/types.ts)의 StoppedRecording과 CaptureReport에 readonly warning?: string | null 필드를 추가한다.
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-101
+
+stop_condition:
+  gates: [build, lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 3
+
+acceptance_criteria:
+  - id: AC1
+    description: |-
+      CaptureReportPayload와 StoppedRecordingPayload에 warning 필드가 있고 직렬화된다
+    verification:
+      type: gate
+      ref: build
+  - id: AC2
+    description: |-
+      capture에 warning이 있어도 finish_recording이 레코드를 저장하고 Ok를 돌려준다
+    verification:
+      type: verifier
+      instruction: |-
+        finish_recording의 코드 경로를 읽어 warning 존재 시에도 save_capture가 호출되는지 확인한다
+  - id: AC3
+    description: |-
+      frontend 타입에 warning 필드가 추가됐다
+    verification:
+      type: gate
+      ref: lint
+
+evidence: []
+
+failure_memo: []

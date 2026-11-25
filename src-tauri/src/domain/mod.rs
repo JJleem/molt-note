@@ -169,6 +169,8 @@ pub struct Recording {
     pub transcription_status: ProcessingStatus,
     pub ai_status: ProcessingStatus,
     pub notion_status: ProcessingStatus,
+    /// 캡처 도중 문제가 있었지만 파일은 온전했을 때의 경고. 대부분의 녹음에서 `None`이다.
+    pub capture_warning: Option<String>,
 }
 
 /// 조회된 Recording 하나 (§5 A · C 화면이 그대로 그릴 수 있는 형태).
@@ -352,6 +354,7 @@ mod tests {
             transcription_status: ProcessingStatus::None,
             ai_status: ProcessingStatus::None,
             notion_status: ProcessingStatus::None,
+            capture_warning: None,
         };
 
         let view = RecordingView::from(recording.clone());

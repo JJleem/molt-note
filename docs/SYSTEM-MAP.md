@@ -3,7 +3,7 @@
 이 문서는 프로젝트의 **최상위 지도**다. 상세 구현 문서가 아니라 진입점이다.
 상세는 §8의 문서로 넘긴다.
 
-> **현재 상태: Phase 5.10까지 engineering DONE. 그 뒤 2026-09-08의 변경들은 Runtime을
+> **현재 상태: Phase 5.11까지 engineering DONE. 그 뒤 2026-09-08의 변경들은 Runtime을
 > 거치지 않았다 (§5.9).**
 >
 > ⚠️ **2026-09-08은 이 저장소가 Runtime 밖에서 하루를 보낸 날이다.** Phase 5.9의 Plan은
@@ -98,6 +98,9 @@
 >   끝났는지가 그 기록에 남아 있다. **Human Review는 실행되지 않았다**
 > - **2026-11-13 Phase 5.10 engineering DONE** — Meeting v2 schema · Transcript 포함 선택 반영
 >   (§9.5 · §11). `docs/MEETING-NOTE-FORMAT.md` 상태를 구현됨으로 갱신
+> - **2026-11-25 Phase 5.11 engineering DONE** — 정지가 확정된 녹음을 버리지 않는다 · 캡처 경고
+>   영속(migration 11) · 이벤트 로그 · 입양 시각 = 파일 이름. 2026-11-16 실제 회의(75분)에서 경고와
+>   함께 저장된 것을 확인했다 (§5)
 
 ---
 
@@ -924,6 +927,24 @@ content schema v2: `meetingTitle` · `meetingKind` · `attendees` · `reliabilit
 
 내보내기(§11)와 Notion 전송: AI 노트가 있으면 Transcript 포함 여부를 고른다. Meeting 노트의
 기본값은 넣지 않는 것이다. AI 노트가 없으면 Transcript는 언제나 들어간다 (INV-8).
+
+### Phase 5.11 — Stop Never Loses a Recording · 2026-11-25 · **engineering DONE · 실제 회의 1회 확인**
+
+**파일 확정과 검증이 성공하면 정지는 성공이다.** 녹음 도중의 버퍼 넘침·스트림 오류는 더 이상
+정지를 실패로 만들지 않고 **경고**로 분리된다 → 레코드는 저장되고 경고는 `recordings.capture_warning`
+(migration 11, nullable · additive)에 남아 녹음 화면에 보인다. 파일 확정이 실패하면 지금처럼 레코드가
+없고 경로를 담은 실패가 온다.
+
+- 이벤트 로그: 앱 데이터 디렉터리의 `molt-note-events.log` (best-effort · 오디오·전사 내용 없음, INV-6)
+- 고아 입양의 `created_at`·제목 = 파일 이름 `capture-<unix초>`의 시각 (파싱 실패면 현재 시각)
+- 테스트: `src-tauri/tests/capture_warning.rs` — 큐 넘침 / 스트림 오류 / 정상 / 확정 실패
+
+**실제 확인 (2026-11-16):** 75분 회의가 경고("00:00 무렵 일부 구간이 유실됐을 수 있다")와 함께
+저장됐다. 5.11 전에는 이 경우 녹음이 목록에서 사라졌다. 경고의 원인(큐 넘침인지 스트림 오류인지)은
+로그에 남지 않는다 — 다음 Phase에서 다룬다.
+
+Plan `PLAN-20261116T005546Z` · 7 Task DONE (TASK-105는 gate-only 계약이라 사람의 `transition`,
+`LOOP-RUNTIME-FIELD-NOTES` OBS-030).
 
 ### Phase 6 — Cross-platform Validation & Hardening · **PLANNED**
 ---

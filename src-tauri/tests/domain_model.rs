@@ -63,6 +63,7 @@ fn recording(id: &str) -> Recording {
         transcription_status: ProcessingStatus::None,
         ai_status: ProcessingStatus::None,
         notion_status: ProcessingStatus::None,
+        capture_warning: None,
     }
 }
 
@@ -139,6 +140,7 @@ fn the_four_concepts_live_in_four_separate_tables_with_the_fields_section_7_list
             "transcription_status",
             "ai_status",
             "notion_status",
+            "capture_warning",
         ]
     );
     // 앞의 일곱이 §7이 요구하는 전부이고, 마지막 하나는 **전사 한 건에 걸린 시간**이다

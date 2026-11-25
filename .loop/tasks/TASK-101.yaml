@@ -1,0 +1,53 @@
+# capture::stop이 interrupted를 경고로 분리한다
+# Runtime이 PLAN-20261116T005546Z 승인 시점에 생성했다 (proposal P1). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-101
+status: DONE
+
+request: |-
+  capture::ActiveCapture::stop에서 stop_device()가 Err를 돌려줬을 때 즉시 return Err하는 현재 경로를 바꾼다. (1) writer.join()이 Ok이고 파일이 온전하면, stop_device의 Err는 경고(warning)로 분리한다. CaptureReport에 warning: Option<String> 필드를 추가하고 그 값을 채운다. (2) writer.join()이 Err이면 지금처럼 Err를 돌려준다(파일 확정 실패). (3) system_capture의 interrupted 슬롯에 사건 발생 시각(녹음 시작 기준 경과 시간)을 함께 남기도록 Interrupted 타입을 (Option<Failure>, Option<Duration>)으로 확장한다. note() 호출 시 Instant::now()와 녹음 시작 Instant의 차를 기록한다. 경고 메시지에 'HH:MM 무렵 일부 구간이 유실됐을 수 있다' 형태로 경과 시간을 포함한다. (4) meeting_capture의 Stopper::stop에서 dropped_frames > 0일 때도 같은 패턴으로 경고를 만든다(Err 대신 CaptureReport의 warning에 넣는다). 이를 위해 MeetingCaptureSource::open이 SampleSource::open의 반환을 통해 경고를 전달할 수 있도록 한다. capture.rs의 start()가 경고를 전파할 수 있도록 구조를 조정한다.
+
+execution:
+  role: impl
+
+stop_condition:
+  gates: [build, test]
+  requires_verifier: true
+  max_consecutive_failures: 3
+
+acceptance_criteria:
+  - id: AC1
+    description: |-
+      CaptureReport에 warning: Option<String> 필드가 있고, stop_device Err + writer Ok일 때 warning이 채워지며 Ok(CaptureReport)를 돌려준다
+    verification:
+      type: gate
+      ref: test
+  - id: AC2
+    description: |-
+      writer.join()이 Err이면 여전히 Err(Failure)를 돌려준다
+    verification:
+      type: gate
+      ref: test
+  - id: AC3
+    description: |-
+      경고 메시지에 녹음 시작 기준 경과 시간이 포함된다
+    verification:
+      type: gate
+      ref: test
+  - id: AC4
+    description: |-
+      meeting_capture의 dropped_frames > 0 경로도 Err 대신 warning으로 전환된다
+    verification:
+      type: verifier
+      instruction: |-
+        meeting_capture.rs의 Stopper::stop에서 dropped > 0일 때 Err를 돌려주지 않고 경고로 전환되는 경로를 코드에서 확인한다
+  - id: AC5
+    description: |-
+      build와 기존 테스트가 통과한다
+    verification:
+      type: gate
+      ref: build
+
+evidence: []
+
+failure_memo: []

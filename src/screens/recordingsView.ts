@@ -35,6 +35,8 @@ export interface RecordingListItem {
   /** Rust가 만든 값 그대로. */
   readonly durationLabel: string;
   readonly statuses: readonly [RecordingStatusBadge, RecordingStatusBadge, RecordingStatusBadge];
+  /** 캡처 도중 문제가 있었을 때의 경고. 대부분은 `null`이다. */
+  readonly captureWarning: string | null;
 }
 
 /**
@@ -101,6 +103,7 @@ function toListItem(recording: Recording, options: RecordedAtOptions): Recording
       statusBadge('AI Note', recording.aiStatus),
       statusBadge('Notion', recording.notionStatus),
     ],
+    captureWarning: recording.captureWarning,
   };
 }
 

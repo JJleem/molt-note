@@ -3166,3 +3166,163 @@ OBS-026 — 429(사용 한도)가 `PROCESS_CRASH`로 분류됐다. **provider �
 ### Status
 
 **OPEN** — 1회 (OBS-026과 같은 계열로는 2회).
+
+---
+
+## OBS-030 — Planner가 `requires_verifier: false`인 Task를 만들었고, Runtime은 그것을 끝낼 길이 없었다 (gate-only 교착)
+
+- **Date**: 2026-11-16 (사람의 처리 2026-11-25)
+- **Phase / Goal**: Phase 5.11 — Stop Never Loses a Recording (`phase-prompt/05.11-stop-never-loses-a-recording.md`)
+- **Plan ID**: `PLAN-20261116T005546Z` · **Plan execution**: `PLANEXEC-20261116T013412Z`
+- **Task / Run / Execution**: `TASK-105` · `RUN-20261116T012956Z-TASK-105` · `EXEC-20261116T012956Z-TASK-105`
+- **Runtime stage**: stop (Gate 뒤)
+- **Command**: `loopctl execute-plan PLAN-20261116T005546Z`
+
+### 관측된 사실
+
+Planner가 만든 Task 계약:
+
+```text
+stop_condition: gates [build, test] · requires_verifier: false
+acceptance_criteria: AC1~AC4 모두 verification.type gate
+```
+
+`execute-plan`의 결과:
+
+```text
+[Worker] success -> REVIEW
+[Gate] PASS (build PASS, test PASS)
+stop NEEDS_HUMAN — "TASK-105 passed its gates but requires no independent verification;
+                    gate-only completion is not implemented."
+Plan Result: NEEDS_HUMAN · stop_reason TASK_STOPPED
+```
+
+지원되는 회복 경로로 Verifier를 한 번 돌리려 했다:
+
+```text
+$ loopctl verify TASK-105 --timeout 1800
+Verifier cannot run for RUN-20261116T012956Z-TASK-105:
+  TASK-105 does not require independent verification
+  (stop_condition.requires_verifier is false and no verifier-type criteria exist)
+```
+
+**`execute`는 Gate만으로 끝내지 못하고, `verify`는 Verifier가 필요 없다며 거부한다.**
+Runtime 안에 이 Task를 DONE으로 보낼 경로가 없다. 남은 것은 사람의 `transition TASK-105 DONE`뿐이었다.
+
+운영자는 diff를 직접 읽었다(파싱 함수·입양 경로·통합 테스트 AC3 확인). 사용자 승인 뒤
+`loopctl transition TASK-105 DONE`으로 끝냈다.
+
+TASK-105를 기다리지 않는 TASK-106 · TASK-107은 `execute`로 따로 돌려 DONE이 됐다 (수동 fallback).
+`execute-plan`을 다시 부르면 REVIEW 상태의 TASK-105에서 같은 정지를 반복할 것으로 보여서다 (미검증).
+
+### 기대한 동작
+
+둘 중 하나:
+
+- Planner가 Runtime이 끝낼 수 없는 계약(`requires_verifier: false`)을 만들지 않는다 — Plan
+  Validation이 이것을 거른다.
+- 또는 Runtime이 gate-only 계약을 Gate PASS로 끝낸다.
+
+### Impact
+
+- Plan 실행이 7개 중 5번째에서 멈췄다. 사람의 판단과 수동 실행 두 번, `transition` 한 번이 필요했다.
+- 사용자 승인을 기다리는 동안 그 Task가 REVIEW에 머물러 **저장소 전체가 9일간 커밋되지 못했다**
+  (Gate subject를 바꾸지 않으려고 문서·현장 기록도 미뤘다).
+- Plan Validation이 PASS였다 — 끝낼 수 없는 Task를 통과시켰다.
+
+### Possible improvement (미검증 · 제안일 뿐이다)
+
+1. Plan Validation이 `requires_verifier: false`를 거절하거나 경고한다 (현재 Runtime이 지원하지 않는 계약).
+2. 또는 Runtime V1에서 gate-only 완료를 구현한다.
+
+**Field-Test Principle에 따라 지금 Runtime을 고치지 않는다.**
+
+### Status
+
+**OPEN** — 1회.
+
+---
+
+## OBS-031 — 문서만 바꾼 커밋이 승인 대기 중인 Plan을 무효로 만들었다
+
+- **Date**: 2026-11-16
+- **Phase / Goal**: Phase 5.11
+- **Plan ID**: `PLAN-20261113T093115Z` (무효) → `PLAN-20261116T005546Z` (재생성)
+- **Command**: `loopctl plan-approve PLAN-20261113T093115Z`
+
+### 관측된 사실
+
+```text
+Plan approval refused.
+  repository state changed since this plan was created.
+  Create a fresh plan against the current project state.
+```
+
+Plan 생성 뒤 들어간 커밋은 문서뿐이었다 — `docs/LOOP-RUNTIME-FIELD-NOTES.md`(OBS-029),
+`docs/HANDOFF-2026-11-13.md`. 제품 소스·테스트는 바뀌지 않았다.
+
+다시 만든 Plan은 같은 범위였고 Task 분할만 달랐다 (7 → 7, 문서 Task가 빠지고 경고 전파 Task가 생겼다).
+비용 $1.57 · 몇 분.
+
+### 기대한 동작 / Impact
+
+**fail-closed는 맞는 동작이다.** 다만 운영 규칙("Plan 승인 전 인수인계 문서를 커밋한다")과
+결합하면 승인 대기 Plan은 거의 언제나 무효가 된다. 사용자가 검토한 Plan과 실제 승인한 Plan이
+달라진다 — 이번에는 범위가 같았지만 Task 분할은 사용자가 보지 않은 것이었다.
+
+### Possible improvement (미검증)
+
+- 무효 사유에 바뀐 경로를 보여 준다 (문서뿐인지 사람이 바로 판단할 수 있게).
+- 운영자 쪽: 승인 대기 Plan이 있으면 인수인계 문서를 커밋하지 말고 Plan 재생성을 인수인계에 적는다.
+
+### Status
+
+**OPEN** — 1회.
+
+---
+
+## OBS-032 — 화면 Task의 Gate에 `test`가 빠져 있어, 기존 테스트 2개를 깨뜨린 변경이 Gate·Verifier PASS로 DONE이 됐다
+
+- **Date**: 2026-11-16 (발견 2026-11-25)
+- **Phase / Goal**: Phase 5.11
+- **Plan ID**: `PLAN-20261116T005546Z` · **Task / Execution**: `TASK-107` · `EXEC-20261116T013948Z-TASK-107`
+- **Command**: `loopctl execute TASK-107`
+
+### 관측된 사실
+
+Planner가 만든 계약: `stop_condition.gates: [build, lint]` · `requires_verifier: true`.
+TASK-107은 `SavedRecording`에 `captureWarning`을 더했다. Gate(build · lint) PASS · Verifier PASS → DONE.
+
+Phase 마무리 때 운영자가 `npm run test`를 돌렸다:
+
+```text
+Tests  2 failed | 699 passed (701)
+  coreWithoutAi.test.ts   정지가 성공하면 저장된 녹음이 그대로 화면에 온다 (R-002)
+  recordingView.test.ts   정지가 성공하면 저장된 녹음이 화면에 남는다
+  expected { id, …(3) } to deeply equal { id, …(2) }
+```
+
+두 테스트는 저장 결과를 필드 단위로 비교한다 — 새 필드를 기대값에 넣지 않았다. `npm run test`는
+`vitest run && cargo test`라서 **vitest가 실패하면 cargo test는 돌지도 않는다.**
+
+운영자가 기대값 두 곳에 `captureWarning: null`을 더해 고쳤다 (제품 동작은 바꾸지 않음).
+그 뒤 vitest 701 · cargo test 전부 통과.
+
+### 기대한 동작
+
+제품 소스(`src/`)를 바꾸는 Task의 Gate에는 `test`가 들어간다. Verifier가 테스트를 돌리지 않았거나,
+돌렸다면 실패를 놓쳤다 (어느 쪽인지 미확인).
+
+### Impact
+
+- 거짓 PASS 1회. Plan 전체가 DONE으로 보였지만 저장소 Gate는 깨져 있었다.
+- 운영자가 마지막에 전체 Gate를 다시 돌리지 않았다면 깨진 상태로 커밋됐다.
+
+### Possible improvement (미검증)
+
+1. Plan Validation이 소스를 바꾸는 Task에서 `test` Gate가 빠진 계약을 경고한다.
+2. Plan 실행 끝에 전체 Gate를 한 번 더 돌린다 (Task 단위 Gate의 합이 저장소 Gate가 아니다).
+
+### Status
+
+**OPEN** — 1회. OBS-030과 함께, 이번 Plan에서 Planner의 `stop_condition` 선택이 두 번 문제가 됐다.

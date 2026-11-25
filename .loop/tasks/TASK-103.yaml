@@ -1,0 +1,44 @@
+# 경고를 DB에 영속화한다
+# Runtime이 PLAN-20261116T005546Z 승인 시점에 생성했다 (proposal P3). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-103
+status: DONE
+
+request: |-
+  (1) src-tauri/src/db/migrations.rs에 additive migration을 추가한다: ALTER TABLE recordings ADD COLUMN capture_warning TEXT DEFAULT NULL. (2) domain::Recording에 capture_warning: Option<String> 필드를 추가한다. (3) store의 insert_recording이 capture_warning을 저장하고, 조회(select) 시 읽는다. (4) NewRecording에 capture_warning: Option<String>을 추가하고, Storage::save_capture가 CaptureReportPayload의 warning을 여기에 넣는다. (5) RecordingPayload(frontend로 직렬화되는 타입)에 captureWarning을 추가하고, src/ipc/types.ts의 Recording에도 반영한다.
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-102
+
+stop_condition:
+  gates: [build, lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 3
+
+acceptance_criteria:
+  - id: AC1
+    description: |-
+      migration이 MIGRATIONS 배열에 추가되고 기존 DB에서 오류 없이 적용된다
+    verification:
+      type: gate
+      ref: test
+  - id: AC2
+    description: |-
+      저장된 recording을 다시 조회하면 capture_warning이 그대로 돌아온다
+    verification:
+      type: gate
+      ref: test
+  - id: AC3
+    description: |-
+      frontend Recording 타입에 captureWarning 필드가 있다
+    verification:
+      type: gate
+      ref: lint
+
+evidence: []
+
+failure_memo: []

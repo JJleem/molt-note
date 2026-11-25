@@ -159,3 +159,23 @@ fn the_audio_file_is_never_touched() {
 
     assert_eq!(std::fs::read(&path).expect("읽기"), before, "파일이 바뀌면 안 된다");
 }
+
+#[test]
+fn adopted_recording_created_at_comes_from_filename_not_current_time() {
+    // AC3 — 입양된 레코드의 created_at이 파일 이름의 시각이다(현재 시각이 아니다).
+    let temp = TempRoot::new("timestamp");
+    let app_data_dir = temp.app_data_dir();
+
+    let _first = Storage::open(&app_data_dir);
+    // 1794535932 = 2026-11-13T02:12:12Z (UTC)
+    finalized_recording(&app_data_dir.recordings_dir(), "capture-1794535932.wav", 2);
+
+    let storage = Storage::open(&app_data_dir);
+    let listed = storage.list_recordings().expect("읽을 수 있어야 한다");
+
+    assert_eq!(listed.len(), 1);
+    assert_eq!(
+        listed[0].created_at, "2026-11-13T02:12:12.000Z",
+        "created_at은 파일 이름의 시각이어야 한다",
+    );
+}

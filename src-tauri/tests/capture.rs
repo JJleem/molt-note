@@ -286,8 +286,9 @@ fn a_failure_to_open_serializes_into_the_shape_the_frontend_reads() {
 }
 
 #[test]
-fn a_capture_that_was_cut_short_says_so_and_keeps_what_was_recorded() {
-    // 끊긴 것을 성공으로 보고하지 않는다. 그렇다고 이미 녹음된 것을 숨기지도 않는다.
+fn a_capture_that_was_cut_short_produces_a_warning_and_keeps_what_was_recorded() {
+    // 장치가 끊겼더라도 파일이 온전하면 경고와 함께 성공이다 —
+    // 이미 녹음된 것을 실패로 버리지 않는다.
     let temp = TempRoot::new("cut-short");
     let app_data_dir = temp.app_data_dir();
     let capture = Recorder::with_source(
@@ -299,22 +300,18 @@ fn a_capture_that_was_cut_short_says_so_and_keeps_what_was_recorded() {
     );
 
     capture.start(DEVICE_KEY, CaptureMode::Microphone).expect("녹음을 시작할 수 있어야 한다");
-    let failure = capture.stop().expect_err("끊긴 캡처는 실패로 보고된다");
+    let report = capture.stop().expect("파일이 온전하면 경고와 함께 성공이다");
 
-    assert_eq!(failure.kind, FailureKind::AudioDevice);
-    assert!(failure.retryable);
-    assert_eq!(failure.detail.as_deref(), Some("stream error"));
+    assert!(report.warning.is_some(), "경고가 있어야 한다");
+    assert!(
+        report.warning.as_ref().unwrap().contains("끊겼다"),
+        "원인을 알 수 있어야 한다: {:?}",
+        report.warning,
+    );
 
     let written = wav_files(&app_data_dir.recordings_dir());
     assert_eq!(written.len(), 1, "그때까지의 녹음은 파일로 남는다");
-    assert!(
-        failure.message.contains(&written[0].display().to_string()),
-        "어디에 남았는지 사용자가 알 수 있어야 한다: {}",
-        failure.message
-    );
-    assert!(
-        std::fs::metadata(&written[0]).expect("파일을 읽을 수 있어야 한다").len() > 0
-    );
+    assert!(report.byte_size > 0, "파일이 비어 있지 않다");
 }
 
 #[test]

@@ -72,6 +72,7 @@ fn recording(id: &str, created_at: &str, duration_ms: i64) -> Recording {
         transcription_status: ProcessingStatus::None,
         ai_status: ProcessingStatus::None,
         notion_status: ProcessingStatus::None,
+        capture_warning: None,
     }
 }
 

@@ -87,6 +87,7 @@ fn a_recording(title: &str) -> NewRecording {
         audio_path: "recordings/sample.wav".to_string(),
         audio_format: "wav".to_string(),
         microphone: None,
+        capture_warning: None,
     }
 }
 

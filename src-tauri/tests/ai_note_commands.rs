@@ -233,6 +233,7 @@ impl Fixture {
                 transcription_status: ProcessingStatus::Done,
                 ai_status: ProcessingStatus::None,
                 notion_status: ProcessingStatus::None,
+                capture_warning: None,
             },
         )
         .expect("사전 조건: 녹음 레코드를 저장한다");

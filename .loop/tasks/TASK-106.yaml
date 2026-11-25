@@ -1,0 +1,52 @@
+# 경고가 있는 정지의 end-to-end 테스트
+# Runtime이 PLAN-20261116T005546Z 승인 시점에 생성했다 (proposal P6). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-106
+status: DONE
+
+request: |-
+  가짜 SampleSource를 써서 Phase 5.11 Required Outcome 7의 네 시나리오를 테스트한다. tests/ 아래에 전용 테스트를 만든다. (a) 큐 넘침: SampleSource가 interrupted에 Full 실패를 적어 두는 가짜. stop하면 레코드가 저장되고 capture_warning이 있다. (b) 스트림 오류: SampleSource가 interrupted에 스트림 오류를 적어 두는 가짜. stop하면 레코드가 저장되고 capture_warning이 있다. (c) 정상: 아무 사건 없이 stop하면 레코드가 저장되고 capture_warning이 없다. (d) 파일 확정 실패: writer가 실패하는 가짜. stop하면 레코드가 없고 경로를 담은 Failure가 온다. 이 테스트는 실제 DB를 쓰는 통합 테스트이며, 저장된 레코드를 다시 조회해 capture_warning 값까지 확인한다.
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-103
+  - TASK-104
+
+stop_condition:
+  gates: [build, test]
+  requires_verifier: true
+  max_consecutive_failures: 3
+
+acceptance_criteria:
+  - id: AC1
+    description: |-
+      시나리오 (a)(b): 레코드가 저장되고 capture_warning이 채워져 있다
+    verification:
+      type: gate
+      ref: test
+  - id: AC2
+    description: |-
+      시나리오 (c): 레코드가 저장되고 capture_warning이 None이다
+    verification:
+      type: gate
+      ref: test
+  - id: AC3
+    description: |-
+      시나리오 (d): 레코드가 없고 Failure에 파일 경로가 있다
+    verification:
+      type: gate
+      ref: test
+  - id: AC4
+    description: |-
+      네 시나리오 모두 가짜 SampleSource로 마이크 없이 돈다
+    verification:
+      type: verifier
+      instruction: |-
+        테스트 코드가 실제 하드웨어나 마이크 권한을 요구하지 않는지 확인한다
+
+evidence: []
+
+failure_memo: []

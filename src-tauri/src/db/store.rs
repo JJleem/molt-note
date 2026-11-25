@@ -18,7 +18,7 @@ use crate::domain::{
 /// Recording 조회에 쓰는 열 목록. 목록·단건 조회가 같은 순서를 쓰도록 한 곳에 둔다.
 const RECORDING_COLUMNS: &str = "id, title, created_at, updated_at, duration_ms, audio_path,
      audio_format, microphone, current_transcript_id,
-     transcription_status, ai_status, notion_status";
+     transcription_status, ai_status, notion_status, capture_warning";
 
 /// Transcript 조회에 쓰는 열 목록. 단건·목록 조회가 같은 순서를 쓰도록 한 곳에 둔다 —
 /// 한쪽에만 열을 더하면 같은 Transcript가 조회 경로에 따라 다르게 읽힌다.
@@ -33,6 +33,28 @@ const TRANSCRIPT_COLUMNS: &str =
 pub fn new_id(connection: &Connection) -> Result<String, DatabaseError> {
     connection
         .query_row("SELECT lower(hex(randomblob(16)))", [], |row| row.get(0))
+        .map_err(DatabaseError::Sql)
+}
+
+/// `capture-<unix초>.wav` 파일 이름에서 unix 초를 꺼낸다.
+///
+/// 파싱할 수 없으면 `None`이다 — 패턴에 맞지 않는 파일을 거부할 뿐 실패가 아니다.
+pub fn parse_capture_timestamp(filename: &str) -> Option<u64> {
+    let stem = filename.strip_suffix(".wav")?;
+    let digits = stem.strip_prefix("capture-")?;
+    digits.parse::<u64>().ok()
+}
+
+/// Unix 초를 ISO-8601 UTC 텍스트로 만든다 (`2026-09-01T10:00:00.000Z`).
+///
+/// SQLite의 시계를 빌려 쓰는 [`now`]와 같은 서식이다.
+pub fn unix_to_iso8601(connection: &Connection, unix_seconds: u64) -> Result<String, DatabaseError> {
+    connection
+        .query_row(
+            "SELECT strftime('%Y-%m-%dT%H:%M:%fZ', ?1, 'unixepoch')",
+            [unix_seconds as i64],
+            |row| row.get(0),
+        )
         .map_err(DatabaseError::Sql)
 }
 
@@ -58,8 +80,9 @@ pub fn insert_recording(
         .execute(
             "INSERT INTO recordings (
                  id, title, created_at, updated_at, duration_ms, audio_path, audio_format,
-                 microphone, current_transcript_id, transcription_status, ai_status, notion_status
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                 microphone, current_transcript_id, transcription_status, ai_status, notion_status,
+                 capture_warning
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
             rusqlite::params![
                 recording.id.as_str(),
                 recording.title,
@@ -73,6 +96,7 @@ pub fn insert_recording(
                 recording.transcription_status.as_str(),
                 recording.ai_status.as_str(),
                 recording.notion_status.as_str(),
+                recording.capture_warning,
             ],
         )
         .map_err(DatabaseError::Sql)?;
@@ -468,6 +492,7 @@ struct RawRecording {
     transcription_status: String,
     ai_status: String,
     notion_status: String,
+    capture_warning: Option<String>,
 }
 
 fn read_recording_row(row: &Row<'_>) -> rusqlite::Result<RawRecording> {
@@ -484,6 +509,7 @@ fn read_recording_row(row: &Row<'_>) -> rusqlite::Result<RawRecording> {
         transcription_status: row.get(9)?,
         ai_status: row.get(10)?,
         notion_status: row.get(11)?,
+        capture_warning: row.get(12)?,
     })
 }
 
@@ -506,6 +532,7 @@ fn decode_recording(raw: RawRecording) -> Result<Recording, DatabaseError> {
         )?,
         ai_status: status_or_error(raw.ai_status, "recordings", "ai_status")?,
         notion_status: status_or_error(raw.notion_status, "recordings", "notion_status")?,
+        capture_warning: raw.capture_warning,
     })
 }
 
@@ -683,4 +710,36 @@ pub fn abandon_interrupted_work(
         )
         .map_err(DatabaseError::Sql)?;
     Ok(changed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_capture_timestamp_extracts_unix_seconds() {
+        assert_eq!(parse_capture_timestamp("capture-1794535932.wav"), Some(1794535932));
+    }
+
+    #[test]
+    fn parse_capture_timestamp_returns_none_for_non_matching_names() {
+        assert_eq!(parse_capture_timestamp("recording.wav"), None);
+        assert_eq!(parse_capture_timestamp("capture-.wav"), None);
+        assert_eq!(parse_capture_timestamp("capture-abc.wav"), None);
+        assert_eq!(parse_capture_timestamp("capture-123.mp3"), None);
+        assert_eq!(parse_capture_timestamp("capture-123"), None);
+        assert_eq!(parse_capture_timestamp(""), None);
+    }
+
+    #[test]
+    fn parse_capture_timestamp_handles_zero() {
+        assert_eq!(parse_capture_timestamp("capture-0.wav"), Some(0));
+    }
+
+    #[test]
+    fn unix_to_iso8601_formats_correctly() {
+        let conn = Connection::open_in_memory().expect("열 수 있어야 한다");
+        let result = unix_to_iso8601(&conn, 1_794_535_932).expect("변환할 수 있어야 한다");
+        assert_eq!(result, "2026-11-13T02:12:12.000Z");
+    }
 }

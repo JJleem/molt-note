@@ -195,6 +195,11 @@ impl Storage {
         }
     }
 
+    /// 앱 데이터 디렉터리 루트. 얻지 못했다면 `None`이다.
+    pub fn app_data_root(&self) -> Option<&std::path::Path> {
+        self.app_data_dir.as_ref().ok().map(|d| d.root())
+    }
+
     /// 초기화가 실패했다면 그 실패. 정상이면 `None`이다.
     pub fn failure(&self) -> Option<&Failure> {
         match &self.state {
@@ -369,6 +374,7 @@ impl Storage {
             audio_format: capture::EXTENSION.to_string(),
             // 실제로 열린 장치의 이름이다 — 고른 이름이 아니다.
             microphone: Some(capture.device_label.clone()),
+            capture_warning: capture.warning.clone(),
         })
     }
 
@@ -428,13 +434,26 @@ impl Storage {
                 continue;
             };
 
-            let saved = self.insert(|created_at| NewRecording {
+            // 파일 이름에서 시각을 꺼낸다. 실패하면 현재 시각을 쓴다 — 되살리지 않는 것보다 낫다.
+            let created_at_override = orphan
+                .path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .and_then(store::parse_capture_timestamp)
+                .and_then(|unix| {
+                    self.connection()
+                        .ok()
+                        .and_then(|conn| store::unix_to_iso8601(&conn, unix).ok())
+                });
+
+            let saved = self.insert_at(created_at_override, |created_at| NewRecording {
                 title: title_for(created_at),
                 duration_ms,
                 audio_path: path.to_owned(),
                 audio_format: capture::EXTENSION.to_string(),
                 // **모르는 것을 적지 않는다.** 어느 마이크였는지는 파일에 없다.
                 microphone: None,
+                capture_warning: None,
             });
             if saved.is_ok() {
                 adopted += 1;
@@ -451,9 +470,21 @@ impl Storage {
         &self,
         recording: impl FnOnce(&str) -> NewRecording,
     ) -> Result<RecordingPayload, Failure> {
+        self.insert_at(None, recording)
+    }
+
+    /// 녹음 하나를 저장한다. `created_at_override`가 있으면 현재 시각 대신 그것을 쓴다.
+    fn insert_at(
+        &self,
+        created_at_override: Option<String>,
+        recording: impl FnOnce(&str) -> NewRecording,
+    ) -> Result<RecordingPayload, Failure> {
         let connection = self.connection()?;
         let id = store::new_id(&connection)?;
-        let timestamp = store::now(&connection)?;
+        let timestamp = match created_at_override {
+            Some(ts) => ts,
+            None => store::now(&connection)?,
+        };
 
         let recording = validated(recording(&timestamp))?.into_recording(id, timestamp);
         store::insert_recording(&connection, &recording)?;
@@ -872,14 +903,31 @@ pub fn finish_recording(
     live: &std::sync::Arc<LiveTranscriber>,
     title: Option<&str>,
 ) -> Result<StoppedRecordingPayload, Failure> {
-    let capture = recorder.stop()?;
+    let log_dir = storage.app_data_root();
+
+    let capture = match recorder.stop() {
+        Ok(c) => c,
+        Err(failure) => {
+            if let Some(dir) = log_dir {
+                crate::log::write_event(dir, &format!("finish_recording: 정지 실패 — {failure}"));
+            }
+            return Err(failure);
+        }
+    };
     let output_path = PathBuf::from(&capture.output_path);
 
     // **파일이 확정된 다음은 레코드다.** 그 사이에 다른 일을 끼워 넣지 않는다 — 2026-09-14에
     // 여기서 남은 구간 전사를 돌렸다가 UI가 7분 멈췄고, 그동안 레코드도 저장되지 않았다.
-    let recording = storage
-        .save_capture(&capture, title)
-        .map_err(|failure| keeping_file(not_listed(failure), &output_path))?;
+    let recording = match storage.save_capture(&capture, title) {
+        Ok(r) => r,
+        Err(failure) => {
+            let failure = keeping_file(not_listed(failure), &output_path);
+            if let Some(dir) = log_dir {
+                crate::log::write_event(dir, &format!("finish_recording: DB 저장 실패 — {failure}"));
+            }
+            return Err(failure);
+        }
+    };
 
     // 여기까지가 정지의 성공이다 (R-002). 아래의 어떤 일도 그것을 되돌리지 않는다.
     //
@@ -891,7 +939,14 @@ pub fn finish_recording(
         start_automatic_transcription(storage, transcriber, &recording.id);
     }
 
-    Ok(StoppedRecordingPayload { recording, capture })
+    if let Some(warning) = &capture.warning {
+        if let Some(dir) = log_dir {
+            crate::log::write_event(dir, &format!("finish_recording: 캡처 경고 — {warning}"));
+        }
+    }
+
+    let warning = capture.warning.clone();
+    Ok(StoppedRecordingPayload { recording, capture, warning })
 }
 
 
