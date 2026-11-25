@@ -43,6 +43,7 @@ import {
   noteModeChoices,
   noteSections,
   noteView,
+  stripLeadingTopicNumber,
   type AiNoteInput,
 } from './aiNoteView';
 import { loadedRecordingDetail } from './recordingDetailView';
@@ -337,8 +338,8 @@ describe('V2 Meeting → noteSections (AC-4-1 · AC-4-2 · AC-4-3)', () => {
     expect(sections.map((s) => s.title)).toEqual([
       '핵심 요약',
       '지난 액션 아이템',
-      '배포 전략',
-      '코드 리뷰 프로세스',
+      '1. 배포 전략',
+      '2. 코드 리뷰 프로세스',
       '액션 아이템',
       '확인 필요',
     ]);
@@ -363,7 +364,7 @@ describe('V2 Meeting → noteSections (AC-4-1 · AC-4-2 · AC-4-3)', () => {
     const sections = noteSections(MEETING_V2);
     const deployTopic = sections[2];
     expect(deployTopic.kind).toBe('grouped');
-    expect(deployTopic.title).toBe('배포 전략');
+    expect(deployTopic.title).toBe('1. 배포 전략');
     expect(deployTopic.groups).toHaveLength(2);
     expect(deployTopic.groups[0].heading).toBe('현재 상태');
     expect(deployTopic.groups[0].items).toEqual(['스테이징 환경 구축 완료']);
@@ -398,7 +399,7 @@ describe('V2 Meeting → noteSections (AC-4-1 · AC-4-2 · AC-4-3)', () => {
     expect(titles).not.toContain('지난 액션 아이템');
     // 나머지 순서는 유지된다.
     expect(titles[0]).toBe('핵심 요약');
-    expect(titles[1]).toBe('배포 전략');
+    expect(titles[1]).toBe('1. 배포 전략');
   });
 });
 
@@ -434,7 +435,7 @@ describe('V2 Meeting 비교표 → noteSections (P4-AC1 · P4-AC2)', () => {
   };
 
   it('표가 있는 묶음은 열과 행을 그대로 섹션에 싣는다 — 행은 열 수에 맞춘다', () => {
-    const section = noteSections(WITH_TABLE).find((s) => s.title === '도구 비교')!;
+    const section = noteSections(WITH_TABLE).find((s) => s.title === '2. 도구 비교')!;
     expect(section.kind).toBe('grouped');
     expect(section.groups[0].table).toEqual({
       columns: ['도구', '장점', '단점'],
@@ -454,8 +455,8 @@ describe('V2 Meeting 비교표 → noteSections (P4-AC1 · P4-AC2)', () => {
     expect(sections.map((s) => s.title)).toEqual([
       '핵심 요약',
       '지난 액션 아이템',
-      '배포 전략',
-      '코드 리뷰 프로세스',
+      '1. 배포 전략',
+      '2. 코드 리뷰 프로세스',
       '액션 아이템',
       '확인 필요',
     ]);
@@ -485,7 +486,7 @@ describe('V2 Meeting 비교표 → noteSections (P4-AC1 · P4-AC2)', () => {
       ...MEETING_V2,
       topics: [{ title: '빈 표', groups: [{ heading: 'h', items: ['x'], table: { columns: [], rows: [['a']] } }] }],
     };
-    const section = noteSections(note).find((s) => s.title === '빈 표')!;
+    const section = noteSections(note).find((s) => s.title === '1. 빈 표')!;
     expect(section.groups[0]).not.toHaveProperty('table');
   });
 
@@ -494,7 +495,7 @@ describe('V2 Meeting 비교표 → noteSections (P4-AC1 · P4-AC2)', () => {
       ...MEETING_V2,
       topics: [{ title: '표만', groups: [{ heading: 'h', items: [], table: { columns: ['a'], rows: [['1']] } }] }],
     };
-    const section = noteSections(note).find((s) => s.title === '표만')!;
+    const section = noteSections(note).find((s) => s.title === '1. 표만')!;
     expect(section.emptyText).toBeNull();
   });
 
@@ -504,8 +505,82 @@ describe('V2 Meeting 비교표 → noteSections (P4-AC1 · P4-AC2)', () => {
       ...MEETING_V2,
       topics: [{ title: '파이프', groups: [{ heading: 'h', items: [pipe] }] }],
     };
-    const section = noteSections(note).find((s) => s.title === '파이프')!;
+    const section = noteSections(note).find((s) => s.title === '1. 파이프')!;
     expect(section.groups[0]).toEqual({ heading: 'h', items: [pipe] });
+  });
+});
+
+describe('주제 섹션 번호는 화면이 한 번만 붙인다 (P2-AC4)', () => {
+  function withTopics(titles: readonly string[]): MeetingNoteV2 {
+    return {
+      ...MEETING_V2,
+      topics: titles.map((title) => ({ title, groups: [{ heading: 'h', items: ['x'] }] })),
+    };
+  }
+
+  function topicTitles(note: MeetingNoteV2): string[] {
+    const fixed = new Set(['핵심 요약', '지난 액션 아이템', '액션 아이템', '확인 필요']);
+    return noteSections(note).map((s) => s.title).filter((t) => !fixed.has(t));
+  }
+
+  it.each(['1. 제목', '1) 제목', '제목'])('%s는 첫 주제 섹션 제목 "1. 제목"이 된다', (title) => {
+    expect(topicTitles(withTopics([title]))).toEqual(['1. 제목']);
+  });
+
+  it('모델이 붙인 번호와 상관없이 렌더 순서대로 번호를 매긴다', () => {
+    expect(topicTitles(withTopics(['3. 가', '가) 나', '１．전각', '７） 전각 괄호']))).toEqual([
+      '1. 가',
+      '2. 가) 나',
+      '3. １．전각',
+      '4. 전각 괄호',
+    ]);
+  });
+
+  it("'2026년 계획'과 '3D 재구성'은 원문이 그대로 남고 번호만 붙는다", () => {
+    expect(topicTitles(withTopics(['2026년 계획', '3D 재구성']))).toEqual([
+      '1. 2026년 계획',
+      '2. 3D 재구성',
+    ]);
+  });
+
+  it('Rust strip_leading_topic_number와 같은 사례에 같은 결과를 낸다', () => {
+    const cases: readonly (readonly [string, string])[] = [
+      ['1. 제목', '제목'],
+      ['1) 제목', '제목'],
+      ['  01 .  제목  ', '제목'],
+      ['１． 제목', '제목'],
+      ['２） 제목', '제목'],
+      ['제목', '제목'],
+      ['2026년 계획', '2026년 계획'],
+      ['3D 재구성', '3D 재구성'],
+      ['1.5배 성장', '1.5배 성장'],
+      ['1.', '1.'],
+      ['1. ', '1. '],
+      ['1.제목', '1.제목'],
+      ['', ''],
+    ];
+    for (const [input, expected] of cases) {
+      expect(stripLeadingTopicNumber(input)).toBe(expected);
+    }
+  });
+
+  it('다른 섹션의 제목과 목록 모양은 그대로다', () => {
+    const sections = noteSections(withTopics(['1. 제목']));
+    expect(sections.map((s) => s.title)).toEqual([
+      '핵심 요약',
+      '지난 액션 아이템',
+      '1. 제목',
+      '액션 아이템',
+      '확인 필요',
+    ]);
+    expect(sections[0]).toMatchObject({ kind: 'list', items: MEETING_V2.keySummary });
+    expect(sections[1].kind).toBe('grouped');
+    expect(sections[1].groups.map((g) => g.heading)).toEqual(['완료', '진행 중']);
+    expect(sections[3]).toMatchObject({
+      kind: 'list',
+      items: ['배포 스크립트 작성 (김철수, 11/20)', '리뷰 가이드 초안 (이영희, 11/22)'],
+    });
+    expect(sections[4]).toMatchObject({ kind: 'list', items: MEETING_V2.needsConfirmation });
   });
 });
 
@@ -604,12 +679,12 @@ describe('large V2 Meeting fixture → noteSections (AC-8-1 · AC-8-2)', () => {
     expect(titles[0]).toBe('핵심 요약');
     expect(titles[1]).toBe('지난 액션 아이템');
     // topics 6개
-    expect(titles[2]).toBe('Q4 제품 로드맵 점검');
-    expect(titles[3]).toBe('디자인 시스템 v2 전환');
-    expect(titles[4]).toBe('백엔드 API 리팩토링');
-    expect(titles[5]).toBe('QA 자동화 전략');
-    expect(titles[6]).toBe('VOC 분석');
-    expect(titles[7]).toBe('인프라 및 DevOps');
+    expect(titles[2]).toBe('1. Q4 제품 로드맵 점검');
+    expect(titles[3]).toBe('2. 디자인 시스템 v2 전환');
+    expect(titles[4]).toBe('3. 백엔드 API 리팩토링');
+    expect(titles[5]).toBe('4. QA 자동화 전략');
+    expect(titles[6]).toBe('5. VOC 분석');
+    expect(titles[7]).toBe('6. 인프라 및 DevOps');
     // 마지막 둘
     expect(titles[8]).toBe('액션 아이템');
     expect(titles[9]).toBe('확인 필요');

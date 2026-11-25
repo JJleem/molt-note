@@ -84,7 +84,8 @@ The object has exactly these keys:
   the status of items that were not mentioned. All five keys must be present; use empty arrays when
   nothing applies.
 - \"topics\": array of objects { \"title\": string, \"groups\": [{ \"heading\": string, \"items\": [string], \"table\"?: { \"columns\": [string], \"rows\": [[string]] } }] }.
-  Number each topic (\"1. ...\", \"2. ...\"). Group by topic, not by chronological order. Use empty
+  Do not put a number or order marker (e.g. \"1.\", \"1)\", \"01.\") in topics[].title; the app
+  numbers the topics itself. Group by topic, not by chronological order. Use empty
   string for heading when no subheading is needed; use \"**bold subheading**\" when grouping within
   a topic. Write short declarative sentences (~함, ~예정, ~하기로 함). Markers:
   💬 for decision-maker directives/feedback (bold the content),
@@ -171,7 +172,7 @@ Transcript:
 ///
 /// **손으로 선언한 값이다.** 프롬프트나 schema를 고치면 [`computed_prompt_version`]이 다른 값을
 /// 내고 `prompt_version_is_bound_to_the_prompt_text` 테스트가 깨진다. 그때 이 값을 함께 고친다.
-pub const PROMPT_VERSION_MEETING: &str = "v1.meeting.b2f3ba75";
+pub const PROMPT_VERSION_MEETING: &str = "v1.meeting.47fe6a78";
 
 /// Study 프롬프트의 `promptVersion`. [`PROMPT_VERSION_MEETING`]과 같은 규칙이다.
 pub const PROMPT_VERSION_STUDY: &str = "v1.study.2cfad6a0";
@@ -792,6 +793,29 @@ mod tests {
             !MEETING_PROMPT.contains("Use tables for comparisons"),
             "표를 어디에 둘지 말하지 않는 옛 지시가 없다"
         );
+    }
+
+    // ── Phase 5.13: 주제 번호는 앱이 한 번만 붙인다 ───────────────────────────────
+
+    #[test]
+    fn the_meeting_prompt_forbids_numbering_topic_titles() {
+        assert!(
+            MEETING_PROMPT.contains("Do not put a number or order marker"),
+            "topics[].title에 번호를 붙이지 말라는 지시가 있다"
+        );
+        assert!(MEETING_PROMPT.contains("in topics[].title"));
+        for marker in ["\"1.\"", "\"1)\"", "\"01.\""] {
+            assert!(MEETING_PROMPT.contains(marker), "금지 예시 {marker}가 있다");
+        }
+        assert!(
+            MEETING_PROMPT.contains("the app\n  numbers the topics itself"),
+            "번호는 앱이 붙인다고 말한다"
+        );
+        assert!(
+            !MEETING_PROMPT.contains("Number each topic"),
+            "주제에 번호를 붙이라는 옛 지시가 없다"
+        );
+        assert_ne!(PROMPT_VERSION_MEETING, "v1.meeting.b2f3ba75");
     }
 
     #[test]

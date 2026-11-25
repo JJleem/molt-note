@@ -3,7 +3,7 @@
 이 문서는 프로젝트의 **최상위 지도**다. 상세 구현 문서가 아니라 진입점이다.
 상세는 §8의 문서로 넘긴다.
 
-> **현재 상태: Phase 5.12까지 engineering DONE. 그 뒤 2026-09-08의 변경들은 Runtime을
+> **현재 상태: Phase 5.13까지 engineering DONE. 그 뒤 2026-09-08의 변경들은 Runtime을
 > 거치지 않았다 (§5.9).**
 >
 > ⚠️ **2026-09-08은 이 저장소가 Runtime 밖에서 하루를 보낸 날이다.** Phase 5.9의 Plan은
@@ -963,6 +963,13 @@ Plan `PLAN-20261116T005546Z` · 7 Task DONE (TASK-105는 gate-only 계약이라 
 **실제 provider 호출로는 아직 확인하지 않았다** — 사용자가 노트를 다시 만들 때 확인된다.
 
 Plan `PLAN-20261125T033136Z` · 9 Task DONE (TASK-116은 Plan 실행 timeout 뒤 `execute`로 마무리, OBS-033).
+
+### Phase 5.13 — Topic Numbering Once · 2026-11-25 · **engineering DONE**
+
+주제 번호는 렌더러(Markdown · 앱 화면)가 붙인다. 모델이 제목 앞에 붙인 번호(`1.` · `1)` · 전각 숫자, 뒤에 공백)는
+한 번 떼어 낸다 — `## 1. 1. 제목` 중복을 없앤다. 번호처럼 보이지 않는 제목(`2026년 계획` · `3D 재구성`)은 그대로.
+Meeting 프롬프트는 제목에 번호를 붙이지 말라고 지시한다. 저장된 노트는 고치지 않고, 다시 렌더할 때 한 번만 나온다.
+Plan `PLAN-20261125T051038Z` · 3 Task DONE (`phase-prompt/05.13-topic-numbering-once.md`).
 
 ### Phase 6 — Cross-platform Validation & Hardening · **PLANNED**
 ---

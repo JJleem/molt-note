@@ -201,6 +201,51 @@ function groupedSection(title: string, groups: readonly NoteGroup[]): NoteSectio
   };
 }
 
+/** Rust `char::is_whitespace`와 같은 집합 — JS `\s`에서 U+FEFF를 빼고 U+0085를 더한다. */
+function isRustWhitespace(c: string): boolean {
+  return c !== '﻿' && /[\s\u0085]/u.test(c);
+}
+
+function isTopicDigit(c: string): boolean {
+  return (c >= '0' && c <= '9') || (c >= '０' && c <= '９');
+}
+
+function skipWhitespace(s: string, from: number): number {
+  let i = from;
+  while (i < s.length && isRustWhitespace(s[i]!)) i += 1;
+  return i;
+}
+
+/**
+ * 제목 앞에 붙은 번호 꼴을 **딱 한 번** 뗀다 — Rust `export::markdown::strip_leading_topic_number`와
+ * 같은 규칙이다.
+ *
+ * 떼는 꼴: 맨 앞 공백, ASCII 또는 전각 숫자 1개 이상, 선택적 공백, 구분자 `.` · `．` · `)` · `）`
+ * 중 하나, 그리고 공백(문자열 끝은 떼지 않는다 — Rust와 같다). 그 외의 제목(`2026년 계획`,
+ * `3D 재구성`, `1.5배 성장`)은 그대로 둔다. 떼고 나서 비면 원래 제목을 돌려준다.
+ */
+export function stripLeadingTopicNumber(title: string): string {
+  const start = skipWhitespace(title, 0);
+  let i = start;
+  while (i < title.length && isTopicDigit(title[i]!)) i += 1;
+  if (i === start) return title;
+  i = skipWhitespace(title, i);
+  const sep = title[i];
+  if (sep !== '.' && sep !== '．' && sep !== ')' && sep !== '）') return title;
+  i += 1;
+  const next = title[i];
+  if (next === undefined || !isRustWhitespace(next)) return title;
+  let end = title.length;
+  while (end > i && isRustWhitespace(title[end - 1]!)) end -= 1;
+  const stripped = title.slice(skipWhitespace(title, i), end);
+  return stripped.length === 0 ? title : stripped;
+}
+
+/** 주제 섹션 제목 — 번호는 화면이 렌더 순서대로 정확히 한 번 붙인다. */
+function topicSectionTitle(number: number, title: string): string {
+  return `${number}. ${stripLeadingTopicNumber(title)}`;
+}
+
 const PREVIOUS_ACTION_LABELS: readonly (readonly [keyof PreviousActionItems, string])[] = [
   ['done', '완료'],
   ['changed', '변경됨'],
@@ -238,9 +283,11 @@ export function noteSections(note: StructuredNote): readonly NoteSection[] {
         if (!previousActionItemsEmpty(note.previousActionItems)) {
           sections.push(previousActionItemsSection(note.previousActionItems));
         }
-        for (const topic of note.topics) {
-          sections.push(groupedSection(topic.title, topic.groups.map(topicGroup)));
-        }
+        note.topics.forEach((topic, index) => {
+          sections.push(
+            groupedSection(topicSectionTitle(index + 1, topic.title), topic.groups.map(topicGroup)),
+          );
+        });
         sections.push(
           listSection('액션 아이템', note.actionItems.map((ai) => `${ai.task} (${ai.owner}, ${ai.due})`)),
           listSection('확인 필요', note.needsConfirmation),

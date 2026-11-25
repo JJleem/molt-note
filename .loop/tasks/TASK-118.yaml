@@ -1,0 +1,47 @@
+# 앱 화면 주제 섹션 제목도 같은 번호 규칙을 쓴다
+# Runtime이 PLAN-20261125T051038Z 승인 시점에 생성했다 (proposal P2). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-118
+status: DONE
+
+request: |-
+  src/screens/aiNoteView.ts의 noteSections는 V2 Meeting에서 groupedSection(topic.title, ...)으로 제목을 그대로 쓴다. 그래서 화면 번호가 모델 출력에 따라 있거나 없다. 같은 파일(또는 src/screens 아래 작은 순수 모듈)에 TypeScript 함수를 만든다. 이 함수는 P1과 같은 규칙으로 앞 번호를 한 번 뗀다. 그 규칙은 맨 앞 공백, ASCII 또는 전각 숫자 1개 이상, 선택적 공백, '.' · '．' · ')' · '）' 중 하나, 그리고 공백 또는 끝이다. 떼고 나서 비면 원래 제목을 쓴다. 주제 섹션 제목은 렌더 순서대로 `N. 제목` 꼴로 만든다. 핵심 요약, 이전 액션 아이템, 액션 아이템, 확인 필요 섹션의 제목과 목록 모양은 바꾸지 않는다. src/screens/aiNoteView.test.ts에 테스트를 추가한다: '1. 제목', '1) 제목', '제목'은 첫 주제 섹션 제목 '1. 제목'이 된다. '2026년 계획'은 '1. 2026년 계획', '3D 재구성'은 '2. 3D 재구성' 식으로 번호만 붙는다. 이 변경으로 깨지는 기존 TS 테스트의 기대값은 새 규칙에 맞게 고친다.
+
+execution:
+  role: impl
+
+stop_condition:
+  gates: [build, lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 3
+
+acceptance_criteria:
+  - id: P2-AC1
+    description: |-
+      전체 test Gate가 통과한다.
+    verification:
+      type: gate
+      ref: test
+  - id: P2-AC2
+    description: |-
+      build Gate가 통과한다.
+    verification:
+      type: gate
+      ref: build
+  - id: P2-AC3
+    description: |-
+      lint Gate가 통과한다.
+    verification:
+      type: gate
+      ref: lint
+  - id: P2-AC4
+    description: |-
+      aiNoteView 테스트가 다음을 단언한다. 주제 섹션 제목이 '1. 제목' 꼴로 번호 한 번만 갖는다('1. 제목', '1) 제목', '제목' 입력 모두). '2026년 계획'과 '3D 재구성'은 원문이 보존되고 번호만 붙는다. 다른 섹션의 제목과 목록 모양은 그대로다.
+    verification:
+      type: verifier
+      instruction: |-
+        src/screens/aiNoteView.ts와 테스트 diff를 읽고, 규칙이 P1의 Rust 규칙과 같은 사례에 대해 같은 결과를 내는지 확인한다.
+
+evidence: []
+
+failure_memo: []

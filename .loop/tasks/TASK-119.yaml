@@ -1,0 +1,47 @@
+# Meeting 프롬프트가 주제 제목 번호를 금지하고 promptVersion이 바뀐다
+# Runtime이 PLAN-20261125T051038Z 승인 시점에 생성했다 (proposal P3). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-119
+status: DONE
+
+request: |-
+  src-tauri/src/ai/prompt.rs의 MEETING_PROMPT를 고친다. topics 설명 줄(현재 86행 부근의 "topics" 항목) 근처에 영어 지시 한 문장을 추가한다. 내용은 topics[].title에 번호나 순서 표기(예: '1.', '1)', '01.')를 붙이지 말라는 것이고, 번호는 앱이 붙인다는 점도 적는다. 해시 강제 규칙에 따라 PROMPT_VERSION_MEETING 선언값을 새 계산값으로 바꾼다. 그 값을 고정한 기존 테스트 기대값도 같이 고친다. Study와 Summary 프롬프트와 그 버전은 바꾸지 않는다. prompt.rs의 테스트 모듈에 MEETING_PROMPT가 제목 번호 금지 지시를 담고 있음을 단언하는 테스트를 추가한다. 실제 provider 호출은 하지 않는다.
+
+execution:
+  role: impl
+
+stop_condition:
+  gates: [build, lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 3
+
+acceptance_criteria:
+  - id: P3-AC1
+    description: |-
+      전체 test Gate가 통과한다. 이 Gate에는 promptVersion 해시 일치 테스트가 포함된다.
+    verification:
+      type: gate
+      ref: test
+  - id: P3-AC2
+    description: |-
+      build Gate가 통과한다.
+    verification:
+      type: gate
+      ref: build
+  - id: P3-AC3
+    description: |-
+      lint Gate가 통과한다.
+    verification:
+      type: gate
+      ref: lint
+  - id: P3-AC4
+    description: |-
+      MEETING_PROMPT에 topics[].title 번호 금지 지시가 있고, 이를 단언하는 테스트가 있다. PROMPT_VERSION_MEETING은 이전 값 v1.meeting.b2f3ba75와 다르다. Study와 Summary 버전은 그대로다.
+    verification:
+      type: verifier
+      instruction: |-
+        src-tauri/src/ai/prompt.rs의 diff를 읽고 지시 문장, 새 버전 값, 추가된 테스트, Study/Summary 불변을 확인한다.
+
+evidence: []
+
+failure_memo: []

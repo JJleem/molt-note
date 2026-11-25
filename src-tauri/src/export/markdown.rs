@@ -364,12 +364,55 @@ fn render_previous_action_items(pai: &PreviousActionItems) -> Option<String> {
     (!parts.is_empty()).then(|| parts.join("\n"))
 }
 
+/// 제목 앞에 붙은 번호 꼴을 **딱 한 번** 뗀다.
+///
+/// 모델이 `topics[].title`에 이미 `1. 제목`처럼 번호를 붙여 보내면, 렌더러가 붙이는 번호와
+/// 겹쳐 `## 1. 1. 제목`이 된다. 번호는 렌더러 하나만 붙인다.
+///
+/// 떼는 꼴: 맨 앞 공백, ASCII 또는 전각 숫자 1개 이상(앞의 0 허용), 선택적 공백, 구분자
+/// `.` · `．` · `)` · `）` 중 하나, 그리고 공백 또는 문자열 끝. 그 외의 제목(`2026년 계획`,
+/// `3D 재구성`, `1.5배 성장`)은 그대로 둔다. 떼고 나서 비면 원래 제목을 돌려준다.
+/// 저장된 노트 데이터는 바꾸지 않는다 — 렌더링 때만 적용한다.
+fn strip_leading_topic_number(title: &str) -> &str {
+    let is_digit = |c: char| c.is_ascii_digit() || ('０'..='９').contains(&c);
+
+    let rest = title.trim_start();
+    let after_digits = rest.trim_start_matches(is_digit);
+    if after_digits.len() == rest.len() {
+        return title;
+    }
+    let after_space = after_digits.trim_start();
+    let Some(sep) = after_space.chars().next() else {
+        return title;
+    };
+    if !matches!(sep, '.' | '．' | ')' | '）') {
+        return title;
+    }
+    let after_sep = &after_space[sep.len_utf8()..];
+    match after_sep.chars().next() {
+        None => title,
+        Some(c) if c.is_whitespace() => {
+            let stripped = after_sep.trim();
+            if stripped.is_empty() {
+                title
+            } else {
+                stripped
+            }
+        }
+        Some(_) => title,
+    }
+}
+
 /// 주제 하나를 `## N. <title>` 섹션으로 렌더한다.
+///
+/// 번호는 렌더러가 정확히 한 번 붙인다 — 제목에 딸려 온 번호는
+/// [`strip_leading_topic_number`]로 먼저 뗀다.
 fn render_topic(number: usize, topic: &Topic) -> Option<String> {
-    let title = single_line(&topic.title);
-    if title.is_empty() {
+    let collapsed = single_line(&topic.title);
+    if collapsed.is_empty() {
         return None;
     }
+    let title = strip_leading_topic_number(&collapsed);
 
     let mut chunks: Vec<TopicChunk> = Vec::new();
     for group in &topic.groups {
@@ -1995,6 +2038,82 @@ mod tests {
             ]
             .join("\n")
         );
+    }
+
+    // ── 주제 번호는 한 번만 (Phase 5.13) ─────────────────────────────────────
+
+    fn topic_titled(title: &str) -> Topic {
+        Topic {
+            title: title.to_owned(),
+            groups: vec![TopicGroup {
+                heading: "".to_owned(),
+                items: strings(&["내용"]),
+                table: None,
+            }],
+        }
+    }
+
+    fn topic_heading(number: usize, title: &str) -> String {
+        let section = render_topic(number, &topic_titled(title)).expect("주제 섹션이 있어야 한다");
+        section.lines().next().unwrap().to_owned()
+    }
+
+    #[test]
+    fn a_numbered_topic_title_gets_the_renderer_number_exactly_once() {
+        for title in [
+            "1. 제목",
+            "1) 제목",
+            "제목",
+            "01. 제목",
+            "１. 제목",
+            "1 . 제목",
+            "  3） 제목",
+            "１） 제목",
+        ] {
+            assert_eq!(topic_heading(1, title), "## 1. 제목", "{title:?}");
+        }
+        // 구분자 뒤에 공백이 없으면 번호 꼴이 아니다 — 그대로 둔다.
+        assert_eq!(topic_heading(1, "1．제목"), "## 1. 1．제목");
+    }
+
+    #[test]
+    fn a_title_that_only_looks_like_a_number_stays_as_it_is() {
+        assert_eq!(topic_heading(1, "2026년 계획"), "## 1. 2026년 계획");
+        assert_eq!(topic_heading(1, "3D 재구성"), "## 1. 3D 재구성");
+        assert_eq!(topic_heading(1, "1.5배 성장"), "## 1. 1.5배 성장");
+    }
+
+    #[test]
+    fn a_number_is_stripped_only_once() {
+        assert_eq!(topic_heading(1, "1. 2. 제목"), "## 1. 2. 제목");
+        assert_eq!(strip_leading_topic_number("1. 1. 제목"), "1. 제목");
+    }
+
+    #[test]
+    fn a_title_that_would_become_empty_keeps_its_original_text() {
+        assert_eq!(strip_leading_topic_number("1."), "1.");
+        assert_eq!(strip_leading_topic_number("1. "), "1. ");
+        assert_eq!(topic_heading(1, "1. "), "## 1. 1.");
+    }
+
+    #[test]
+    fn the_second_topic_is_numbered_two_and_stored_titles_are_untouched() {
+        let recording = recording();
+        let transcript = transcript();
+        let note = v2_with_topics(vec![topic_titled("1. 일정"), topic_titled("2) 예산")]);
+
+        let markdown = render(&document(&recording, &transcript, Some(&note)), false);
+
+        assert!(markdown.contains("\n## 1. 일정\n- 내용\n"), "{markdown}");
+        assert!(markdown.contains("\n## 2. 예산\n- 내용\n"), "{markdown}");
+        assert!(!markdown.contains("## 1. 1."));
+        assert!(!markdown.contains("## 2. 2"));
+        // 렌더링은 저장된 노트를 바꾸지 않는다.
+        let StructuredNote::MeetingV2(v2) = &note else {
+            panic!("MeetingV2여야 한다");
+        };
+        assert_eq!(v2.topics[0].title, "1. 일정");
+        assert_eq!(v2.topics[1].title, "2) 예산");
     }
 
     // ── include_transcript (AC-6-1 · AC-6-2) ──────────────────────────────────
