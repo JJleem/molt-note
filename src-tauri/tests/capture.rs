@@ -115,7 +115,7 @@ impl SampleSource for FakeMicrophone {
             stop: Box::new(move || {
                 let _ = sending.join();
                 match interrupted {
-                    Some(failure) => Err(failure),
+                    Some(failure) => Err(failure.into()),
                     None => Ok(()),
                 }
             }),

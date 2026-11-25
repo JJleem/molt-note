@@ -129,6 +129,17 @@ pub struct PreviousActionItems {
 pub struct TopicGroup {
     pub heading: String,
     pub items: Vec<String>,
+    /// 선택 비교표. 없으면 키 자체를 쓰지 않는다 — 표가 생기기 전의 v2 노트와 같은 문자열이
+    /// 되도록(`CONTENT_SCHEMA_VERSION`은 2 그대로).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub table: Option<TopicTable>,
+}
+
+/// 주제 묶음의 비교표 — 열 이름과, 각 행의 칸(문자열).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TopicTable {
+    pub columns: Vec<String>,
+    pub rows: Vec<Vec<String>>,
 }
 
 /// 주제 하나 — `## N. <title>`, 안에 여러 `TopicGroup`.
@@ -302,11 +313,21 @@ pub fn json_schema(mode: NoteType) -> Value {
                 },
                 "required": ["done", "changed", "inProgress", "noProgress", "notMentioned"],
             });
+            // `table`은 선택이다 — `required`에 넣지 않는다.
+            let topic_table_schema = json!({
+                "type": "object",
+                "properties": {
+                    "columns": list(),
+                    "rows": { "type": "array", "items": list() },
+                },
+                "required": ["columns", "rows"],
+            });
             let topic_group_schema = json!({
                 "type": "object",
                 "properties": {
                     "heading": text(),
                     "items": list(),
+                    "table": topic_table_schema,
                 },
                 "required": ["heading", "items"],
             });
@@ -689,7 +710,11 @@ fn clean_topics(raw: Vec<Topic>) -> Result<Vec<Topic>, ResponseRejection> {
         for group in topic.groups {
             let heading = group.heading.trim().to_owned();
             let items = clean_items("topics[].groups[].items", group.items)?;
-            groups.push(TopicGroup { heading, items });
+            groups.push(TopicGroup {
+                heading,
+                items,
+                table: group.table,
+            });
         }
         cleaned.push(Topic { title, groups });
     }
@@ -788,6 +813,7 @@ mod tests {
                 groups: vec![TopicGroup {
                     heading: "".to_owned(),
                     items: vec!["9월 출시로 합의".to_owned()],
+                    table: None,
                 }],
             }],
             action_items: vec![ActionItemV2 {
@@ -929,6 +955,24 @@ mod tests {
         let group_props = &topic_props["groups"]["items"]["properties"];
         assert_eq!(group_props["heading"]["type"], "string");
         assert_eq!(group_props["items"]["type"], "array");
+        assert_eq!(group_props.as_object().unwrap().len(), 3, "heading · items · table");
+
+        // table is an optional object { columns: string[], rows: string[][] }
+        let table = &group_props["table"];
+        assert_eq!(table["type"], "object");
+        assert_eq!(table["properties"]["columns"]["type"], "array");
+        assert_eq!(table["properties"]["columns"]["items"]["type"], "string");
+        assert_eq!(table["properties"]["rows"]["type"], "array");
+        assert_eq!(table["properties"]["rows"]["items"]["type"], "array");
+        assert_eq!(table["properties"]["rows"]["items"]["items"]["type"], "string");
+        let group_required = topic_props["groups"]["items"]["required"]
+            .as_array()
+            .unwrap();
+        assert_eq!(group_required, &vec![json!("heading"), json!("items")]);
+        assert!(
+            !group_required.contains(&json!("table")),
+            "table은 선택이다"
+        );
 
         // actionItems is array of objects
         assert_eq!(props["actionItems"]["type"], "array");
@@ -947,6 +991,78 @@ mod tests {
         let json = serde_json::to_string(inner).expect("serialize");
         let restored: MeetingNoteV2 = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(&restored, inner);
+    }
+
+    // ── TopicGroup.table (선택 비교표) ───────────────────────────────────────────
+
+    /// table 필드가 생기기 전에 저장된 v2 content — 그대로 읽히고 table은 None이다.
+    #[test]
+    fn stored_v2_content_without_a_table_decodes_with_table_none() {
+        let content = r#"{"schemaVersion":2,"mode":"meeting","note":{"meetingTitle":"분기 계획 회의","meetingKind":"정기 위클리 (일정 확정)","attendees":["김철수","이영희"],"reliabilityNotice":"1시간 53분 녹음을 자동 전사 후 정리했습니다.","keySummary":["**9월 출시 확정**: 일정이 최종 합의됨"],"previousActionItems":{"done":["RFP 초안 완료"],"changed":[],"inProgress":[],"noProgress":[],"notMentioned":[]},"topics":[{"title":"일정 확정","groups":[{"heading":"","items":["9월 출시로 합의"]}]}],"actionItems":[{"task":"초안 작성","detail":"RFP 기반","owner":"김철수","due":"11/20","period":"이번 주"}],"needsConfirmation":[]}}"#;
+
+        let restored =
+            decode_content(content, NoteType::Meeting).expect("옛 v2 content는 읽혀야 한다");
+        assert_eq!(restored, meeting_v2());
+
+        let StructuredNote::MeetingV2(ref inner) = restored else { panic!() };
+        assert_eq!(inner.topics[0].groups[0].table, None);
+
+        // table이 없으면 키도 쓰지 않는다 — 다시 담으면 같은 문자열이다.
+        assert_eq!(encode_content(&restored), content);
+    }
+
+    #[test]
+    fn a_v2_response_without_a_table_parses_with_table_none() {
+        let body = r#"{"meetingTitle":"회의","meetingKind":"위클리","attendees":[],"reliabilityNotice":"녹음 기반","keySummary":["요약"],"previousActionItems":{"done":[],"changed":[],"inProgress":[],"noProgress":[],"notMentioned":[]},"topics":[{"title":"주제","groups":[{"heading":"","items":["항목"]}]}],"actionItems":[],"needsConfirmation":[]}"#;
+        let StructuredNote::MeetingV2(note) =
+            parse_note(NoteType::Meeting, body).expect("읽을 수 있어야 한다")
+        else {
+            panic!("MeetingV2 노트여야 한다");
+        };
+        assert_eq!(note.topics[0].groups[0].table, None);
+    }
+
+    #[test]
+    fn v2_content_with_a_table_decodes_and_round_trips_intact() {
+        let content = r#"{"schemaVersion":2,"mode":"meeting","note":{"meetingTitle":"회의","meetingKind":"위클리","attendees":[],"reliabilityNotice":"녹음 기반","keySummary":["요약"],"previousActionItems":{"done":[],"changed":[],"inProgress":[],"noProgress":[],"notMentioned":[]},"topics":[{"title":"업체 비교","groups":[{"heading":"견적","items":["두 곳 비교"],"table":{"columns":["업체","금액","비고"],"rows":[["A사","500만원","STT 기준"],["B사","620만원",""]]}}]}],"actionItems":[],"needsConfirmation":[]}}"#;
+
+        let restored =
+            decode_content(content, NoteType::Meeting).expect("table이 든 v2는 읽혀야 한다");
+        let StructuredNote::MeetingV2(ref inner) = restored else { panic!() };
+        assert_eq!(
+            inner.topics[0].groups[0].table,
+            Some(TopicTable {
+                columns: vec!["업체".to_owned(), "금액".to_owned(), "비고".to_owned()],
+                rows: vec![
+                    vec!["A사".to_owned(), "500만원".to_owned(), "STT 기준".to_owned()],
+                    vec!["B사".to_owned(), "620만원".to_owned(), "".to_owned()],
+                ],
+            })
+        );
+
+        // 다시 담으면 같은 문자열, 다시 읽으면 같은 노트.
+        let re_encoded = encode_content(&restored);
+        assert_eq!(re_encoded, content);
+        assert_eq!(
+            decode_content(&re_encoded, NoteType::Meeting).expect("왕복"),
+            restored
+        );
+    }
+
+    #[test]
+    fn a_v2_response_with_a_table_keeps_it_through_parse_and_storage() {
+        let body = r#"{"meetingTitle":"회의","meetingKind":"위클리","attendees":[],"reliabilityNotice":"녹음 기반","keySummary":["요약"],"previousActionItems":{"done":[],"changed":[],"inProgress":[],"noProgress":[],"notMentioned":[]},"topics":[{"title":"비교","groups":[{"heading":"","items":[],"table":{"columns":["안","장점"],"rows":[["1안","빠름"]]}}]}],"actionItems":[],"needsConfirmation":[]}"#;
+        let note = parse_note(NoteType::Meeting, body).expect("읽을 수 있어야 한다");
+        let StructuredNote::MeetingV2(ref inner) = note else { panic!() };
+        let table = inner.topics[0].groups[0].table.as_ref().expect("table이 남아야 한다");
+        assert_eq!(table.columns, ["안", "장점"]);
+        assert_eq!(table.rows, [["1안", "빠름"]]);
+
+        let content = encode_content(&note);
+        assert_eq!(
+            decode_content(&content, NoteType::Meeting).expect("다시 읽을 수 있어야 한다"),
+            note
+        );
     }
 
     // ── §7.5 content 봉투 ────────────────────────────────────────────────────────

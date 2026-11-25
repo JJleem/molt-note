@@ -1,0 +1,41 @@
+# Notion chunking keeps a GFM table as one unit
+# Runtime이 PLAN-20261125T033136Z 승인 시점에 생성했다 (proposal P3). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-110
+status: DONE
+
+request: |-
+  Change split_markdown in src-tauri/src/notion/chunk.rs so a GFM table block (consecutive lines starting with `|`, including a separator row) is one indivisible unit, like a code fence. A paragraph that fits the budget is kept whole as before, and when a paragraph exceeds the budget and is split at line boundaries, the split must not fall inside a table. A table that alone exceeds the budget is an Err (OversizedAtom), as for a code block; add a table value to AtomKind and its Display wording if needed. Keep the lossless-concatenation property. Tests: (d) when documents with tables are split with many paragraphs before and after, every table is wholly contained in one chunk; existing chunk tests still pass.
+
+execution:
+  role: impl
+
+stop_condition:
+  gates: [build, lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 3
+
+acceptance_criteria:
+  - id: P3-AC1
+    description: |-
+      A test shows that split_markdown never splits a table across two chunks and that concatenating the chunks gives back the input.
+    verification:
+      type: verifier
+      instruction: |-
+        Check that the new test in chunk.rs puts a table near a split boundary.
+  - id: P3-AC2
+    description: |-
+      Tests pass.
+    verification:
+      type: gate
+      ref: test
+  - id: P3-AC3
+    description: |-
+      Lint passes.
+    verification:
+      type: gate
+      ref: lint
+
+evidence: []
+
+failure_memo: []

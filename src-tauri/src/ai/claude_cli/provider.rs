@@ -55,7 +55,13 @@ pub const DEFAULT_MODEL: &str = "claude-sonnet-5";
 ///
 /// 2시간 회의도 이 안에 끝나야 한다. 넉넉하게 잡는 이유는 **끝나지 않는 것보다 늦는 것이
 /// 낫기 때문**이다 — 생성은 이미 배경 스레드에서 돌고 UI를 막지 않는다.
-pub const GENERATE_TIMEOUT: Duration = Duration::from_secs(600);
+///
+/// 30분(1800초)인 근거:
+/// - 75분 회의 한 건의 노트 생성이 실측 약 6분 걸렸다. 이전 값 10분(600초)은 그 두 배도 안 됐다.
+/// - 이미 113분짜리 녹음이 있다. 길이에 비례하면 그것만으로 9분 남짓이라 10분은 아슬아슬하다.
+/// - 2시간(120분) 회의가 들어가야 한다. 비례로 약 10분이고, 모델·네트워크 편차를 감안해
+///   세 배 남짓의 여유를 둔다.
+pub const GENERATE_TIMEOUT: Duration = Duration::from_secs(1800);
 
 /// 설치 여부만 물어볼 때의 시간.
 pub const PROBE_TIMEOUT: Duration = Duration::from_secs(20);

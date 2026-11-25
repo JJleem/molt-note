@@ -1,0 +1,54 @@
+# Additive table field in the Meeting v2 schema
+# Runtime이 PLAN-20261125T033136Z 승인 시점에 생성했다 (proposal P1). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-108
+status: DONE
+
+request: |-
+  Add an optional comparison table to the TopicGroup struct in src-tauri/src/ai/note.rs (e.g. `table: Option<TopicTable>`, where TopicTable has `columns: Vec<String>` and `rows: Vec<Vec<String>>`; use serde(default) and skip_serializing_if = Option::is_none). CONTENT_SCHEMA_VERSION stays 2. Add the matching optional property to the Meeting JSON schema from json_schema(NoteType::Meeting), and adjust the schema tests (e.g. the_schema_asks_for_exactly_the_fields_of_the_type, json_schema_meeting_reflects_v2_nested_structure) to the new shape. Add the same optional field to the Meeting v2 TopicGroup type in src/ipc/types.ts. If the schema change alters computed_prompt_version, update PROMPT_VERSION_MEETING in src-tauri/src/ai/prompt.rs so prompt_version_is_bound_to_the_prompt_text passes. Tests: (1) existing v2 JSON without a table field and v1 notes decode as before; (2) v2 JSON with a table decodes and round-trips intact. Do not change the prompt wording, the renderers, or Study/Summary.
+
+execution:
+  role: impl
+
+stop_condition:
+  gates: [build, lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 3
+
+acceptance_criteria:
+  - id: P1-AC1
+    description: |-
+      TopicGroup has an optional table field (columns, rows), and Meeting v2 JSON without the field decodes with the table as None.
+    verification:
+      type: verifier
+      instruction: |-
+        In src-tauri/src/ai/note.rs, check the TopicGroup table field, its serde default, and the decode test that has no table field.
+  - id: P1-AC2
+    description: |-
+      The Meeting JSON schema includes the optional table, and the TS type includes the same optional field.
+    verification:
+      type: verifier
+      instruction: |-
+        Check json_schema(Meeting) and the TopicGroup type in src/ipc/types.ts.
+  - id: P1-AC3
+    description: |-
+      Build, lint, and test pass.
+    verification:
+      type: gate
+      ref: test
+  - id: P1-AC4
+    description: |-
+      Build passes.
+    verification:
+      type: gate
+      ref: build
+  - id: P1-AC5
+    description: |-
+      Lint passes.
+    verification:
+      type: gate
+      ref: lint
+
+evidence: []
+
+failure_memo: []

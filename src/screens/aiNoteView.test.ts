@@ -402,6 +402,113 @@ describe('V2 Meeting → noteSections (AC-4-1 · AC-4-2 · AC-4-3)', () => {
   });
 });
 
+describe('V2 Meeting 비교표 → noteSections (P4-AC1 · P4-AC2)', () => {
+  const TABLE_TOPICS: readonly Topic[] = [
+    TOPICS[0],
+    {
+      title: '도구 비교',
+      groups: [
+        {
+          heading: '후보',
+          items: ['두 도구를 비교했다'],
+          table: {
+            columns: ['도구', '장점', '단점'],
+            rows: [
+              ['A', '빠름', '비쌈'],
+              ['B', '쌈'],
+              ['C', '안정', '느림', '넘치는 칸'],
+            ],
+          },
+        },
+        { heading: '결론', items: ['A를 쓴다'] },
+      ],
+    },
+  ];
+  const WITH_TABLE: MeetingNoteV2 = { ...MEETING_V2, topics: TABLE_TOPICS };
+  const WITHOUT_TABLE: MeetingNoteV2 = {
+    ...MEETING_V2,
+    topics: TABLE_TOPICS.map((topic) => ({
+      ...topic,
+      groups: topic.groups.map(({ heading, items }) => ({ heading, items })),
+    })),
+  };
+
+  it('표가 있는 묶음은 열과 행을 그대로 섹션에 싣는다 — 행은 열 수에 맞춘다', () => {
+    const section = noteSections(WITH_TABLE).find((s) => s.title === '도구 비교')!;
+    expect(section.kind).toBe('grouped');
+    expect(section.groups[0].table).toEqual({
+      columns: ['도구', '장점', '단점'],
+      rows: [
+        ['A', '빠름', '비쌈'],
+        ['B', '쌈', ''],
+        ['C', '안정', '느림'],
+      ],
+    });
+    expect(section.groups[0].items).toEqual(['두 도구를 비교했다']);
+    // 표가 없는 묶음에는 키 자체가 없다.
+    expect(section.groups[1]).not.toHaveProperty('table');
+  });
+
+  it('표가 없는 노트의 섹션은 이전과 똑같다 — 어떤 묶음에도 table 키가 없다', () => {
+    const sections = noteSections(MEETING_V2);
+    expect(sections.map((s) => s.title)).toEqual([
+      '핵심 요약',
+      '지난 액션 아이템',
+      '배포 전략',
+      '코드 리뷰 프로세스',
+      '액션 아이템',
+      '확인 필요',
+    ]);
+    expect(sections[2].groups).toEqual([
+      { heading: '현재 상태', items: ['스테이징 환경 구축 완료'] },
+      { heading: '결정 사항', items: ['블루-그린 배포 적용'] },
+    ]);
+    for (const section of sections) {
+      for (const group of section.groups) {
+        expect(group).not.toHaveProperty('table');
+      }
+    }
+  });
+
+  it('표를 뺀 같은 노트는 표가 붙은 노트에서 table만 빠진 섹션을 만든다', () => {
+    const withTable = noteSections(WITH_TABLE);
+    const withoutTable = noteSections(WITHOUT_TABLE);
+    const stripped = withTable.map((section) => ({
+      ...section,
+      groups: section.groups.map(({ heading, items }) => ({ heading, items })),
+    }));
+    expect(withoutTable).toEqual(stripped);
+  });
+
+  it('열이 없는 표는 그리지 않는다', () => {
+    const note: MeetingNoteV2 = {
+      ...MEETING_V2,
+      topics: [{ title: '빈 표', groups: [{ heading: 'h', items: ['x'], table: { columns: [], rows: [['a']] } }] }],
+    };
+    const section = noteSections(note).find((s) => s.title === '빈 표')!;
+    expect(section.groups[0]).not.toHaveProperty('table');
+  });
+
+  it('항목만 없고 표만 있는 묶음은 비어 있다고 말하지 않는다', () => {
+    const note: MeetingNoteV2 = {
+      ...MEETING_V2,
+      topics: [{ title: '표만', groups: [{ heading: 'h', items: [], table: { columns: ['a'], rows: [['1']] } }] }],
+    };
+    const section = noteSections(note).find((s) => s.title === '표만')!;
+    expect(section.emptyText).toBeNull();
+  });
+
+  it('한 줄 파이프 문자열 항목은 표가 되지 않고 글머리표 한 줄로 남는다', () => {
+    const pipe = '| a | b | |---|---| | 1 | 2 |';
+    const note: MeetingNoteV2 = {
+      ...MEETING_V2,
+      topics: [{ title: '파이프', groups: [{ heading: 'h', items: [pipe] }] }],
+    };
+    const section = noteSections(note).find((s) => s.title === '파이프')!;
+    expect(section.groups[0]).toEqual({ heading: 'h', items: [pipe] });
+  });
+});
+
 // ── AC-8-1: ~25KB V2 fixture의 앱 noteSections 통과 (E2E 검증의 TS 구간) ──────
 
 describe('large V2 Meeting fixture → noteSections (AC-8-1 · AC-8-2)', () => {

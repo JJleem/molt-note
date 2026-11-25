@@ -14,7 +14,10 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use molt_note_lib::audio::{CaptureFormat, CaptureMode, OpenCapture, SampleSink, SampleSource};
+use molt_note_lib::audio::{
+    CaptureFormat, CaptureIncident, CaptureMode, IncidentCause, OpenCapture, SampleSink,
+    SampleSource,
+};
 use molt_note_lib::commands::{
     finish_recording, LiveTranscriber, Recorder, Storage, Transcriber,
 };
@@ -91,11 +94,11 @@ fn idle_live() -> Arc<LiveTranscriber> {
 
 // ── 가짜 마이크 ─────────────────────────────────────────────────────────────
 
-/// 테스트가 직접 샘플을 보내는 마이크. `interrupted`로 stop 시 반환할 실패를 정한다.
+/// 테스트가 직접 샘플을 보내는 마이크. `interrupted`로 stop 시 반환할 사건을 정한다.
 #[derive(Clone)]
 struct ControlledMicrophone {
     sink: Arc<Mutex<Option<SampleSink>>>,
-    interrupted: Arc<Mutex<Option<Failure>>>,
+    interrupted: Arc<Mutex<Option<CaptureIncident>>>,
 }
 
 impl ControlledMicrophone {
@@ -106,10 +109,10 @@ impl ControlledMicrophone {
         }
     }
 
-    fn with_interrupted(failure: Failure) -> Self {
+    fn with_interrupted(incident: CaptureIncident) -> Self {
         Self {
             sink: Arc::new(Mutex::new(None)),
-            interrupted: Arc::new(Mutex::new(Some(failure))),
+            interrupted: Arc::new(Mutex::new(Some(incident))),
         }
     }
 
@@ -134,7 +137,7 @@ impl SampleSource for ControlledMicrophone {
             stop: Box::new(move || {
                 *sink.lock().expect("통로를 놓을 수 있어야 한다") = None;
                 match interrupted.lock().expect("interrupted를 빌릴 수 있어야 한다").take() {
-                    Some(failure) => Err(failure),
+                    Some(incident) => Err(incident),
                     None => Ok(()),
                 }
             }),
@@ -173,6 +176,16 @@ impl SampleSource for WriterFailMicrophone {
     }
 }
 
+/// 이벤트 로그에서 `finish_recording: 캡처 경고` 줄만 꺼낸다.
+fn capture_warning_log_lines(temp: &TempRoot) -> Vec<String> {
+    let log = std::fs::read_to_string(temp.path().join("app-data").join("molt-note-events.log"))
+        .unwrap_or_default();
+    log.lines()
+        .filter(|line| line.contains("finish_recording: 캡처 경고"))
+        .map(str::to_owned)
+        .collect()
+}
+
 fn setup(
     temp: &TempRoot,
     source: impl SampleSource + Send + Sync + 'static,
@@ -192,10 +205,15 @@ fn setup(
 #[test]
 fn queue_overflow_saves_a_record_with_capture_warning() {
     let temp = TempRoot::new("queue-overflow");
-    let mic = ControlledMicrophone::with_interrupted(Failure::retryable(
-        FailureKind::AudioDevice,
-        "큐가 넘쳤다. 일부 구간이 유실됐을 수 있다.",
-    ));
+    let mic = ControlledMicrophone::with_interrupted(CaptureIncident {
+        cause: IncidentCause::QueueOverflow,
+        elapsed_secs: Some(330),
+        failure: Failure::retryable(
+            FailureKind::AudioDevice,
+            "큐가 넘쳤다. 일부 구간이 유실됐을 수 있다.",
+        )
+        .with_detail("queue full"),
+    });
     let mic_handle = mic.clone();
     let (recorder, storage, transcriber, clock) = setup(&temp, mic);
 
@@ -234,6 +252,61 @@ fn queue_overflow_saves_a_record_with_capture_warning() {
         "DB의 capture_warning: {:?}",
         reloaded.capture_warning,
     );
+
+    // 원인이 값으로 payload까지 올라왔다.
+    let incident = stopped.capture.incident.as_ref().expect("원인이 있어야 한다");
+    assert_eq!(incident.cause, "queue_overflow");
+    assert_eq!(incident.kind, FailureKind::AudioDevice);
+    assert_eq!(incident.elapsed_seconds, Some(330));
+    assert_eq!(incident.detail.as_deref(), Some("queue full"));
+
+    // 이벤트 로그 줄이 원인 · 종류 · 경과 시간 · detail을 담는다 (f).
+    let lines = capture_warning_log_lines(&temp);
+    assert_eq!(lines.len(), 1, "캡처 경고 줄이 하나 있어야 한다: {lines:?}");
+    let line = &lines[0];
+    assert!(line.contains("cause=queue_overflow"), "{line}");
+    assert!(!line.contains("cause=stream_error"), "{line}");
+    assert!(line.contains("kind=audioDevice"), "{line}");
+    assert!(line.contains("elapsed_s=330"), "{line}");
+    assert!(line.contains("detail=\"queue full\""), "{line}");
+}
+
+// ── 원인은 문장이 아니라 값에서 온다 ─────────────────────────────────────────
+
+/// 같은 경고 문장이어도 원인 값이 다르면 로그 줄이 다르다 — 문장을 뜯어 추측하지 않는다 (f).
+#[test]
+fn the_log_line_cause_comes_from_the_value_not_the_message() {
+    let message = "녹음 시작 후 약 2분 무렵 일부 구간이 유실됐을 수 있다";
+    let mut lines = Vec::new();
+    for cause in [IncidentCause::QueueOverflow, IncidentCause::StreamError] {
+        let temp = TempRoot::new("cause-by-value");
+        let mic = ControlledMicrophone::with_interrupted(CaptureIncident {
+            cause,
+            elapsed_secs: Some(125),
+            failure: Failure::retryable(FailureKind::AudioDevice, message),
+        });
+        let mic_handle = mic.clone();
+        let (recorder, storage, transcriber, clock) = setup(&temp, mic);
+        recorder
+            .start(DEVICE_KEY, CaptureMode::Microphone)
+            .expect("시작할 수 있어야 한다");
+        mic_handle.speak(1_000);
+        clock.advance(5_000);
+        let stopped = finish_recording(&recorder, &storage, &transcriber, &idle_live(), None)
+            .expect("파일이 온전하면 경고와 함께 성공이다");
+        assert_eq!(stopped.warning.as_deref(), Some(message));
+
+        let found = capture_warning_log_lines(&temp);
+        assert_eq!(found.len(), 1, "{found:?}");
+        lines.push(found[0].clone());
+    }
+
+    assert!(lines[0].contains("cause=queue_overflow"), "{}", lines[0]);
+    assert!(lines[1].contains("cause=stream_error"), "{}", lines[1]);
+    for line in &lines {
+        assert!(line.contains(message), "경고 문장도 함께 남는다: {line}");
+        assert!(line.contains("elapsed_s=125"), "{line}");
+    }
 }
 
 // ── 시나리오 (b): 스트림 오류 ────────────────────────────────────────────────
@@ -241,10 +314,15 @@ fn queue_overflow_saves_a_record_with_capture_warning() {
 #[test]
 fn stream_error_saves_a_record_with_capture_warning() {
     let temp = TempRoot::new("stream-error");
-    let mic = ControlledMicrophone::with_interrupted(Failure::retryable(
-        FailureKind::AudioDevice,
-        "녹음이 중간에 끊겼다. 스트림 오류가 발생했다.",
-    ));
+    let mic = ControlledMicrophone::with_interrupted(CaptureIncident {
+        cause: IncidentCause::StreamError,
+        elapsed_secs: Some(42),
+        failure: Failure::retryable(
+            FailureKind::AudioDevice,
+            "녹음이 중간에 끊겼다. 스트림 오류가 발생했다.",
+        )
+        .with_detail("device disconnected"),
+    });
     let mic_handle = mic.clone();
     let (recorder, storage, transcriber, clock) = setup(&temp, mic);
 
@@ -282,6 +360,20 @@ fn stream_error_saves_a_record_with_capture_warning() {
         "DB의 capture_warning: {:?}",
         reloaded.capture_warning,
     );
+
+    let incident = stopped.capture.incident.as_ref().expect("원인이 있어야 한다");
+    assert_eq!(incident.cause, "stream_error");
+    assert_eq!(incident.elapsed_seconds, Some(42));
+
+    // 이벤트 로그 줄이 원인 · 종류 · 경과 시간 · detail을 담는다 (f).
+    let lines = capture_warning_log_lines(&temp);
+    assert_eq!(lines.len(), 1, "캡처 경고 줄이 하나 있어야 한다: {lines:?}");
+    let line = &lines[0];
+    assert!(line.contains("cause=stream_error"), "{line}");
+    assert!(!line.contains("cause=queue_overflow"), "{line}");
+    assert!(line.contains("kind=audioDevice"), "{line}");
+    assert!(line.contains("elapsed_s=42"), "{line}");
+    assert!(line.contains("detail=\"device disconnected\""), "{line}");
 }
 
 // ── 시나리오 (c): 정상 ──────────────────────────────────────────────────────
@@ -317,6 +409,8 @@ fn clean_stop_saves_a_record_without_capture_warning() {
         reloaded.capture_warning, None,
         "DB 레코드의 capture_warning도 None이어야 한다"
     );
+    assert_eq!(stopped.capture.incident, None);
+    assert!(capture_warning_log_lines(&temp).is_empty(), "경고가 없으면 경고 줄도 없다");
 }
 
 // ── 시나리오 (d): 파일 확정 실패 ────────────────────────────────────────────

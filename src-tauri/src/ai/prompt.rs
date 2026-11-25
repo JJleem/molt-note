@@ -55,8 +55,11 @@ You turn a meeting transcript into a structured meeting note following the team'
 Return exactly one JSON object and nothing else. No prose before or after it, no code fence,
 no explanation.
 
-The transcript may include [HH:MM:SS] timestamps before each segment. Use these timestamps when
-referencing specific moments (e.g. broken segments, uncertain passages).
+The transcript is plain text, one segment per line, with no times.
+
+Do not write transcript times (e.g. [HH:MM:SS], 00:03:23) anywhere in the output. When you need
+to point at an uncertain or broken part, refer to it by what was being discussed
+(e.g. \"the repeated-recognition part during the coating-thickness-gauge discussion\").
 
 The object has exactly these keys:
 
@@ -80,7 +83,7 @@ The object has exactly these keys:
   not discussed this time). Only include items actually mentioned in the transcript. Do not guess
   the status of items that were not mentioned. All five keys must be present; use empty arrays when
   nothing applies.
-- \"topics\": array of objects { \"title\": string, \"groups\": [{ \"heading\": string, \"items\": [string] }] }.
+- \"topics\": array of objects { \"title\": string, \"groups\": [{ \"heading\": string, \"items\": [string], \"table\"?: { \"columns\": [string], \"rows\": [[string]] } }] }.
   Number each topic (\"1. ...\", \"2. ...\"). Group by topic, not by chronological order. Use empty
   string for heading when no subheading is needed; use \"**bold subheading**\" when grouping within
   a topic. Write short declarative sentences (~함, ~예정, ~하기로 함). Markers:
@@ -88,9 +91,11 @@ The object has exactly these keys:
   ⚠️ for problems/risks/warnings,
   → for resulting actions or decisions.
   Mark uncertain proper nouns/numbers with STT상 '...' and uncertain sentences with (STT 기준).
-  When amounts conflict or a passage is unclear, do not transcribe — describe the context and
-  reference the transcript timestamp in a > quote block.
-  Use tables for comparisons (schedule stages, candidate comparisons) when helpful.
+  When amounts conflict or a passage is unclear, do not transcribe — describe the context in a
+  > quote block, naming the part by what was being discussed.
+  For comparisons (schedule stages, candidate comparisons), put the table only in the group's
+  optional \"table\" field (omit the field when there is no table). Never write table syntax
+  (|, |---|) inside string items.
 - \"actionItems\": array of objects { \"task\": string, \"detail\": string, \"owner\": string, \"due\": string, \"period\": string }.
   task: the action to take. detail: context or follow-up notes.
   owner: use \"담당 확인\" if unknown, \"<name>(추정)\" if guessed from context.
@@ -99,9 +104,10 @@ The object has exactly these keys:
   Do not invent action items not discussed in the meeting.
 - \"needsConfirmation\": array of strings. Items requiring human verification:
   uncertain attendees or titles,
-  ambiguous speaker attribution with stakes (include transcript timestamp),
+  ambiguous speaker attribution with stakes (name the part by what was being discussed),
   suspected STT errors in proper nouns/numbers (show what was heard: STT상 '...'),
-  and repeated/broken transcription segments that should not be read as content (with timestamps).
+  and repeated/broken transcription segments that should not be read as content (name each by
+  what was being discussed, not by time).
 
 Rules:
 - Use only what the transcript says. Do not invent decisions, owners, dates, or facts.
@@ -165,7 +171,7 @@ Transcript:
 ///
 /// **손으로 선언한 값이다.** 프롬프트나 schema를 고치면 [`computed_prompt_version`]이 다른 값을
 /// 내고 `prompt_version_is_bound_to_the_prompt_text` 테스트가 깨진다. 그때 이 값을 함께 고친다.
-pub const PROMPT_VERSION_MEETING: &str = "v1.meeting.54529c96";
+pub const PROMPT_VERSION_MEETING: &str = "v1.meeting.b2f3ba75";
 
 /// Study 프롬프트의 `promptVersion`. [`PROMPT_VERSION_MEETING`]과 같은 규칙이다.
 pub const PROMPT_VERSION_STUDY: &str = "v1.study.2cfad6a0";
@@ -324,6 +330,34 @@ pub fn segments_to_timestamped_text(segments: &[TranscriptSegment], raw_text: &s
     }
 
     lines.join("\n")
+}
+
+/// segments를 시각 없이 텍스트 한 줄씩의 문자열로 조립한다.
+///
+/// 빈 segment는 건너뛰고, segments가 비어 있으면 `raw_text`를 그대로 돌려준다
+/// ([`segments_to_timestamped_text`]와 같은 규칙).
+pub fn segments_to_plain_text(segments: &[TranscriptSegment], raw_text: &str) -> String {
+    if segments.is_empty() {
+        return raw_text.to_owned();
+    }
+
+    segments
+        .iter()
+        .map(|segment| segment.text.trim())
+        .filter(|text| !text.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// 그 mode의 프롬프트 입력 텍스트.
+///
+/// Meeting은 시각 없는 평문이다 — 시각이 입력에 있으면 모델이 그것을 회의록에 옮겨 적는다.
+/// Study와 Summary는 `[HH:MM:SS] 텍스트` 형식 그대로다.
+pub fn transcript_input(mode: NoteType, segments: &[TranscriptSegment], raw_text: &str) -> String {
+    match mode {
+        NoteType::Meeting => segments_to_plain_text(segments, raw_text),
+        NoteType::Study | NoteType::Summary => segments_to_timestamped_text(segments, raw_text),
+    }
 }
 
 /// transcript 텍스트를 프롬프트 입력으로 준비한다 — **보내기 전에 크기를 판정하는 자리다.**
@@ -620,7 +654,7 @@ mod tests {
         let budget = ContextBudget {
             context_tokens: 131_072,
         };
-        let prepared = prepare(NoteType::Meeting, &text, budget).expect("들어가야 한다");
+        let prepared = prepare(NoteType::Study, &text, budget).expect("들어가야 한다");
         assert!(prepared.prompt.contains("[00:00:03]"));
         assert!(prepared.prompt.contains("[00:01:05]"));
     }
@@ -678,5 +712,124 @@ mod tests {
         // 프롬프트 원문의 첫 문장이 기존과 같다.
         assert!(STUDY_PROMPT.starts_with("You turn a lecture or study session transcript"));
         assert!(SUMMARY_PROMPT.starts_with("You turn a transcript into a short structured summary"));
+    }
+
+    // ── Phase 5.12: Meeting은 시각을 받지도 쓰지도 않는다 ──────────────────────────
+
+    /// `[dd:dd:dd]` 꼴이 들어 있는가.
+    fn has_bracketed_time(text: &str) -> bool {
+        let bytes = text.as_bytes();
+        bytes.windows(10).any(|w| {
+            w[0] == b'['
+                && w[9] == b']'
+                && w[3] == b':'
+                && w[6] == b':'
+                && [1, 2, 4, 5, 7, 8].iter().all(|&i| w[i].is_ascii_digit())
+        })
+    }
+
+    /// `dd:dd:dd` 꼴이 들어 있는가 (괄호 유무와 무관).
+    fn has_bare_time(text: &str) -> bool {
+        let bytes = text.as_bytes();
+        bytes.windows(8).any(|w| {
+            w[2] == b':' && w[5] == b':' && [0, 1, 3, 4, 6, 7].iter().all(|&i| w[i].is_ascii_digit())
+        })
+    }
+
+    fn fake_segments() -> Vec<TranscriptSegment> {
+        vec![
+            TranscriptSegment {
+                start_ms: 203_000,
+                end_ms: 206_000,
+                text: "장비 예산 이야기".to_owned(),
+            },
+            TranscriptSegment {
+                start_ms: 206_000,
+                end_ms: 207_000,
+                text: "   ".to_owned(),
+            },
+            TranscriptSegment {
+                start_ms: 3_725_000,
+                end_ms: 3_730_000,
+                text: "다음 주 일정 확정".to_owned(),
+            },
+        ]
+    }
+
+    #[test]
+    fn the_meeting_prompt_has_no_instruction_to_use_or_include_timestamps() {
+        for old in [
+            "Use these timestamps",
+            "include transcript timestamp",
+            "(with timestamps)",
+            "reference the transcript timestamp",
+            "timestamps before each segment",
+        ] {
+            assert!(
+                !MEETING_PROMPT.contains(old),
+                "옛 시각 지시가 남아 있다: {old}"
+            );
+        }
+        assert!(
+            !MEETING_PROMPT.to_lowercase().contains("timestamp"),
+            "Meeting 프롬프트에 timestamp라는 말 자체가 없다"
+        );
+    }
+
+    #[test]
+    fn the_meeting_prompt_tells_the_model_not_to_write_times() {
+        assert!(MEETING_PROMPT.contains("Do not write transcript times"));
+        assert!(MEETING_PROMPT.contains("refer to it by what was being discussed"));
+        assert!(MEETING_PROMPT.contains("with no times"), "입력에 시각이 없다고 말한다");
+    }
+
+    #[test]
+    fn the_meeting_prompt_keeps_tables_in_the_table_field_only() {
+        assert!(MEETING_PROMPT.contains("put the table only in the group's"));
+        assert!(MEETING_PROMPT.contains("Never write table syntax"));
+        assert!(MEETING_PROMPT.contains("inside string items"));
+        assert!(
+            !MEETING_PROMPT.contains("Use tables for comparisons"),
+            "표를 어디에 둘지 말하지 않는 옛 지시가 없다"
+        );
+    }
+
+    #[test]
+    fn the_meeting_input_has_no_times_and_keeps_the_text() {
+        let input = transcript_input(NoteType::Meeting, &fake_segments(), "fallback");
+
+        assert_eq!(input, "장비 예산 이야기\n다음 주 일정 확정");
+        assert!(!has_bracketed_time(&input));
+        assert!(!has_bare_time(&input));
+
+        let prepared = prepare(NoteType::Meeting, &input, ContextBudget::DEFAULT)
+            .expect("들어가야 한다");
+        assert!(
+            !has_bracketed_time(&prepared.prompt),
+            "Meeting으로 보내는 프롬프트 전체에 [HH:MM:SS] 꼴이 없다"
+        );
+        assert_eq!(prepared.prompt_version, PROMPT_VERSION_MEETING);
+    }
+
+    #[test]
+    fn the_meeting_input_falls_back_to_raw_text() {
+        assert_eq!(
+            transcript_input(NoteType::Meeting, &[], "원본 텍스트 그대로"),
+            "원본 텍스트 그대로"
+        );
+    }
+
+    #[test]
+    fn the_study_and_summary_input_is_unchanged() {
+        let segments = fake_segments();
+        for mode in [NoteType::Study, NoteType::Summary] {
+            let input = transcript_input(mode, &segments, "fallback");
+            assert_eq!(
+                input,
+                segments_to_timestamped_text(&segments, "fallback"),
+                "{mode}: 입력은 예전 그대로다"
+            );
+            assert_eq!(input, "[00:03:23] 장비 예산 이야기\n[01:02:05] 다음 주 일정 확정");
+        }
     }
 }

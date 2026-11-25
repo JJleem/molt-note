@@ -3,7 +3,7 @@
 이 문서는 프로젝트의 **최상위 지도**다. 상세 구현 문서가 아니라 진입점이다.
 상세는 §8의 문서로 넘긴다.
 
-> **현재 상태: Phase 5.11까지 engineering DONE. 그 뒤 2026-09-08의 변경들은 Runtime을
+> **현재 상태: Phase 5.12까지 engineering DONE. 그 뒤 2026-09-08의 변경들은 Runtime을
 > 거치지 않았다 (§5.9).**
 >
 > ⚠️ **2026-09-08은 이 저장소가 Runtime 밖에서 하루를 보낸 날이다.** Phase 5.9의 Plan은
@@ -101,6 +101,8 @@
 > - **2026-11-25 Phase 5.11 engineering DONE** — 정지가 확정된 녹음을 버리지 않는다 · 캡처 경고
 >   영속(migration 11) · 이벤트 로그 · 입양 시각 = 파일 이름. 2026-11-16 실제 회의(75분)에서 경고와
 >   함께 저장된 것을 확인했다 (§5)
+> - **2026-11-25 Phase 5.12 engineering DONE** — Meeting 노트에 전사 시각 없음 · 표는 전용 필드로
+>   GFM 표 블록(Notion 붙여넣기·전송에서 표) · claude-cli 생성 제한 1800s · 사건 원인 로그 · 경고 "약 N분"
 
 ---
 
@@ -945,6 +947,22 @@ content schema v2: `meetingTitle` · `meetingKind` · `attendees` · `reliabilit
 
 Plan `PLAN-20261116T005546Z` · 7 Task DONE (TASK-105는 gate-only 계약이라 사람의 `transition`,
 `LOOP-RUNTIME-FIELD-NOTES` OBS-030).
+
+### Phase 5.12 — Clean Minutes · Tables · Capture Cause · 2026-11-25 · **engineering DONE**
+
+5.10을 실제 75분 회의에 처음 써 보고 드러난 것을 고쳤다 (`phase-prompt/05.12-clean-minutes-and-capture-cause.md`).
+
+- **Meeting 노트에 전사 시각이 없다.** Meeting 프롬프트 입력은 시각 없는 평문이고, 출력에 시각을 쓰지 말라고
+  지시한다. 불확실한 구간은 내용으로 가리킨다. Study · Summary 입력은 `[HH:MM:SS]` 그대로.
+- **표는 group의 선택 필드 `table { columns, rows }`** (schema v2에 additive). Markdown은 빈 줄로 둘러싼 GFM 표
+  블록으로 내고, 문자열 항목에 섞여 온 표 문법은 깨진 한 줄 표가 되지 않게 중화한다. Notion 분할은 표를
+  자르지 않는다. 앱 화면도 표를 보인다. 표 필드 없는 기존 노트는 그대로.
+- claude-cli 생성 제한 600s → 1800s (2시간 회의).
+- 녹음 중 사건 로그에 원인(큐 넘침 / 스트림 오류)과 경과 시간. 경고 문구는 "녹음 시작 후 약 N분 무렵".
+
+**실제 provider 호출로는 아직 확인하지 않았다** — 사용자가 노트를 다시 만들 때 확인된다.
+
+Plan `PLAN-20261125T033136Z` · 9 Task DONE (TASK-116은 Plan 실행 timeout 뒤 `execute`로 마무리, OBS-033).
 
 ### Phase 6 — Cross-platform Validation & Hardening · **PLANNED**
 ---

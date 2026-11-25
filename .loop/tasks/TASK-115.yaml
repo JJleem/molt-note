@@ -1,0 +1,52 @@
+# Log the capture incident's cause and show units in the warning
+# Runtime이 PLAN-20261125T033136Z 승인 시점에 생성했다 (proposal P8). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-115
+status: DONE
+
+request: |-
+  (1) In src-tauri/src/audio/system_capture.rs, change the warning text from '{HH:MM} 무렵' to '녹음 시작 후 약 N분 무렵' ('about N minutes after recording started') so the unit is visible (replace or fix format_elapsed_hhmm). Distinguish less than 1 minute naturally. (2) Keep the incident's kind (FailureKind), detail, and cause class (queue overflow vs stream error — keep it as a value, e.g. an enum, not by comparing message text) plus the elapsed time (seconds) all the way to the stop result. Today ActiveCapture::stop in capture.rs keeps only failure.message as warning, so add a structured cause field to CaptureReport (or similar). If an IPC payload changes, update src/ipc/types.ts too. (3) Write that cause into the 'finish_recording: 캡처 경고' event-log line in finish_recording in src-tauri/src/commands/mod.rs (e.g. cause=queue_overflow kind=AudioDevice elapsed_s=… detail=…). Do not write audio or transcript content (INV-6). Do not change warning text already saved in the DB. Tests: (f) for both the queue-overflow and stream-error cases, the log line (or the string that builds it) distinguishes the cause; (g) the warning text contains '분' (minutes) and not the old '00:00 무렵' form; adjust the existing capture.rs test that expects '00:05'. Do not change the queue size (256).
+
+execution:
+  role: impl
+
+stop_condition:
+  gates: [build, lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 3
+
+acceptance_criteria:
+  - id: P8-AC1
+    description: |-
+      The event-log line distinguishes queue overflow from stream error and includes kind, detail, and elapsed time (there is a test).
+    verification:
+      type: verifier
+      instruction: |-
+        Confirm the cause is passed as a value rather than inferred from message text, and that no audio or transcript content enters the log.
+  - id: P8-AC2
+    description: |-
+      The warning text reads '녹음 시작 후 약 N분' ('about N minutes after recording started'), with the unit visible (there is a test).
+    verification:
+      type: verifier
+  - id: P8-AC3
+    description: |-
+      Tests pass.
+    verification:
+      type: gate
+      ref: test
+  - id: P8-AC4
+    description: |-
+      Build passes.
+    verification:
+      type: gate
+      ref: build
+  - id: P8-AC5
+    description: |-
+      Lint passes.
+    verification:
+      type: gate
+      ref: lint
+
+evidence: []
+
+failure_memo: []

@@ -22,7 +22,10 @@ use std::time::{Duration, Instant};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
-use crate::audio::capture::{CaptureFormat, OpenCapture, SampleSink, SampleSource, SinkError};
+use crate::audio::capture::{
+    lost_segment_warning, CaptureFormat, CaptureIncident, IncidentCause, OpenCapture, SampleSink,
+    SampleSource, SinkError,
+};
 use crate::audio::devices::{catalog, selection_keys, ObservedInputDevice};
 use crate::audio::system_devices::name_of;
 use crate::domain::{Failure, FailureKind};
@@ -31,9 +34,10 @@ use crate::domain::{Failure, FailureKind};
 ///
 /// 오디오 콜백은 실패를 돌려줄 곳이 없다 — 그래서 여기에 적어 두고 정지 시점에 꺼낸다.
 /// 녹음 시작 시각도 함께 두어 사건 발생의 경과 시간을 구한다.
+/// 원인 분류([`IncidentCause`])는 사건이 기록되는 자리에서 **값으로** 정해진다.
 struct InterruptSlot {
     started_at: Instant,
-    event: Option<(Failure, Duration)>,
+    event: Option<(IncidentCause, Failure, Duration)>,
 }
 
 type Interrupted = Arc<Mutex<InterruptSlot>>;
@@ -107,26 +111,29 @@ impl SampleSource for SystemSampleSource {
                     return Err(Failure::retryable(
                         FailureKind::AudioDevice,
                         "녹음을 멈추는 중 문제가 있었다.",
-                    ));
+                    )
+                    .into());
                 }
                 match interrupted.lock() {
                     Ok(mut slot) => match slot.event.take() {
-                        Some((failure, elapsed)) => {
-                            let hhmm = format_elapsed_hhmm(elapsed);
-                            Err(Failure {
-                                message: format!("{hhmm} 무렵 일부 구간이 유실됐을 수 있다"),
+                        Some((cause, failure, elapsed)) => Err(CaptureIncident {
+                            cause,
+                            elapsed_secs: Some(elapsed.as_secs()),
+                            failure: Failure {
+                                message: lost_segment_warning(elapsed),
                                 detail: failure.detail.or(Some(failure.message)),
                                 kind: failure.kind,
                                 source_data_safe: failure.source_data_safe,
                                 retryable: failure.retryable,
-                            })
-                        }
+                            },
+                        }),
                         None => Ok(()),
                     },
                     Err(_) => Err(Failure::retryable(
                         FailureKind::AudioDevice,
                         "녹음이 끝까지 정상이었는지 확인하지 못했다.",
-                    )),
+                    )
+                    .into()),
                 }
             }),
         })
@@ -274,6 +281,7 @@ fn forward_f32(
 fn note_stream_error(interrupted: &Interrupted, error: impl std::fmt::Display) {
     note(
         interrupted,
+        IncidentCause::StreamError,
         Failure::retryable(FailureKind::AudioDevice, "녹음이 중간에 끊겼다.").with_detail(error),
     );
 }
@@ -288,6 +296,7 @@ fn deliver(samples: &SampleSink, interrupted: &Interrupted, chunk: Vec<i16>) {
         // 큐가 찼다. **버렸다는 사실을 숨기지 않는다** — 정지할 때 사용자에게 알린다 (R-005).
         Err(SinkError::Full) => note(
             interrupted,
+            IncidentCause::QueueOverflow,
             Failure::retryable(
                 FailureKind::AudioDevice,
                 "저장이 녹음을 따라가지 못해 일부 구간이 유실됐다.",
@@ -301,22 +310,14 @@ fn deliver(samples: &SampleSink, interrupted: &Interrupted, chunk: Vec<i16>) {
 /// 캡처 도중의 사건을 적어 둔다. **먼저 일어난 것 하나만 남긴다** —
 /// 같은 사건이 콜백마다 반복돼도 사용자에게 필요한 것은 한 문장이다.
 ///
-/// 녹음 시작 기준 경과 시간도 함께 기록한다.
-fn note(interrupted: &Interrupted, failure: Failure) {
+/// 녹음 시작 기준 경과 시간과 원인 분류도 함께 기록한다.
+fn note(interrupted: &Interrupted, cause: IncidentCause, failure: Failure) {
     if let Ok(mut slot) = interrupted.lock() {
         if slot.event.is_none() {
             let elapsed = slot.started_at.elapsed();
-            slot.event = Some((failure, elapsed));
+            slot.event = Some((cause, failure, elapsed));
         }
     }
-}
-
-/// 경과 시간을 `HH:MM` 형식으로.
-fn format_elapsed_hhmm(duration: Duration) -> String {
-    let total_secs = duration.as_secs();
-    let hours = total_secs / 3600;
-    let minutes = (total_secs % 3600) / 60;
-    format!("{hours:02}:{minutes:02}")
 }
 
 /// 32-bit 실수 샘플 하나를 16-bit PCM으로. 범위를 벗어난 값은 잘라 낸다.
@@ -340,12 +341,31 @@ mod tests {
         assert_eq!(to_i16(-1.0), -i16::MAX);
     }
 
+    /// 사건의 원인은 기록하는 자리에서 값으로 정해지고, 먼저 일어난 것 하나만 남는다.
     #[test]
-    fn elapsed_time_formats_as_zero_padded_hours_and_minutes() {
-        assert_eq!(format_elapsed_hhmm(Duration::from_secs(0)), "00:00");
-        assert_eq!(format_elapsed_hhmm(Duration::from_secs(5 * 60 + 30)), "00:05");
-        assert_eq!(format_elapsed_hhmm(Duration::from_secs(3600 + 120)), "01:02");
-        assert_eq!(format_elapsed_hhmm(Duration::from_secs(36_000)), "10:00");
+    fn noted_incidents_keep_their_cause_as_a_value() {
+        let slot: Interrupted = Arc::new(Mutex::new(InterruptSlot {
+            started_at: Instant::now(),
+            event: None,
+        }));
+        note_stream_error(&slot, "device disconnected");
+        note(
+            &slot,
+            IncidentCause::QueueOverflow,
+            Failure::retryable(FailureKind::AudioDevice, "나중 사건"),
+        );
+
+        let (cause, failure, _) = slot.lock().unwrap().event.take().expect("사건이 있다");
+        assert_eq!(cause, IncidentCause::StreamError, "먼저 일어난 것이 남는다");
+        assert_eq!(failure.detail.as_deref(), Some("device disconnected"));
+    }
+
+    /// 경고 문장은 경과 분으로 말한다 — 예전의 `00:05 무렵` 꼴이 아니다.
+    #[test]
+    fn the_warning_text_states_minutes_since_the_start() {
+        let text = lost_segment_warning(Duration::from_secs(5 * 60 + 30));
+        assert!(text.contains("약 5분"), "{text}");
+        assert!(!text.contains("00:05"), "{text}");
     }
 
     #[test]

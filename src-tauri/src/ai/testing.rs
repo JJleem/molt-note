@@ -260,6 +260,7 @@ pub fn sample_note(mode: NoteType) -> StructuredNote {
                 groups: vec![TopicGroup {
                     heading: "".to_owned(),
                     items: vec!["다음 주에 다시 정리한다".to_owned()],
+                    table: None,
                 }],
             }],
             action_items: vec![ActionItemV2 {

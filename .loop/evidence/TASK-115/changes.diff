@@ -1,0 +1,835 @@
+diff --git a/src-tauri/src/audio/capture.rs b/src-tauri/src/audio/capture.rs
+index 1c6d722..cd8045e 100644
+--- a/src-tauri/src/audio/capture.rs
++++ b/src-tauri/src/audio/capture.rs
+@@ -149,6 +149,85 @@ pub struct CaptureReport {
+     /// 장치 정지가 실패했더라도 파일이 확정됐으면 그 사실을 여기에 담고 `Ok`를 돌려준다 —
+     /// 이미 녹음된 것을 실패로 버리지 않는다.
+     pub warning: Option<String>,
++    /// 경고의 **구조화된 원인** — 원인 분류 · 종류 · 기술적 표현 · 경과 시간.
++    ///
++    /// [`Self::warning`]은 사람이 읽는 문장이고, 이 값은 로그와 진단이 읽는 값이다.
++    /// 원인은 문장을 뜯어 추측하지 않고 **사건이 기록된 자리에서 값으로** 정해진다.
++    pub incident: Option<CaptureIncident>,
++}
++
++/// 캡처 도중의 사건이 **어디서 왔는가.** 메시지 문장이 아니라 값으로 구분한다.
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
++pub enum IncidentCause {
++    /// 저장이 녹음을 따라가지 못해 샘플 큐([`SAMPLE_QUEUE_CAPACITY`])가 찼다.
++    QueueOverflow,
++    /// 장치 스트림 자체가 오류를 알렸다.
++    StreamError,
++    /// 그 밖의 정지 실패 (스레드 정리 실패 · 원인을 분류하지 않은 장치 등).
++    Other,
++}
++
++impl IncidentCause {
++    /// 로그에 남기는 이름.
++    pub const fn as_key(self) -> &'static str {
++        match self {
++            Self::QueueOverflow => "queue_overflow",
++            Self::StreamError => "stream_error",
++            Self::Other => "other",
++        }
++    }
++}
++
++/// 장치 정지가 돌려주는 사건 하나 — 실패와 그 **원인 분류**, 그리고 녹음 시작 기준 경과 시간.
++#[derive(Debug, Clone, PartialEq, Eq)]
++pub struct CaptureIncident {
++    pub cause: IncidentCause,
++    /// 녹음 시작부터 사건까지의 경과 시간(초). 모르면 없음이다.
++    pub elapsed_secs: Option<u64>,
++    /// 사용자에게 보일 문장(`message`)과 종류(`kind`) · 기술적 표현(`detail`).
++    pub failure: Failure,
++}
++
++impl CaptureIncident {
++    /// 이벤트 로그에 붙이는 `key=value` 필드들.
++    ///
++    /// **오디오 · 전사 내용은 들어가지 않는다** (INV-6) — 원인 분류 · 실패 종류 · 경과 시간 ·
++    /// 장치가 알려준 기술적 표현뿐이다. `detail`은 따옴표로 감싸 한 줄을 깨지 않게 한다.
++    pub fn log_fields(&self) -> String {
++        let elapsed = self
++            .elapsed_secs
++            .map_or_else(|| "unknown".to_string(), |secs| secs.to_string());
++        let detail = self.failure.detail.as_deref().unwrap_or("");
++        format!(
++            "cause={} kind={} elapsed_s={elapsed} detail={detail:?}",
++            self.cause.as_key(),
++            self.failure.kind,
++        )
++    }
++}
++
++impl From<Failure> for CaptureIncident {
++    /// 원인을 분류하지 않은 정지 실패.
++    fn from(failure: Failure) -> Self {
++        Self {
++            cause: IncidentCause::Other,
++            elapsed_secs: None,
++            failure,
++        }
++    }
++}
++
++/// 캡처 도중 일부 구간이 유실됐을 수 있다는 경고 문장.
++///
++/// 시각처럼 보이는 `00:05`가 아니라 **녹음 시작 기준 경과 분**으로 말한다 — 단위가 보여야
++/// 사람이 녹음의 어디쯤인지 안다. 1분이 되기 전이면 그렇게 말한다.
++pub fn lost_segment_warning(elapsed: std::time::Duration) -> String {
++    let minutes = elapsed.as_secs() / 60;
++    if minutes == 0 {
++        "녹음 시작 후 1분 안에 일부 구간이 유실됐을 수 있다".to_string()
++    } else {
++        format!("녹음 시작 후 약 {minutes}분 무렵 일부 구간이 유실됐을 수 있다")
++    }
+ }
+ 
+ /// 파일에 쓰는 쪽으로 흘러가는 것.
+@@ -266,8 +345,8 @@ pub struct OpenCapture {
+     pub device_label: String,
+     /// 장치가 알려준 형식.
+     pub format: CaptureFormat,
+-    /// 장치를 멈춘다. **캡처가 도중에 끊겼다면 그 사실을 여기서 돌려준다.**
+-    pub stop: Box<dyn FnOnce() -> Result<(), Failure> + Send>,
++    /// 장치를 멈춘다. **캡처가 도중에 끊겼다면 그 사실을 원인과 함께 여기서 돌려준다.**
++    pub stop: Box<dyn FnOnce() -> Result<(), CaptureIncident> + Send>,
+ }
+ 
+ /// 실제 장치에서 샘플을 받는 경계.
+@@ -292,7 +371,7 @@ pub struct ActiveCapture {
+     device_label: String,
+     format: CaptureFormat,
+     output_path: PathBuf,
+-    stop_device: Box<dyn FnOnce() -> Result<(), Failure> + Send>,
++    stop_device: Box<dyn FnOnce() -> Result<(), CaptureIncident> + Send>,
+     /// 파일에 쓰는 쪽으로 가는 통로. 이것을 닫는 것이 "더 이상 샘플이 없다"는 신호다.
+     packets: SyncSender<Packet>,
+     /// 파일에 실제로 쓰인 샘플에서 쌓인 것. 쓰는 쪽과 **같은 값을 함께 본다** (모듈 주석).
+@@ -380,10 +459,11 @@ impl ActiveCapture {
+ 
+         // 5. 파일은 온전하다. 장치 정지가 실패했더라도 이미 녹음된 것을 버리지 않는다 —
+         //    그 사실은 경고로 분리한다.
+-        let warning = match stopped {
+-            Err(failure) => Some(failure.message),
+-            Ok(()) => None,
+-        };
++        //    원인은 문장이 아니라 값으로 함께 올라간다.
++        let incident = stopped.err();
++        let warning = incident
++            .as_ref()
++            .map(|incident| incident.failure.message.clone());
+ 
+         let byte_size = file_size(&output_path)?;
+         Ok(CaptureReport {
+@@ -392,6 +472,7 @@ impl ActiveCapture {
+             format,
+             byte_size,
+             warning,
++            incident,
+         })
+     }
+ }
+@@ -924,10 +1005,14 @@ mod tests {
+             format,
+             output_path: path,
+             stop_device: Box::new(|| {
+-                Err(Failure::retryable(
+-                    FailureKind::AudioDevice,
+-                    "00:05 무렵 일부 구간이 유실됐을 수 있다",
+-                ))
++                Err(CaptureIncident {
++                    cause: IncidentCause::QueueOverflow,
++                    elapsed_secs: Some(5 * 60 + 30),
++                    failure: Failure::retryable(
++                        FailureKind::AudioDevice,
++                        lost_segment_warning(std::time::Duration::from_secs(5 * 60 + 30)),
++                    ),
++                })
+             }),
+             packets: sender,
+             level: Arc::new(Mutex::new(InputLevel::new())),
+@@ -937,13 +1022,73 @@ mod tests {
+         let report = capture.stop().expect("경고와 함께 성공해야 한다");
+         assert!(report.warning.is_some(), "경고가 있어야 한다");
+         assert!(
+-            report.warning.as_ref().unwrap().contains("00:05"),
+-            "경과 시간이 포함되어야 한다: {:?}",
++            report.warning.as_ref().unwrap().contains("약 5분"),
++            "경과 시간이 단위와 함께 포함되어야 한다: {:?}",
+             report.warning
+         );
++        let incident = report.incident.as_ref().expect("원인이 값으로 남아야 한다");
++        assert_eq!(incident.cause, IncidentCause::QueueOverflow);
++        assert_eq!(incident.elapsed_secs, Some(330));
++        assert_eq!(incident.failure.kind, FailureKind::AudioDevice);
+         assert!(report.byte_size > 0, "파일이 확정됐어야 한다");
+     }
+ 
++    /// 경고 문장은 녹음 시작 기준 **분**으로 말한다. 예전의 `00:00 무렵` 꼴이 아니다 (g).
++    #[test]
++    fn the_lost_segment_warning_speaks_in_minutes_since_the_start() {
++        use std::time::Duration;
++
++        let under_a_minute = lost_segment_warning(Duration::from_secs(0));
++        assert!(under_a_minute.contains("분"), "{under_a_minute}");
++        assert!(under_a_minute.contains("1분 안에"), "{under_a_minute}");
++        assert!(!under_a_minute.contains("00:00"), "{under_a_minute}");
++        assert_eq!(lost_segment_warning(Duration::from_secs(59)), under_a_minute);
++
++        let five = lost_segment_warning(Duration::from_secs(5 * 60 + 30));
++        assert_eq!(five, "녹음 시작 후 약 5분 무렵 일부 구간이 유실됐을 수 있다");
++        assert!(!five.contains("00:05"), "{five}");
++
++        let long = lost_segment_warning(Duration::from_secs(3600 + 120));
++        assert!(long.contains("약 62분"), "{long}");
++        for text in [&under_a_minute, &five, &long] {
++            assert!(text.starts_with("녹음 시작 후"), "{text}");
++            assert!(!text.contains(':'), "시각처럼 보이는 꼴이 아니다: {text}");
++        }
++    }
++
++    /// 로그 필드는 원인을 **값으로** 구분한다 — 같은 문장이어도 원인이 다르면 다르게 남는다 (f).
++    #[test]
++    fn incident_log_fields_distinguish_queue_overflow_from_stream_error() {
++        let same_message = "녹음 시작 후 약 3분 무렵 일부 구간이 유실됐을 수 있다";
++        let overflow = CaptureIncident {
++            cause: IncidentCause::QueueOverflow,
++            elapsed_secs: Some(185),
++            failure: Failure::retryable(FailureKind::AudioDevice, same_message),
++        };
++        let stream = CaptureIncident {
++            cause: IncidentCause::StreamError,
++            elapsed_secs: Some(185),
++            failure: Failure::retryable(FailureKind::AudioDevice, same_message)
++                .with_detail("device disconnected"),
++        };
++
++        let overflow_fields = overflow.log_fields();
++        let stream_fields = stream.log_fields();
++        assert!(overflow_fields.contains("cause=queue_overflow"), "{overflow_fields}");
++        assert!(stream_fields.contains("cause=stream_error"), "{stream_fields}");
++        assert_ne!(overflow_fields, stream_fields);
++        for fields in [&overflow_fields, &stream_fields] {
++            assert!(fields.contains("kind=audioDevice"), "{fields}");
++            assert!(fields.contains("elapsed_s=185"), "{fields}");
++            assert!(!fields.contains(same_message), "사용자 문장은 필드가 아니다: {fields}");
++        }
++        assert!(stream_fields.contains("detail=\"device disconnected\""), "{stream_fields}");
++
++        let unknown = CaptureIncident::from(Failure::retryable(FailureKind::AudioDevice, "x"));
++        assert_eq!(unknown.cause, IncidentCause::Other);
++        assert!(unknown.log_fields().contains("elapsed_s=unknown"));
++    }
++
+     /// writer가 실패하면 stop_device 결과와 무관하게 Err를 돌려준다 (AC2).
+     #[test]
+     fn writer_err_still_returns_err() {
+@@ -966,7 +1111,7 @@ mod tests {
+             format,
+             output_path: path,
+             stop_device: Box::new(|| {
+-                Err(Failure::retryable(FailureKind::AudioDevice, "장치 오류"))
++                Err(Failure::retryable(FailureKind::AudioDevice, "장치 오류").into())
+             }),
+             packets: sender,
+             level: Arc::new(Mutex::new(InputLevel::new())),
+@@ -1008,5 +1153,6 @@ mod tests {
+ 
+         let report = capture.stop().expect("성공해야 한다");
+         assert_eq!(report.warning, None, "정상 정지에는 경고가 없다");
++        assert_eq!(report.incident, None, "정상 정지에는 원인도 없다");
+     }
+ }
+diff --git a/src-tauri/src/audio/meeting_capture.rs b/src-tauri/src/audio/meeting_capture.rs
+index ceb51e1..2dae287 100644
+--- a/src-tauri/src/audio/meeting_capture.rs
++++ b/src-tauri/src/audio/meeting_capture.rs
+@@ -38,7 +38,9 @@ use objc2_core_audio::{
+ };
+ use objc2_core_audio_types::{AudioBufferList, AudioTimeStamp};
+ 
+-use super::capture::{CaptureFormat, OpenCapture, SampleSink, SampleSource};
++use super::capture::{
++    CaptureFormat, CaptureIncident, IncidentCause, OpenCapture, SampleSink, SampleSource,
++};
+ use super::meeting_mix::{fold_to_stereo, OUTPUT_CHANNELS};
+ use crate::domain::{Failure, FailureKind};
+ use crate::platform::system_audio::{self, MeetingInput};
+@@ -131,7 +133,7 @@ struct Stopper {
+ unsafe impl Send for Stopper {}
+ 
+ impl Stopper {
+-    fn stop(self) -> Result<(), Failure> {
++    fn stop(self) -> Result<(), CaptureIncident> {
+         let device_id = self.input.device_id();
+ 
+         // **순서가 규칙이다**: 멈추고 → 떼어내고 → 그다음에야 context를 거둔다.
+@@ -147,12 +149,17 @@ impl Stopper {
+         drop(self.input);
+ 
+         if dropped > 0 {
+-            return Err(Failure::retryable(
+-                FailureKind::AudioDevice,
+-                "녹음 중에 일부 소리를 파일에 넘기지 못했다.",
+-            )
+-            .with_detail(format!("dropped_frames={dropped}"))
+-            .with_source_data_at_risk());
++            // 보내지 못한 것은 큐가 찼다는 뜻이다. 언제였는지는 세지 않으므로 경과 시간은 모른다.
++            return Err(CaptureIncident {
++                cause: IncidentCause::QueueOverflow,
++                elapsed_secs: None,
++                failure: Failure::retryable(
++                    FailureKind::AudioDevice,
++                    "녹음 중에 일부 소리를 파일에 넘기지 못했다.",
++                )
++                .with_detail(format!("dropped_frames={dropped}"))
++                .with_source_data_at_risk(),
++            });
+         }
+         Ok(())
+     }
+diff --git a/src-tauri/src/audio/mod.rs b/src-tauri/src/audio/mod.rs
+index 1f5cbdc..dcf2e5a 100644
+--- a/src-tauri/src/audio/mod.rs
++++ b/src-tauri/src/audio/mod.rs
+@@ -34,8 +34,8 @@ pub mod system_capture;
+ pub mod system_devices;
+ 
+ pub use capture::{
+-    ActiveCapture, CaptureFormat, CaptureMode, CaptureReport, OpenCapture, SampleSink, SampleSource, SinkError,
+-    CONTAINER,
++    lost_segment_warning, ActiveCapture, CaptureFormat, CaptureIncident, CaptureMode, CaptureReport,
++    IncidentCause, OpenCapture, SampleSink, SampleSource, SinkError, CONTAINER,
+ };
+ pub use finalized::{audio_is_present, VerifiedAudio, MIN_FINALIZED_BYTES};
+ pub use devices::{catalog, InputDevice, InputDeviceSource, ObservedInputDevice};
+diff --git a/src-tauri/src/audio/system_capture.rs b/src-tauri/src/audio/system_capture.rs
+index 72dc556..0dc036a 100644
+--- a/src-tauri/src/audio/system_capture.rs
++++ b/src-tauri/src/audio/system_capture.rs
+@@ -22,7 +22,10 @@ use std::time::{Duration, Instant};
+ 
+ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+ 
+-use crate::audio::capture::{CaptureFormat, OpenCapture, SampleSink, SampleSource, SinkError};
++use crate::audio::capture::{
++    lost_segment_warning, CaptureFormat, CaptureIncident, IncidentCause, OpenCapture, SampleSink,
++    SampleSource, SinkError,
++};
+ use crate::audio::devices::{catalog, selection_keys, ObservedInputDevice};
+ use crate::audio::system_devices::name_of;
+ use crate::domain::{Failure, FailureKind};
+@@ -31,9 +34,10 @@ use crate::domain::{Failure, FailureKind};
+ ///
+ /// 오디오 콜백은 실패를 돌려줄 곳이 없다 — 그래서 여기에 적어 두고 정지 시점에 꺼낸다.
+ /// 녹음 시작 시각도 함께 두어 사건 발생의 경과 시간을 구한다.
++/// 원인 분류([`IncidentCause`])는 사건이 기록되는 자리에서 **값으로** 정해진다.
+ struct InterruptSlot {
+     started_at: Instant,
+-    event: Option<(Failure, Duration)>,
++    event: Option<(IncidentCause, Failure, Duration)>,
+ }
+ 
+ type Interrupted = Arc<Mutex<InterruptSlot>>;
+@@ -107,26 +111,29 @@ impl SampleSource for SystemSampleSource {
+                     return Err(Failure::retryable(
+                         FailureKind::AudioDevice,
+                         "녹음을 멈추는 중 문제가 있었다.",
+-                    ));
++                    )
++                    .into());
+                 }
+                 match interrupted.lock() {
+                     Ok(mut slot) => match slot.event.take() {
+-                        Some((failure, elapsed)) => {
+-                            let hhmm = format_elapsed_hhmm(elapsed);
+-                            Err(Failure {
+-                                message: format!("{hhmm} 무렵 일부 구간이 유실됐을 수 있다"),
++                        Some((cause, failure, elapsed)) => Err(CaptureIncident {
++                            cause,
++                            elapsed_secs: Some(elapsed.as_secs()),
++                            failure: Failure {
++                                message: lost_segment_warning(elapsed),
+                                 detail: failure.detail.or(Some(failure.message)),
+                                 kind: failure.kind,
+                                 source_data_safe: failure.source_data_safe,
+                                 retryable: failure.retryable,
+-                            })
+-                        }
++                            },
++                        }),
+                         None => Ok(()),
+                     },
+                     Err(_) => Err(Failure::retryable(
+                         FailureKind::AudioDevice,
+                         "녹음이 끝까지 정상이었는지 확인하지 못했다.",
+-                    )),
++                    )
++                    .into()),
+                 }
+             }),
+         })
+@@ -274,6 +281,7 @@ fn forward_f32(
+ fn note_stream_error(interrupted: &Interrupted, error: impl std::fmt::Display) {
+     note(
+         interrupted,
++        IncidentCause::StreamError,
+         Failure::retryable(FailureKind::AudioDevice, "녹음이 중간에 끊겼다.").with_detail(error),
+     );
+ }
+@@ -288,6 +296,7 @@ fn deliver(samples: &SampleSink, interrupted: &Interrupted, chunk: Vec<i16>) {
+         // 큐가 찼다. **버렸다는 사실을 숨기지 않는다** — 정지할 때 사용자에게 알린다 (R-005).
+         Err(SinkError::Full) => note(
+             interrupted,
++            IncidentCause::QueueOverflow,
+             Failure::retryable(
+                 FailureKind::AudioDevice,
+                 "저장이 녹음을 따라가지 못해 일부 구간이 유실됐다.",
+@@ -301,24 +310,16 @@ fn deliver(samples: &SampleSink, interrupted: &Interrupted, chunk: Vec<i16>) {
+ /// 캡처 도중의 사건을 적어 둔다. **먼저 일어난 것 하나만 남긴다** —
+ /// 같은 사건이 콜백마다 반복돼도 사용자에게 필요한 것은 한 문장이다.
+ ///
+-/// 녹음 시작 기준 경과 시간도 함께 기록한다.
+-fn note(interrupted: &Interrupted, failure: Failure) {
++/// 녹음 시작 기준 경과 시간과 원인 분류도 함께 기록한다.
++fn note(interrupted: &Interrupted, cause: IncidentCause, failure: Failure) {
+     if let Ok(mut slot) = interrupted.lock() {
+         if slot.event.is_none() {
+             let elapsed = slot.started_at.elapsed();
+-            slot.event = Some((failure, elapsed));
++            slot.event = Some((cause, failure, elapsed));
+         }
+     }
+ }
+ 
+-/// 경과 시간을 `HH:MM` 형식으로.
+-fn format_elapsed_hhmm(duration: Duration) -> String {
+-    let total_secs = duration.as_secs();
+-    let hours = total_secs / 3600;
+-    let minutes = (total_secs % 3600) / 60;
+-    format!("{hours:02}:{minutes:02}")
+-}
+-
+ /// 32-bit 실수 샘플 하나를 16-bit PCM으로. 범위를 벗어난 값은 잘라 낸다.
+ ///
+ /// `as`는 포화 변환이므로 값이 얼마든 여기서 죽지 않는다.
+@@ -340,12 +341,31 @@ mod tests {
+         assert_eq!(to_i16(-1.0), -i16::MAX);
+     }
+ 
++    /// 사건의 원인은 기록하는 자리에서 값으로 정해지고, 먼저 일어난 것 하나만 남는다.
++    #[test]
++    fn noted_incidents_keep_their_cause_as_a_value() {
++        let slot: Interrupted = Arc::new(Mutex::new(InterruptSlot {
++            started_at: Instant::now(),
++            event: None,
++        }));
++        note_stream_error(&slot, "device disconnected");
++        note(
++            &slot,
++            IncidentCause::QueueOverflow,
++            Failure::retryable(FailureKind::AudioDevice, "나중 사건"),
++        );
++
++        let (cause, failure, _) = slot.lock().unwrap().event.take().expect("사건이 있다");
++        assert_eq!(cause, IncidentCause::StreamError, "먼저 일어난 것이 남는다");
++        assert_eq!(failure.detail.as_deref(), Some("device disconnected"));
++    }
++
++    /// 경고 문장은 경과 분으로 말한다 — 예전의 `00:05 무렵` 꼴이 아니다.
+     #[test]
+-    fn elapsed_time_formats_as_zero_padded_hours_and_minutes() {
+-        assert_eq!(format_elapsed_hhmm(Duration::from_secs(0)), "00:00");
+-        assert_eq!(format_elapsed_hhmm(Duration::from_secs(5 * 60 + 30)), "00:05");
+-        assert_eq!(format_elapsed_hhmm(Duration::from_secs(3600 + 120)), "01:02");
+-        assert_eq!(format_elapsed_hhmm(Duration::from_secs(36_000)), "10:00");
++    fn the_warning_text_states_minutes_since_the_start() {
++        let text = lost_segment_warning(Duration::from_secs(5 * 60 + 30));
++        assert!(text.contains("약 5분"), "{text}");
++        assert!(!text.contains("00:05"), "{text}");
+     }
+ 
+     #[test]
+diff --git a/src-tauri/src/commands/mod.rs b/src-tauri/src/commands/mod.rs
+index 84c9e5a..ff3235f 100644
+--- a/src-tauri/src/commands/mod.rs
++++ b/src-tauri/src/commands/mod.rs
+@@ -125,8 +125,8 @@ pub use export::Exporter;
+ pub use notes::NoteGenerator;
+ pub use notion::{NotionSendStatus, NotionSender};
+ pub use payload::{
+-    AiNotePayload, AiNoteStatusPayload, AiProviderStatusPayload, CaptureReportPayload,
+-    ExportedAiRequestPayload, ExportedFilePayload, HandoffTextPayload, InputDevicePayload,
++    AiNotePayload, AiNoteStatusPayload, AiProviderStatusPayload, CaptureIncidentPayload,
++    CaptureReportPayload, ExportedAiRequestPayload, ExportedFilePayload, HandoffTextPayload, InputDevicePayload,
+     InputLevelPayload, MissingAudioPayload, NewRecording, NotionConnectionPayload,
+     AiCredentialStatusPayload, NotionSendStatusPayload, NotionSyncPayload,
+     NotionTokenStatusPayload, PortionPayload,
+@@ -939,9 +939,9 @@ pub fn finish_recording(
+         start_automatic_transcription(storage, transcriber, &recording.id);
+     }
+ 
+-    if let Some(warning) = &capture.warning {
++    if let Some(event) = capture_warning_event(&capture) {
+         if let Some(dir) = log_dir {
+-            crate::log::write_event(dir, &format!("finish_recording: 캡처 경고 — {warning}"));
++            crate::log::write_event(dir, &event);
+         }
+     }
+ 
+@@ -949,6 +949,22 @@ pub fn finish_recording(
+     Ok(StoppedRecordingPayload { recording, capture, warning })
+ }
+ 
++/// 캡처 경고를 이벤트 로그 한 줄로. 경고가 없으면 없음이다.
++///
++/// 원인 분류는 [`CaptureIncidentPayload`]의 **값에서** 온다 — 경고 문장을 뜯어 추측하지
++/// 않는다. 담기는 것은 경고 문장 · 원인 · 실패 종류 · 경과 시간 · 장치의 기술적 표현뿐이며
++/// **오디오 · 전사 내용은 들어가지 않는다** (INV-6).
++pub fn capture_warning_event(capture: &CaptureReportPayload) -> Option<String> {
++    let warning = capture.warning.as_ref()?;
++    Some(match &capture.incident {
++        Some(incident) => format!(
++            "finish_recording: 캡처 경고 — {warning} [{}]",
++            incident.log_fields()
++        ),
++        None => format!("finish_recording: 캡처 경고 — {warning}"),
++    })
++}
++
+ 
+ /// 방금 저장된 녹음의 전사를 **설정이 켜져 있을 때만** 시작한다 (ADR-0007 §8.2.3).
+ ///
+diff --git a/src-tauri/src/commands/payload.rs b/src-tauri/src/commands/payload.rs
+index 28e6071..556dd64 100644
+--- a/src-tauri/src/commands/payload.rs
++++ b/src-tauri/src/commands/payload.rs
+@@ -20,11 +20,12 @@ use crate::ai::note::{
+ };
+ use crate::ai::provider::{Availability, ProviderDescriptor};
+ use crate::audio::{
+-    CaptureReport, InputDevice, LevelReading, LevelVerdict, SessionState, SessionSummary,
++    CaptureIncident, CaptureReport, InputDevice, LevelReading, LevelVerdict, SessionState,
++    SessionSummary,
+ };
+ 
+ use crate::domain::{
+-    format_duration_ms, AiNote, Failure, NoteType, NotionSync, ProcessingStatus, Recording,
++    format_duration_ms, AiNote, Failure, FailureKind, NoteType, NotionSync, ProcessingStatus, Recording,
+     RecordingId, RecordingView, Settings, Transcript, TranscriptSegment,
+ };
+ 
+@@ -181,6 +182,45 @@ pub struct CaptureReportPayload {
+     pub duration_label: String,
+     /// 파일은 온전하지만 캡처 도중에 문제가 있었을 때의 경고.
+     pub warning: Option<String>,
++    /// 그 경고의 구조화된 원인. 경고가 없으면 없음이다.
++    pub incident: Option<CaptureIncidentPayload>,
++}
++
++/// 캡처 경고의 원인 — 원인 분류 · 실패 종류 · 기술적 표현 · 경과 시간(초).
++///
++/// **오디오 · 전사 내용은 담지 않는다** (INV-6).
++#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
++#[serde(rename_all = "camelCase")]
++pub struct CaptureIncidentPayload {
++    /// `queue_overflow` · `stream_error` · `other`.
++    pub cause: String,
++    pub kind: FailureKind,
++    pub detail: Option<String>,
++    /// 녹음 시작부터 사건까지의 경과 시간(초). 모르면 없음이다.
++    pub elapsed_seconds: Option<u64>,
++    /// 이벤트 로그에 남기는 `key=value` 필드들. 화면에 보내지 않는다.
++    #[serde(skip)]
++    pub(super) log_fields: String,
++}
++
++impl CaptureIncidentPayload {
++    /// 이벤트 로그에 붙이는 필드들 (`cause=… kind=… elapsed_s=… detail=…`).
++    pub fn log_fields(&self) -> &str {
++        &self.log_fields
++    }
++}
++
++impl From<CaptureIncident> for CaptureIncidentPayload {
++    fn from(incident: CaptureIncident) -> Self {
++        let log_fields = incident.log_fields();
++        Self {
++            cause: incident.cause.as_key().to_string(),
++            kind: incident.failure.kind,
++            detail: incident.failure.detail,
++            elapsed_seconds: incident.elapsed_secs,
++            log_fields,
++        }
++    }
+ }
+ 
+ impl CaptureReportPayload {
+@@ -202,6 +242,7 @@ impl CaptureReportPayload {
+             duration_ms: summary.duration_ms,
+             duration_label: summary.duration_label,
+             warning: report.warning,
++            incident: report.incident.map(CaptureIncidentPayload::from),
+         }
+     }
+ }
+diff --git a/src-tauri/tests/capture.rs b/src-tauri/tests/capture.rs
+index abf7399..714e9b2 100644
+--- a/src-tauri/tests/capture.rs
++++ b/src-tauri/tests/capture.rs
+@@ -115,7 +115,7 @@ impl SampleSource for FakeMicrophone {
+             stop: Box::new(move || {
+                 let _ = sending.join();
+                 match interrupted {
+-                    Some(failure) => Err(failure),
++                    Some(failure) => Err(failure.into()),
+                     None => Ok(()),
+                 }
+             }),
+diff --git a/src-tauri/tests/capture_warning.rs b/src-tauri/tests/capture_warning.rs
+index 893814b..996a025 100644
+--- a/src-tauri/tests/capture_warning.rs
++++ b/src-tauri/tests/capture_warning.rs
+@@ -14,7 +14,10 @@ use std::path::{Path, PathBuf};
+ use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
+ use std::sync::{Arc, Mutex};
+ 
+-use molt_note_lib::audio::{CaptureFormat, CaptureMode, OpenCapture, SampleSink, SampleSource};
++use molt_note_lib::audio::{
++    CaptureFormat, CaptureIncident, CaptureMode, IncidentCause, OpenCapture, SampleSink,
++    SampleSource,
++};
+ use molt_note_lib::commands::{
+     finish_recording, LiveTranscriber, Recorder, Storage, Transcriber,
+ };
+@@ -91,11 +94,11 @@ fn idle_live() -> Arc<LiveTranscriber> {
+ 
+ // ── 가짜 마이크 ─────────────────────────────────────────────────────────────
+ 
+-/// 테스트가 직접 샘플을 보내는 마이크. `interrupted`로 stop 시 반환할 실패를 정한다.
++/// 테스트가 직접 샘플을 보내는 마이크. `interrupted`로 stop 시 반환할 사건을 정한다.
+ #[derive(Clone)]
+ struct ControlledMicrophone {
+     sink: Arc<Mutex<Option<SampleSink>>>,
+-    interrupted: Arc<Mutex<Option<Failure>>>,
++    interrupted: Arc<Mutex<Option<CaptureIncident>>>,
+ }
+ 
+ impl ControlledMicrophone {
+@@ -106,10 +109,10 @@ impl ControlledMicrophone {
+         }
+     }
+ 
+-    fn with_interrupted(failure: Failure) -> Self {
++    fn with_interrupted(incident: CaptureIncident) -> Self {
+         Self {
+             sink: Arc::new(Mutex::new(None)),
+-            interrupted: Arc::new(Mutex::new(Some(failure))),
++            interrupted: Arc::new(Mutex::new(Some(incident))),
+         }
+     }
+ 
+@@ -134,7 +137,7 @@ impl SampleSource for ControlledMicrophone {
+             stop: Box::new(move || {
+                 *sink.lock().expect("통로를 놓을 수 있어야 한다") = None;
+                 match interrupted.lock().expect("interrupted를 빌릴 수 있어야 한다").take() {
+-                    Some(failure) => Err(failure),
++                    Some(incident) => Err(incident),
+                     None => Ok(()),
+                 }
+             }),
+@@ -173,6 +176,16 @@ impl SampleSource for WriterFailMicrophone {
+     }
+ }
+ 
++/// 이벤트 로그에서 `finish_recording: 캡처 경고` 줄만 꺼낸다.
++fn capture_warning_log_lines(temp: &TempRoot) -> Vec<String> {
++    let log = std::fs::read_to_string(temp.path().join("app-data").join("molt-note-events.log"))
++        .unwrap_or_default();
++    log.lines()
++        .filter(|line| line.contains("finish_recording: 캡처 경고"))
++        .map(str::to_owned)
++        .collect()
++}
++
+ fn setup(
+     temp: &TempRoot,
+     source: impl SampleSource + Send + Sync + 'static,
+@@ -192,10 +205,15 @@ fn setup(
+ #[test]
+ fn queue_overflow_saves_a_record_with_capture_warning() {
+     let temp = TempRoot::new("queue-overflow");
+-    let mic = ControlledMicrophone::with_interrupted(Failure::retryable(
+-        FailureKind::AudioDevice,
+-        "큐가 넘쳤다. 일부 구간이 유실됐을 수 있다.",
+-    ));
++    let mic = ControlledMicrophone::with_interrupted(CaptureIncident {
++        cause: IncidentCause::QueueOverflow,
++        elapsed_secs: Some(330),
++        failure: Failure::retryable(
++            FailureKind::AudioDevice,
++            "큐가 넘쳤다. 일부 구간이 유실됐을 수 있다.",
++        )
++        .with_detail("queue full"),
++    });
+     let mic_handle = mic.clone();
+     let (recorder, storage, transcriber, clock) = setup(&temp, mic);
+ 
+@@ -234,6 +252,61 @@ fn queue_overflow_saves_a_record_with_capture_warning() {
+         "DB의 capture_warning: {:?}",
+         reloaded.capture_warning,
+     );
++
++    // 원인이 값으로 payload까지 올라왔다.
++    let incident = stopped.capture.incident.as_ref().expect("원인이 있어야 한다");
++    assert_eq!(incident.cause, "queue_overflow");
++    assert_eq!(incident.kind, FailureKind::AudioDevice);
++    assert_eq!(incident.elapsed_seconds, Some(330));
++    assert_eq!(incident.detail.as_deref(), Some("queue full"));
++
++    // 이벤트 로그 줄이 원인 · 종류 · 경과 시간 · detail을 담는다 (f).
++    let lines = capture_warning_log_lines(&temp);
++    assert_eq!(lines.len(), 1, "캡처 경고 줄이 하나 있어야 한다: {lines:?}");
++    let line = &lines[0];
++    assert!(line.contains("cause=queue_overflow"), "{line}");
++    assert!(!line.contains("cause=stream_error"), "{line}");
++    assert!(line.contains("kind=audioDevice"), "{line}");
++    assert!(line.contains("elapsed_s=330"), "{line}");
++    assert!(line.contains("detail=\"queue full\""), "{line}");
++}
++
++// ── 원인은 문장이 아니라 값에서 온다 ─────────────────────────────────────────
++
++/// 같은 경고 문장이어도 원인 값이 다르면 로그 줄이 다르다 — 문장을 뜯어 추측하지 않는다 (f).
++#[test]
++fn the_log_line_cause_comes_from_the_value_not_the_message() {
++    let message = "녹음 시작 후 약 2분 무렵 일부 구간이 유실됐을 수 있다";
++    let mut lines = Vec::new();
++    for cause in [IncidentCause::QueueOverflow, IncidentCause::StreamError] {
++        let temp = TempRoot::new("cause-by-value");
++        let mic = ControlledMicrophone::with_interrupted(CaptureIncident {
++            cause,
++            elapsed_secs: Some(125),
++            failure: Failure::retryable(FailureKind::AudioDevice, message),
++        });
++        let mic_handle = mic.clone();
++        let (recorder, storage, transcriber, clock) = setup(&temp, mic);
++        recorder
++            .start(DEVICE_KEY, CaptureMode::Microphone)
++            .expect("시작할 수 있어야 한다");
++        mic_handle.speak(1_000);
++        clock.advance(5_000);
++        let stopped = finish_recording(&recorder, &storage, &transcriber, &idle_live(), None)
++            .expect("파일이 온전하면 경고와 함께 성공이다");
++        assert_eq!(stopped.warning.as_deref(), Some(message));
++
++        let found = capture_warning_log_lines(&temp);
++        assert_eq!(found.len(), 1, "{found:?}");
++        lines.push(found[0].clone());
++    }
++
++    assert!(lines[0].contains("cause=queue_overflow"), "{}", lines[0]);
++    assert!(lines[1].contains("cause=stream_error"), "{}", lines[1]);
++    for line in &lines {
++        assert!(line.contains(message), "경고 문장도 함께 남는다: {line}");
++        assert!(line.contains("elapsed_s=125"), "{line}");
++    }
+ }
+ 
+ // ── 시나리오 (b): 스트림 오류 ────────────────────────────────────────────────
+@@ -241,10 +314,15 @@ fn queue_overflow_saves_a_record_with_capture_warning() {
+ #[test]
+ fn stream_error_saves_a_record_with_capture_warning() {
+     let temp = TempRoot::new("stream-error");
+-    let mic = ControlledMicrophone::with_interrupted(Failure::retryable(
+-        FailureKind::AudioDevice,
+-        "녹음이 중간에 끊겼다. 스트림 오류가 발생했다.",
+-    ));
++    let mic = ControlledMicrophone::with_interrupted(CaptureIncident {
++        cause: IncidentCause::StreamError,
++        elapsed_secs: Some(42),
++        failure: Failure::retryable(
++            FailureKind::AudioDevice,
++            "녹음이 중간에 끊겼다. 스트림 오류가 발생했다.",
++        )
++        .with_detail("device disconnected"),
++    });
+     let mic_handle = mic.clone();
+     let (recorder, storage, transcriber, clock) = setup(&temp, mic);
+ 
+@@ -282,6 +360,20 @@ fn stream_error_saves_a_record_with_capture_warning() {
+         "DB의 capture_warning: {:?}",
+         reloaded.capture_warning,
+     );
++
++    let incident = stopped.capture.incident.as_ref().expect("원인이 있어야 한다");
++    assert_eq!(incident.cause, "stream_error");
++    assert_eq!(incident.elapsed_seconds, Some(42));
++
++    // 이벤트 로그 줄이 원인 · 종류 · 경과 시간 · detail을 담는다 (f).
++    let lines = capture_warning_log_lines(&temp);
++    assert_eq!(lines.len(), 1, "캡처 경고 줄이 하나 있어야 한다: {lines:?}");
++    let line = &lines[0];
++    assert!(line.contains("cause=stream_error"), "{line}");
++    assert!(!line.contains("cause=queue_overflow"), "{line}");
++    assert!(line.contains("kind=audioDevice"), "{line}");
++    assert!(line.contains("elapsed_s=42"), "{line}");
++    assert!(line.contains("detail=\"device disconnected\""), "{line}");
+ }
+ 
+ // ── 시나리오 (c): 정상 ──────────────────────────────────────────────────────
+@@ -317,6 +409,8 @@ fn clean_stop_saves_a_record_without_capture_warning() {
+         reloaded.capture_warning, None,
+         "DB 레코드의 capture_warning도 None이어야 한다"
+     );
++    assert_eq!(stopped.capture.incident, None);
++    assert!(capture_warning_log_lines(&temp).is_empty(), "경고가 없으면 경고 줄도 없다");
+ }
+ 
+ // ── 시나리오 (d): 파일 확정 실패 ────────────────────────────────────────────
+diff --git a/src/ipc/types.ts b/src/ipc/types.ts
+index 2662d13..16f3cf4 100644
+--- a/src/ipc/types.ts
++++ b/src/ipc/types.ts
+@@ -86,6 +86,23 @@ export interface CaptureReport {
+   readonly durationLabel: string;
+   /** 파일은 온전하지만 캡처 도중에 문제가 있었을 때의 경고. */
+   readonly warning: string | null;
++  /** 그 경고의 구조화된 원인. 경고가 없으면 `null`이다. */
++  readonly incident?: CaptureIncident | null;
++}
++
++/**
++ * 캡처 경고의 원인 — 경고 문장을 뜯어 추측하지 않도록 값으로 온다.
++ * 오디오 · 전사 내용은 담지 않는다 (INV-6).
++ */
++export interface CaptureIncident {
++  /** 큐 넘침 · 스트림 오류 · 그 밖. */
++  readonly cause: 'queue_overflow' | 'stream_error' | 'other';
++  /** 실패 종류 (Rust `FailureKind`의 camelCase 이름). */
++  readonly kind: string;
++  /** 장치가 알려준 기술적 표현. */
++  readonly detail: string | null;
++  /** 녹음 시작부터 사건까지의 경과 시간(초). 모르면 `null`. */
++  readonly elapsedSeconds: number | null;
+ }
+ 
+ /**
+@@ -582,6 +599,14 @@ export interface PreviousActionItems {
+ export interface TopicGroup {
+   readonly heading: string;
+   readonly items: readonly string[];
++  /** 선택 비교표 — 없으면 키 자체가 오지 않는다. */
++  readonly table?: TopicTable;
++}
++
++/** {@link TopicGroup}의 비교표 — 열 이름과, 각 행의 칸. */
++export interface TopicTable {
++  readonly columns: readonly string[];
++  readonly rows: readonly (readonly string[])[];
+ }
+ 
+ /** 주제 하나 — `## N. <title>`, 안에 여러 {@link TopicGroup}. */

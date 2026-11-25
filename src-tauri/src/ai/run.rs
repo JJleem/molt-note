@@ -159,10 +159,10 @@ fn attempt(
     let transcript = store::load_transcript(connection, transcript_id)?
         .ok_or_else(|| dangling_transcript(transcript_id))?;
 
-    // segments가 있으면 [HH:MM:SS] 시각을 붙여 프롬프트 입력을 만든다.
-    // 비어 있으면 raw_text fallback.
+    // Meeting은 시각 없는 평문, Study · Summary는 [HH:MM:SS] 시각을 붙인 입력이다.
+    // segments가 비어 있으면 raw_text fallback.
     let input_text =
-        prompt::segments_to_timestamped_text(&transcript.segments, &transcript.raw_text);
+        prompt::transcript_input(mode, &transcript.segments, &transcript.raw_text);
 
     // 보내기 전에 크기를 판정한다 (ADR-0008 §8.2-3). 넘치면 **요청을 보내지 않고** 자르지도
     // 않는다. 여기서 만들어진 프롬프트 문자열 자체는 쓰이지 않는다 — 실제 요청 본문을 만드는

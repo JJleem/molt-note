@@ -428,6 +428,37 @@ fn only_the_transcript_text_is_handed_to_the_provider() {
     );
 }
 
+#[test]
+fn a_meeting_is_handed_plain_text_without_times() {
+    // Phase 5.12: 시각이 입력에 있으면 모델이 회의록에 옮겨 적는다 — Meeting은 평문만 받는다.
+    let fixture = Fixture::new("meeting-plain");
+    let provider = FakeNoteAiProvider::ready();
+
+    for mode in [NoteType::Meeting, NoteType::Study] {
+        fixture.generate(mode, &provider).expect("생성이 성공해야 한다");
+    }
+
+    let calls = provider.calls();
+    assert_eq!(calls.len(), 2);
+    assert_eq!(calls[0].mode, NoteType::Meeting);
+    assert_eq!(
+        calls[0].transcript, "두 번째 전사 첫 문장\n두 번째 전사 두 번째 문장",
+        "Meeting 입력에는 [HH:MM:SS]가 없다"
+    );
+    let meeting_prompt = prompt::build_prompt(NoteType::Meeting, &calls[0].transcript);
+    assert!(
+        !meeting_prompt.contains("[00:00:0"),
+        "Meeting으로 보내는 프롬프트에 시각이 없다"
+    );
+
+    assert_eq!(calls[1].mode, NoteType::Study);
+    assert_eq!(
+        calls[1].transcript,
+        "[00:00:00] 두 번째 전사 첫 문장\n[00:00:01] 두 번째 전사 두 번째 문장",
+        "Study 입력은 예전 그대로다"
+    );
+}
+
 // --- 기본 입력은 current가 가리키는 Transcript다 (§7.2 · §7.3) ---------------------------
 
 #[test]

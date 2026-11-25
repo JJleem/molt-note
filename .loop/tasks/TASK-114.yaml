@@ -1,0 +1,33 @@
+# Raise the claude-cli generate timeout
+# Runtime이 PLAN-20261125T033136Z 승인 시점에 생성했다 (proposal P7). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-114
+status: DONE
+
+request: |-
+  Change GENERATE_TIMEOUT in src-tauri/src/ai/claude_cli/provider.rs from 600s to 1800s. In a comment, state the reasoning: a 75-minute meeting took about 6 minutes, there is already a 113-minute recording, and a 2-hour meeting must fit. Update any test that pins the value.
+
+execution:
+  role: impl
+
+stop_condition:
+  gates: [build, test]
+  requires_verifier: true
+  max_consecutive_failures: 2
+
+acceptance_criteria:
+  - id: P7-AC1
+    description: |-
+      GENERATE_TIMEOUT is 1800 seconds, and a comment gives the reasoning.
+    verification:
+      type: verifier
+  - id: P7-AC2
+    description: |-
+      Tests pass.
+    verification:
+      type: gate
+      ref: test
+
+evidence: []
+
+failure_memo: []

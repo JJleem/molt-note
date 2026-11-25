@@ -1,0 +1,55 @@
+# Meeting prompt: no timestamps, tables only in the table field
+# Runtime이 PLAN-20261125T033136Z 승인 시점에 생성했다 (proposal P5). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-112
+status: DONE
+
+request: |-
+  Edit MEETING_PROMPT in src-tauri/src/ai/prompt.rs. (1) Remove every instruction that asks for transcript times ('Use these timestamps…', 'include transcript timestamp', '(with timestamps)', 'reference the transcript timestamp in a > quote block', etc.). Add an explicit instruction not to write transcript times (e.g. [HH:MM:SS], 00:03:23) in the output. Uncertain or broken parts are referred to by what was being discussed (e.g. 'the repeated-recognition part during the coating-thickness-gauge discussion'). (2) Use comparison tables only in the group's table field, and do not write table syntax (|, |---|) inside string items. (3) Meeting input no longer puts [HH:MM:SS] before each segment: in the input assembly in src-tauri/src/ai/run.rs (around line 165), use plain text with no time when the mode is Meeting, and keep the current timestamped text for Study and Summary. Fix the top of the prompt that says the input contains timestamps to match. (4) Update PROMPT_VERSION_MEETING so prompt_version_is_bound_to_the_prompt_text passes; the Study and Summary versions do not change. Tests (a): the Meeting prompt text has none of the old time instructions (string checks) and has the instruction not to write times; the prompt Meeting sends to the provider contains no [HH:MM:SS] pattern (fake segments, no real provider call); the Study input is unchanged.
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-108
+
+stop_condition:
+  gates: [build, lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 3
+
+acceptance_criteria:
+  - id: P5-AC1
+    description: |-
+      MEETING_PROMPT has no instruction to use or include timestamps, and has an instruction not to write them in the output (there is a test).
+    verification:
+      type: verifier
+      instruction: |-
+        Read MEETING_PROMPT in full and check it for remaining time instructions.
+  - id: P5-AC2
+    description: |-
+      The input of a prepared Meeting prompt contains no [HH:MM:SS] pattern, and the Study and Summary prompt versions and input are unchanged (there are tests).
+    verification:
+      type: verifier
+  - id: P5-AC3
+    description: |-
+      The prompt tells the model to put tables only in the table field and not to write table syntax in string items.
+    verification:
+      type: verifier
+  - id: P5-AC4
+    description: |-
+      Tests pass, including the promptVersion hash gate.
+    verification:
+      type: gate
+      ref: test
+  - id: P5-AC5
+    description: |-
+      Lint passes.
+    verification:
+      type: gate
+      ref: lint
+
+evidence: []
+
+failure_memo: []

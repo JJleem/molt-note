@@ -1,0 +1,537 @@
+diff --git a/src-tauri/src/export/markdown.rs b/src-tauri/src/export/markdown.rs
+index 2c5d941..aae1c25 100644
+--- a/src-tauri/src/export/markdown.rs
++++ b/src-tauri/src/export/markdown.rs
+@@ -371,27 +371,190 @@ fn render_topic(number: usize, topic: &Topic) -> Option<String> {
+         return None;
+     }
+ 
+-    let mut section = format!("## {number}. {title}");
++    let mut chunks: Vec<TopicChunk> = Vec::new();
+     for group in &topic.groups {
+         let heading = single_line(&group.heading);
+-        let items: Vec<String> = group
+-            .items
+-            .iter()
+-            .map(|item| single_line(item))
+-            .filter(|item| !item.is_empty())
+-            .collect();
+-
+         if !heading.is_empty() {
+-            section.push_str(&format!("\n**{heading}**"));
++            chunks.push(TopicChunk::Line(format!("**{heading}**")));
+         }
+-        for item in &items {
+-            section.push_str(&format!("\n- {item}"));
++        for item in &group.items {
++            chunks.extend(item_chunks(item));
++        }
++        // 비교표는 묶음의 항목 뒤에 온다. 열이 없는 표는 적지 않는다.
++        if let Some(table) = group
++            .table
++            .as_ref()
++            .and_then(|table| render_table(&table.columns, &table.rows))
++        {
++            chunks.push(TopicChunk::Table(table));
++        }
++    }
++
++    let mut section = format!("## {number}. {title}");
++    let mut after_table = false;
++    for chunk in chunks {
++        match chunk {
++            // 표는 글머리표 밖에 있어야 표로 읽힌다 — 앞뒤에 빈 줄을 둔다.
++            TopicChunk::Table(table) => {
++                section.push_str("\n\n");
++                section.push_str(&table);
++                after_table = true;
++            }
++            TopicChunk::Line(line) => {
++                section.push_str(if after_table { "\n\n" } else { "\n" });
++                section.push_str(&line);
++                after_table = false;
++            }
+         }
+     }
+ 
+     Some(section)
+ }
+ 
++/// 주제 섹션 안의 조각 — 한 줄(굵은 소제목 · 글머리표) 또는 표 블록.
++enum TopicChunk {
++    Line(String),
++    Table(String),
++}
++
++/// 문자열 항목 하나를 조각들로 바꾼다.
++///
++/// 보통은 `- <한 줄>` 하나다. 항목 안에 여러 줄로 된 표 문법(머리 행 + `|---|` 구분 행)이
++/// 들어 있으면 그 줄들은 표 블록으로 꺼내고, 앞뒤 글은 각각 글머리표로 남긴다 — 한 줄로
++/// 접혀 `- | a | b | |---|` 같은 글머리표가 생기지 않게 한다. 표로 꺼낼 수 없는 표 문법이
++/// 남으면 [`neutralize_table_syntax`]로 파이프를 무력화한다.
++fn item_chunks(item: &str) -> Vec<TopicChunk> {
++    let lines: Vec<&str> = item.lines().collect();
++    let mut chunks = Vec::new();
++    let mut text: Vec<&str> = Vec::new();
++
++    let mut i = 0;
++    while i < lines.len() {
++        let starts_table = lines[i].trim_start().starts_with('|')
++            && lines.get(i + 1).is_some_and(|next| is_separator_row(next));
++        if !starts_table {
++            text.push(lines[i]);
++            i += 1;
++            continue;
++        }
++
++        push_bullet(&mut chunks, &text.join("\n"));
++        text.clear();
++
++        let columns = split_row(lines[i]);
++        let mut rows = Vec::new();
++        let mut j = i + 2;
++        while j < lines.len() && lines[j].trim_start().starts_with('|') {
++            rows.push(split_row(lines[j]));
++            j += 1;
++        }
++        if let Some(table) = render_table(&columns, &rows) {
++            chunks.push(TopicChunk::Table(table));
++        }
++        i = j;
++    }
++    push_bullet(&mut chunks, &text.join("\n"));
++
++    chunks
++}
++
++/// 글을 한 줄 글머리표로 넣는다. 비어 있으면 넣지 않는다.
++fn push_bullet(chunks: &mut Vec<TopicChunk>, text: &str) {
++    let line = single_line(text);
++    if !line.is_empty() {
++        chunks.push(TopicChunk::Line(format!(
++            "- {}",
++            neutralize_table_syntax(&line)
++        )));
++    }
++}
++
++/// 글머리표 한 줄이 표 문법처럼 보이면(`|`로 시작하거나 `|---`류의 구분 칸이 있으면)
++/// 파이프를 전각 `｜`로 바꾼다. 평범한 글 속의 `A | B`는 건드리지 않는다.
++fn neutralize_table_syntax(line: &str) -> String {
++    let compact: String = line.chars().filter(|c| !c.is_whitespace()).collect();
++    let looks_like_table =
++        compact.starts_with('|') || compact.contains("|-") || compact.contains("|:-");
++    if looks_like_table {
++        line.replace('|', "｜")
++    } else {
++        line.to_owned()
++    }
++}
++
++/// `|---|:--:|` 같은 GFM 구분 행인가.
++fn is_separator_row(line: &str) -> bool {
++    let trimmed = line.trim();
++    if !trimmed.contains('-') || !trimmed.contains('|') {
++        return false;
++    }
++    let inner = trimmed.trim_start_matches('|').trim_end_matches('|');
++    !inner.is_empty()
++        && inner.split('|').all(|cell| {
++            let cell = cell.trim();
++            let core = cell.trim_start_matches(':').trim_end_matches(':');
++            !core.is_empty() && core.chars().all(|c| c == '-')
++        })
++}
++
++/// `| a | b |` 한 행을 칸으로 나눈다. `\|`는 칸 경계가 아니라 글자 `|`다.
++fn split_row(line: &str) -> Vec<String> {
++    let trimmed = line.trim();
++    let trimmed = trimmed.strip_prefix('|').unwrap_or(trimmed);
++    let trimmed = if trimmed.ends_with('|') && !trimmed.ends_with("\\|") {
++        &trimmed[..trimmed.len() - 1]
++    } else {
++        trimmed
++    };
++
++    let mut cells = Vec::new();
++    let mut current = String::new();
++    let mut chars = trimmed.chars().peekable();
++    while let Some(c) = chars.next() {
++        match c {
++            '\\' if chars.peek() == Some(&'|') => {
++                current.push('|');
++                chars.next();
++            }
++            '|' => cells.push(std::mem::take(&mut current).trim().to_owned()),
++            _ => current.push(c),
++        }
++    }
++    cells.push(current.trim().to_owned());
++    cells
++}
++
++/// 열 이름과 행들로 GFM 표 블록(머리 행 · 구분 행 · 데이터 행)을 만든다.
++///
++/// 열이 없으면 `None`. 모자란 칸은 빈 칸으로 채우고, 머리 행보다 많은 칸은 버린다 — 어느
++/// 행이든 열 수가 같아야 표가 깨지지 않는다.
++fn render_table(columns: &[String], rows: &[Vec<String>]) -> Option<String> {
++    let width = columns.len();
++    if width == 0 {
++        return None;
++    }
++
++    let row_line = |cells: Vec<String>| format!("| {} |", cells.join(" | "));
++    let mut lines = vec![
++        row_line(columns.iter().map(|c| table_cell(c)).collect()),
++        row_line(vec!["---".to_owned(); width]),
++    ];
++    for row in rows {
++        lines.push(row_line(
++            (0..width)
++                .map(|k| row.get(k).map(|c| table_cell(c)).unwrap_or_default())
++                .collect(),
++        ));
++    }
++    Some(lines.join("\n"))
++}
++
++/// 표 칸 하나 — 개행(`\n` · `\r\n`)과 공백 덩어리는 공백 하나로 접고, `|`는 `\|`로 막는다.
++/// 칸 안의 `\`는 `\\`로 적어 `\|`가 이스케이프를 풀어 버리지 않게 한다.
++fn table_cell(text: &str) -> String {
++    single_line(text).replace('\\', "\\\\").replace('|', "\\|")
++}
++
+ /// 액션 아이템을 기간(`period`)별로 묶어 렌더한다.
+ fn render_action_items_v2(items: &[ActionItemV2]) -> Option<String> {
+     if items.is_empty() {
+@@ -642,7 +805,7 @@ mod tests {
+ 
+     use crate::ai::note::{
+         ActionItemV2, MeetingNote, MeetingNoteV2, PreviousActionItems, StudyNote, SummaryNote,
+-        Topic, TopicGroup,
++        Topic, TopicGroup, TopicTable,
+     };
+     use crate::domain::{ProcessingStatus, RecordingId, TranscriptId, TranscriptSegment};
+ 
+@@ -730,6 +893,7 @@ mod tests {
+                 groups: vec![TopicGroup {
+                     heading: "".to_owned(),
+                     items: vec!["9월 출시로 합의".to_owned()],
++                    table: None,
+                 }],
+             }],
+             action_items: vec![ActionItemV2 {
+@@ -1519,10 +1683,12 @@ mod tests {
+                         TopicGroup {
+                             heading: "결정 사항".to_owned(),
+                             items: vec!["9월 출시".to_owned()],
++                            table: None,
+                         },
+                         TopicGroup {
+                             heading: "".to_owned(),
+                             items: vec!["추가 논의 필요".to_owned()],
++                            table: None,
+                         },
+                     ],
+                 },
+@@ -1531,6 +1697,7 @@ mod tests {
+                     groups: vec![TopicGroup {
+                         heading: "".to_owned(),
+                         items: vec!["500만원 배정".to_owned()],
++                        table: None,
+                     }],
+                 },
+             ],
+@@ -1544,6 +1711,292 @@ mod tests {
+         assert!(markdown.contains("## 2. 예산\n- 500만원 배정"));
+     }
+ 
++    // ── 주제 묶음의 비교표 (TopicGroup.table) ────────────────────────────────────
++
++    fn v2_with_topics(topics: Vec<Topic>) -> StructuredNote {
++        StructuredNote::MeetingV2(MeetingNoteV2 {
++            meeting_title: "회의".to_owned(),
++            meeting_kind: "위클리".to_owned(),
++            attendees: vec![],
++            reliability_notice: "녹음.".to_owned(),
++            key_summary: vec!["요약".to_owned()],
++            previous_action_items: PreviousActionItems {
++                done: vec![], changed: vec![], in_progress: vec![],
++                no_progress: vec![], not_mentioned: vec![],
++            },
++            topics,
++            action_items: vec![],
++            needs_confirmation: vec![],
++        })
++    }
++
++    fn strings(values: &[&str]) -> Vec<String> {
++        values.iter().map(|v| (*v).to_owned()).collect()
++    }
++
++    /// GFM 표 행의 칸 수 — 앞뒤 `|` 사이에서 이스케이프되지 않은 `|`로 나눈 수.
++    fn column_count(row: &str) -> usize {
++        let inner = row
++            .trim()
++            .strip_prefix('|')
++            .and_then(|r| r.strip_suffix('|'))
++            .expect("표 행은 |로 시작하고 끝난다");
++        let mut count = 1;
++        let mut escaped = false;
++        for c in inner.chars() {
++            match c {
++                '\\' if !escaped => escaped = true,
++                '|' if !escaped => count += 1,
++                _ => escaped = false,
++            }
++            if c != '\\' {
++                escaped = false;
++            }
++        }
++        count
++    }
++
++    fn assert_no_bullet_holds_table_syntax(markdown: &str) {
++        for line in markdown.lines() {
++            if let Some(body) = line.strip_prefix("- ") {
++                assert!(!line.contains("|---"), "글머리표에 표 구분 행이 있다: {line}");
++                assert!(
++                    !body.trim_start().starts_with('|'),
++                    "글머리표가 표 행처럼 시작한다: {line}"
++                );
++            }
++        }
++    }
++
++    #[test]
++    fn a_v2_topic_with_a_table_renders_a_gfm_table_block_surrounded_by_blank_lines() {
++        let recording = recording();
++        let transcript = transcript();
++        let note = v2_with_topics(vec![Topic {
++            title: "업체 비교".to_owned(),
++            groups: vec![
++                TopicGroup {
++                    heading: "견적".to_owned(),
++                    items: strings(&["두 곳 비교"]),
++                    table: Some(TopicTable {
++                        columns: strings(&["업체", "금액", "비고"]),
++                        rows: vec![
++                            strings(&["A사", "500만원", "STT 기준"]),
++                            strings(&["B사", "620만원", ""]),
++                        ],
++                    }),
++                },
++                TopicGroup {
++                    heading: "".to_owned(),
++                    items: strings(&["다음 주 결정"]),
++                    table: None,
++                },
++            ],
++        }]);
++
++        let markdown = render(&document(&recording, &transcript, Some(&note)), true);
++
++        assert!(
++            markdown.contains(
++                "## 1. 업체 비교\n**견적**\n- 두 곳 비교\n\n\
++                 | 업체 | 금액 | 비고 |\n\
++                 | --- | --- | --- |\n\
++                 | A사 | 500만원 | STT 기준 |\n\
++                 | B사 | 620만원 |  |\n\n\
++                 - 다음 주 결정\n\n## Transcript"
++            ),
++            "표 블록이 빈 줄로 둘러싸여야 한다:\n{markdown}"
++        );
++        assert_no_bullet_holds_table_syntax(&markdown);
++    }
++
++    #[test]
++    fn a_table_at_the_end_of_a_topic_is_followed_by_a_blank_line() {
++        let recording = recording();
++        let transcript = transcript();
++        let note = v2_with_topics(vec![Topic {
++            title: "비교".to_owned(),
++            groups: vec![TopicGroup {
++                heading: "".to_owned(),
++                items: vec![],
++                table: Some(TopicTable {
++                    columns: strings(&["안", "장점"]),
++                    rows: vec![strings(&["1안", "빠름"])],
++                }),
++            }],
++        }]);
++
++        let markdown = render(&document(&recording, &transcript, Some(&note)), true);
++
++        assert!(markdown.contains(
++            "## 1. 비교\n\n| 안 | 장점 |\n| --- | --- |\n| 1안 | 빠름 |\n\n## Transcript"
++        ));
++        assert_no_bullet_holds_table_syntax(&markdown);
++    }
++
++    #[test]
++    fn pipes_and_line_breaks_in_cells_keep_every_row_at_the_column_count() {
++        let recording = recording();
++        let transcript = transcript();
++        let note = v2_with_topics(vec![Topic {
++            title: "비교".to_owned(),
++            groups: vec![TopicGroup {
++                heading: "".to_owned(),
++                items: vec![],
++                table: Some(TopicTable {
++                    columns: strings(&["이름|별칭", "설명"]),
++                    rows: vec![
++                        strings(&["A | B", "첫 줄\n둘째 줄"]),
++                        strings(&["윈도\r\n개행", "a|b|c"]),
++                        strings(&["모자란 행"]),
++                        strings(&["넘치는", "행", "버린다"]),
++                        strings(&["역슬래시\\", "\\|"]),
++                    ],
++                }),
++            }],
++        }]);
++
++        let markdown = render(&document(&recording, &transcript, Some(&note)), true);
++
++        let rows: Vec<&str> = markdown.lines().filter(|l| l.starts_with('|')).collect();
++        assert_eq!(rows.len(), 7, "머리 · 구분 · 데이터 5행:\n{markdown}");
++        for row in &rows {
++            assert_eq!(column_count(row), 2, "열 수가 바뀌었다: {row}");
++        }
++        assert_eq!(rows[0], "| 이름\\|별칭 | 설명 |");
++        assert_eq!(rows[2], "| A \\| B | 첫 줄 둘째 줄 |");
++        assert_eq!(rows[3], "| 윈도 개행 | a\\|b\\|c |");
++        assert_eq!(rows[4], "| 모자란 행 |  |");
++        assert_eq!(rows[5], "| 넘치는 | 행 |");
++        assert!(!markdown.contains('\r'));
++    }
++
++    #[test]
++    fn a_table_without_columns_is_not_emitted() {
++        let recording = recording();
++        let transcript = transcript();
++        let with_empty_table = v2_with_topics(vec![Topic {
++            title: "일정".to_owned(),
++            groups: vec![TopicGroup {
++                heading: "".to_owned(),
++                items: strings(&["9월 출시"]),
++                table: Some(TopicTable { columns: vec![], rows: vec![strings(&["x"])] }),
++            }],
++        }]);
++        let without_table = v2_with_topics(vec![Topic {
++            title: "일정".to_owned(),
++            groups: vec![TopicGroup {
++                heading: "".to_owned(),
++                items: strings(&["9월 출시"]),
++                table: None,
++            }],
++        }]);
++
++        assert_eq!(
++            render(&document(&recording, &transcript, Some(&with_empty_table)), true),
++            render(&document(&recording, &transcript, Some(&without_table)), true)
++        );
++    }
++
++    #[test]
++    fn table_syntax_inside_a_string_item_never_becomes_a_one_line_table_bullet() {
++        let recording = recording();
++        let transcript = transcript();
++        let note = v2_with_topics(vec![Topic {
++            title: "비교".to_owned(),
++            groups: vec![TopicGroup {
++                heading: "".to_owned(),
++                items: strings(&[
++                    // 여러 줄 표 — 표 블록으로 꺼낸다.
++                    "업체 비교:\n| 업체 | 금액 |\n|---|---|\n| A사 | 500 |\n| B사 | 620 |\n정리 끝",
++                    // 이미 한 줄로 접힌 표 — 표로 꺼낼 수 없으니 파이프를 무력화한다.
++                    "| a | b | |---|---| | 1 | 2 |",
++                    // 평범한 글 속의 파이프는 그대로 둔다.
++                    "A | B 중 택일",
++                ]),
++                table: None,
++            }],
++        }]);
++
++        let markdown = render(&document(&recording, &transcript, Some(&note)), true);
++
++        assert!(
++            markdown.contains(
++                "## 1. 비교\n- 업체 비교:\n\n\
++                 | 업체 | 금액 |\n| --- | --- |\n| A사 | 500 |\n| B사 | 620 |\n\n\
++                 - 정리 끝\n- ｜ a ｜ b ｜ ｜---｜---｜ ｜ 1 ｜ 2 ｜\n- A | B 중 택일"
++            ),
++            "표 문법이 글머리표 안에 남았다:\n{markdown}"
++        );
++        assert_no_bullet_holds_table_syntax(&markdown);
++    }
++
++    #[test]
++    fn a_v2_topic_without_a_table_renders_exactly_as_before() {
++        let recording = recording();
++        let transcript = transcript();
++        let note = v2_with_topics(vec![
++            Topic {
++                title: "일정".to_owned(),
++                groups: vec![
++                    TopicGroup {
++                        heading: "결정 사항".to_owned(),
++                        items: strings(&["9월 출시", "  여러\n줄  항목 "]),
++                        table: None,
++                    },
++                    TopicGroup {
++                        heading: "".to_owned(),
++                        items: strings(&["", "추가 논의 필요"]),
++                        table: None,
++                    },
++                ],
++            },
++            Topic {
++                title: "".to_owned(),
++                groups: vec![],
++            },
++            Topic {
++                title: "예산".to_owned(),
++                groups: vec![TopicGroup {
++                    heading: "".to_owned(),
++                    items: strings(&["500만원 배정"]),
++                    table: None,
++                }],
++            },
++        ]);
++
++        let markdown = render(&document(&recording, &transcript, Some(&note)), false);
++
++        assert_eq!(
++            markdown,
++            [
++                "# 3DGS Study #04",
++                "",
++                "Date: 2026-09-01",
++                "Duration: 52:31",
++                "",
++                "> 📌 녹음.",
++                "",
++                "- **회의명**: 회의",
++                "- **유형**: 위클리",
++                "",
++                "## 🔑 핵심 요약",
++                "- 요약",
++                "",
++                "## 1. 일정",
++                "**결정 사항**",
++                "- 9월 출시",
++                "- 여러 줄 항목",
++                "- 추가 논의 필요",
++                "",
++                "## 3. 예산",
++                "- 500만원 배정",
++                "",
++            ]
++            .join("\n")
++        );
++    }
++
+     // ── include_transcript (AC-6-1 · AC-6-2) ──────────────────────────────────
+ 
+     #[test]

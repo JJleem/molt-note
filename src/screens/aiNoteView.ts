@@ -41,6 +41,8 @@ import type {
   PreviousActionItems,
   Recording,
   StructuredNote,
+  TopicGroup,
+  TopicTable,
   Transcript,
 } from '../ipc/types';
 
@@ -94,10 +96,52 @@ export function noteModeChoices(selected: NoteMode): readonly NoteModeChoice[] {
  */
 export type NoteSectionKind = 'text' | 'list' | 'grouped';
 
-/** `grouped` 섹션의 하위 묶음 — 소제목과 글머리표. */
+/**
+ * `grouped` 섹션 묶음의 비교표 — 열 이름과 각 행의 칸.
+ *
+ * 행은 언제나 열 수와 같은 칸을 갖는다 (모자라면 빈 칸을 채우고 넘치면 자른다) — 화면이
+ * 칸 수가 들쭉날쭉한 표를 그리지 않게 하기 위해서다. Markdown renderer의 `render_table`과
+ * 같은 규칙이다.
+ */
+export interface NoteTable {
+  readonly columns: readonly string[];
+  readonly rows: readonly (readonly string[])[];
+}
+
+/** `grouped` 섹션의 하위 묶음 — 소제목과 글머리표, 그리고 선택 비교표. */
 export interface NoteGroup {
   readonly heading: string;
   readonly items: readonly string[];
+  /**
+   * 비교표. **표가 없으면 키 자체가 없다** — 표가 없는 노트의 섹션 값이 이전과 똑같이 남는다.
+   *
+   * 표는 구조로 온 `TopicGroup.table`에서만 만들어진다. 항목 문자열이 `| a | b |`처럼
+   * 보여도 그것을 표로 해석하지 않는다 — 문자열은 언제나 글머리표 한 줄로 남는다.
+   */
+  readonly table?: NoteTable;
+}
+
+/** 구조로 온 표를 화면용 표로 옮긴다. 열이 없는 표는 그리지 않는다 (`null`). */
+function noteTable(table: TopicTable | undefined): NoteTable | null {
+  if (table === undefined) {
+    return null;
+  }
+  const columns = table.columns.map((column) => column.trim());
+  if (columns.length === 0) {
+    return null;
+  }
+  const rows = table.rows.map((row) =>
+    columns.map((_, index) => (row[index] ?? '').trim()),
+  );
+  return { columns, rows };
+}
+
+/** `TopicGroup` 하나를 화면 묶음으로 옮긴다. 표가 없으면 이전과 같은 모양이다. */
+function topicGroup(group: TopicGroup): NoteGroup {
+  const table = noteTable(group.table);
+  return table === null
+    ? { heading: group.heading, items: group.items }
+    : { heading: group.heading, items: group.items, table };
 }
 
 export interface NoteSection {
@@ -146,7 +190,7 @@ function listSection(title: string, values: readonly string[]): NoteSection {
 }
 
 function groupedSection(title: string, groups: readonly NoteGroup[]): NoteSection {
-  const empty = groups.every((g) => g.items.length === 0);
+  const empty = groups.every((g) => g.items.length === 0 && g.table === undefined);
   return {
     title,
     kind: 'grouped',
@@ -195,7 +239,7 @@ export function noteSections(note: StructuredNote): readonly NoteSection[] {
           sections.push(previousActionItemsSection(note.previousActionItems));
         }
         for (const topic of note.topics) {
-          sections.push(groupedSection(topic.title, topic.groups.map((g) => ({ heading: g.heading, items: g.items }))));
+          sections.push(groupedSection(topic.title, topic.groups.map(topicGroup)));
         }
         sections.push(
           listSection('액션 아이템', note.actionItems.map((ai) => `${ai.task} (${ai.owner}, ${ai.due})`)),

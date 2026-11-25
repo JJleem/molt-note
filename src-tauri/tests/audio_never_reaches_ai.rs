@@ -328,9 +328,14 @@ fn everything_that_goes_out_is_built_from_the_mode_and_the_transcript_text_alone
 
         // 그리고 값도 전부 알려진 것에서 나왔다 — 사용자 데이터는 `prompt` 하나뿐이며,
         // 그것은 domain이 전사 **텍스트**로 만든 문자열과 글자 하나까지 같다.
+        // Meeting은 시각 없는 평문, Study · Summary는 [HH:MM:SS] 입력이다 (Phase 5.12).
+        let expected_input = match mode {
+            NoteType::Meeting => TRANSCRIPT_TEXT,
+            NoteType::Study | NoteType::Summary => TIMESTAMPED_TEXT,
+        };
         assert_eq!(
             body["prompt"].as_str().expect("프롬프트는 문자열이다"),
-            build_prompt(mode, TIMESTAMPED_TEXT),
+            build_prompt(mode, expected_input),
             "{mode}: 프롬프트가 전사 텍스트 말고 다른 것에서 만들어졌다"
         );
         assert_eq!(body["model"], MODEL_IN_THE_LIST, "{mode}");

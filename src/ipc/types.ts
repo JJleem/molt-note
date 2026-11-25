@@ -86,6 +86,23 @@ export interface CaptureReport {
   readonly durationLabel: string;
   /** 파일은 온전하지만 캡처 도중에 문제가 있었을 때의 경고. */
   readonly warning: string | null;
+  /** 그 경고의 구조화된 원인. 경고가 없으면 `null`이다. */
+  readonly incident?: CaptureIncident | null;
+}
+
+/**
+ * 캡처 경고의 원인 — 경고 문장을 뜯어 추측하지 않도록 값으로 온다.
+ * 오디오 · 전사 내용은 담지 않는다 (INV-6).
+ */
+export interface CaptureIncident {
+  /** 큐 넘침 · 스트림 오류 · 그 밖. */
+  readonly cause: 'queue_overflow' | 'stream_error' | 'other';
+  /** 실패 종류 (Rust `FailureKind`의 camelCase 이름). */
+  readonly kind: string;
+  /** 장치가 알려준 기술적 표현. */
+  readonly detail: string | null;
+  /** 녹음 시작부터 사건까지의 경과 시간(초). 모르면 `null`. */
+  readonly elapsedSeconds: number | null;
 }
 
 /**
@@ -582,6 +599,14 @@ export interface PreviousActionItems {
 export interface TopicGroup {
   readonly heading: string;
   readonly items: readonly string[];
+  /** 선택 비교표 — 없으면 키 자체가 오지 않는다. */
+  readonly table?: TopicTable;
+}
+
+/** {@link TopicGroup}의 비교표 — 열 이름과, 각 행의 칸. */
+export interface TopicTable {
+  readonly columns: readonly string[];
+  readonly rows: readonly (readonly string[])[];
 }
 
 /** 주제 하나 — `## N. <title>`, 안에 여러 {@link TopicGroup}. */

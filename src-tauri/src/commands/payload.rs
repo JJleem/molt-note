@@ -20,11 +20,12 @@ use crate::ai::note::{
 };
 use crate::ai::provider::{Availability, ProviderDescriptor};
 use crate::audio::{
-    CaptureReport, InputDevice, LevelReading, LevelVerdict, SessionState, SessionSummary,
+    CaptureIncident, CaptureReport, InputDevice, LevelReading, LevelVerdict, SessionState,
+    SessionSummary,
 };
 
 use crate::domain::{
-    format_duration_ms, AiNote, Failure, NoteType, NotionSync, ProcessingStatus, Recording,
+    format_duration_ms, AiNote, Failure, FailureKind, NoteType, NotionSync, ProcessingStatus, Recording,
     RecordingId, RecordingView, Settings, Transcript, TranscriptSegment,
 };
 
@@ -181,6 +182,45 @@ pub struct CaptureReportPayload {
     pub duration_label: String,
     /// 파일은 온전하지만 캡처 도중에 문제가 있었을 때의 경고.
     pub warning: Option<String>,
+    /// 그 경고의 구조화된 원인. 경고가 없으면 없음이다.
+    pub incident: Option<CaptureIncidentPayload>,
+}
+
+/// 캡처 경고의 원인 — 원인 분류 · 실패 종류 · 기술적 표현 · 경과 시간(초).
+///
+/// **오디오 · 전사 내용은 담지 않는다** (INV-6).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CaptureIncidentPayload {
+    /// `queue_overflow` · `stream_error` · `other`.
+    pub cause: String,
+    pub kind: FailureKind,
+    pub detail: Option<String>,
+    /// 녹음 시작부터 사건까지의 경과 시간(초). 모르면 없음이다.
+    pub elapsed_seconds: Option<u64>,
+    /// 이벤트 로그에 남기는 `key=value` 필드들. 화면에 보내지 않는다.
+    #[serde(skip)]
+    pub(super) log_fields: String,
+}
+
+impl CaptureIncidentPayload {
+    /// 이벤트 로그에 붙이는 필드들 (`cause=… kind=… elapsed_s=… detail=…`).
+    pub fn log_fields(&self) -> &str {
+        &self.log_fields
+    }
+}
+
+impl From<CaptureIncident> for CaptureIncidentPayload {
+    fn from(incident: CaptureIncident) -> Self {
+        let log_fields = incident.log_fields();
+        Self {
+            cause: incident.cause.as_key().to_string(),
+            kind: incident.failure.kind,
+            detail: incident.failure.detail,
+            elapsed_seconds: incident.elapsed_secs,
+            log_fields,
+        }
+    }
 }
 
 impl CaptureReportPayload {
@@ -202,6 +242,7 @@ impl CaptureReportPayload {
             duration_ms: summary.duration_ms,
             duration_label: summary.duration_label,
             warning: report.warning,
+            incident: report.incident.map(CaptureIncidentPayload::from),
         }
     }
 }

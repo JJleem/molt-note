@@ -34,8 +34,8 @@ pub mod system_capture;
 pub mod system_devices;
 
 pub use capture::{
-    ActiveCapture, CaptureFormat, CaptureMode, CaptureReport, OpenCapture, SampleSink, SampleSource, SinkError,
-    CONTAINER,
+    lost_segment_warning, ActiveCapture, CaptureFormat, CaptureIncident, CaptureMode, CaptureReport,
+    IncidentCause, OpenCapture, SampleSink, SampleSource, SinkError, CONTAINER,
 };
 pub use finalized::{audio_is_present, VerifiedAudio, MIN_FINALIZED_BYTES};
 pub use devices::{catalog, InputDevice, InputDeviceSource, ObservedInputDevice};

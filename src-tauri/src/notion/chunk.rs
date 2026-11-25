@@ -24,7 +24,7 @@
 //!
 //! ## 어떤 경우에도 조용히 자르지 않는다
 //!
-//! 한 chunk에 담을 수 없는 **원자 단위**(예산보다 긴 한 줄 · 예산보다 긴 코드 펜스 블록)를
+//! 한 chunk에 담을 수 없는 **원자 단위**(예산보다 긴 한 줄 · 코드 펜스 블록 · GFM 표)를
 //! 만나면 그 자리에서 [`OversizedAtom`]으로 **멈춘다.** 줄 가운데를 자르면 강조나 링크가
 //! 갈려 보낸 문서가 원본과 다른 문서가 되고, 그것은 무손실이 아니다 (§6.3-4). 부분 결과를
 //! 성공처럼 돌려주는 경로는 여기 없다.
@@ -71,6 +71,7 @@ pub const CHUNK_MAX_BYTES: usize = 60_000;
 ///
 /// ```text
 /// block unit = chunk 안의 "비어 있지 않은 줄" 수. 코드 펜스 블록은 통째로 1로 센다.
+///              표는 나뉘지 않는 단위이지만 줄 수 그대로 센다.
 /// 300 × 3.3 ≈ 1000                          VERIFIED 요청당 1000 block elements
 /// ```
 ///
@@ -88,6 +89,9 @@ pub enum AtomKind {
     Line,
     /// 코드 펜스 블록 하나. 펜스 안에서는 절대 나누지 않는다 (§6.3-3).
     CodeBlock,
+    /// GFM 표 하나 — `|`로 시작하는 연속된 줄들이며 구분선 줄을 포함한다. 표 가운데서
+    /// 나누면 뒤 조각은 머리글 없는 `|` 줄들이 되어 표가 아닌 문단으로 읽힌다.
+    Table,
 }
 
 /// 한 chunk에 담을 수 없는 단위를 만났다 — **아무것도 자르지 않고 멈췄다는 뜻이다.**
@@ -112,14 +116,26 @@ pub struct OversizedAtom {
 
 impl std::fmt::Display for OversizedAtom {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // 조사까지 함께 고른다 — "표이"가 아니라 "표가"다.
         let what = match self.kind {
-            AtomKind::Line => "줄",
-            AtomKind::CodeBlock => "코드 블록",
+            AtomKind::Line => "줄이",
+            AtomKind::CodeBlock => "코드 블록이",
+            AtomKind::Table => "표가",
         };
+
+        if self.bytes <= self.budget {
+            // 바이트로는 들어가는데 담기지 않았다면 block unit 예산을 넘은 것이다 — 줄 수로
+            // 세는 표만 여기에 온다. 바이트 예산을 넘었다고 말하면 거짓이다.
+            return write!(
+                f,
+                "{}번째 줄에서 시작하는 {} block unit 예산 {}을 넘는다 — 자르지 않았다",
+                self.line, what, CHUNK_MAX_BLOCK_UNITS
+            );
+        }
 
         write!(
             f,
-            "{}번째 줄에서 시작하는 {}이 {}바이트로 한 chunk 예산 {}바이트를 넘는다 — 자르지 않았다",
+            "{}번째 줄에서 시작하는 {} {}바이트로 한 chunk 예산 {}바이트를 넘는다 — 자르지 않았다",
             self.line, what, self.bytes, self.budget
         )
     }
@@ -143,8 +159,8 @@ impl std::fmt::Display for OversizedAtom {
 /// ```text
 /// 1. 빈 줄(문단 경계)에서 나눈다.                        ← 기본
 /// 2. 한 문단이 혼자 예산을 넘으면 그 안의 줄 경계에서 나눈다.
-/// 3. 코드 펜스 블록 안에서는 절대 나누지 않는다.
-/// 4. 한 줄(또는 코드 블록 하나)이 혼자 예산을 넘으면 → Err. 자르지 않는다.
+/// 3. 코드 펜스 블록 안에서는 절대 나누지 않는다. GFM 표 안에서도 나누지 않는다.
+/// 4. 한 줄(또는 코드 블록 · 표 하나)이 혼자 예산을 넘으면 → Err. 자르지 않는다.
 /// ```
 ///
 /// # Errors
@@ -167,8 +183,8 @@ pub fn split_markdown(markdown: &str) -> Result<Vec<&str>, OversizedAtom> {
             continue;
         }
 
-        // 들어가지 않으면 그 문단 안의 줄 경계로 내려간다 (§6.3-2). 코드 펜스 블록은 여기서도
-        // 단위 하나이므로 갈리지 않는다 (§6.3-3).
+        // 들어가지 않으면 그 문단 안의 줄 경계로 내려간다 (§6.3-2). 코드 펜스 블록과 표는
+        // 여기서도 단위 하나이므로 갈리지 않는다 (§6.3-3).
         for atom in block {
             if !packer.push(atom.start, atom.end, atom.block_units) {
                 return Err(OversizedAtom {
@@ -184,7 +200,7 @@ pub fn split_markdown(markdown: &str) -> Result<Vec<&str>, OversizedAtom> {
     Ok(packer.finish())
 }
 
-/// 이 모듈이 더 이상 나누지 않는 단위 — 줄 하나, 또는 코드 펜스 블록 하나.
+/// 이 모듈이 더 이상 나누지 않는 단위 — 줄 하나, 코드 펜스 블록 하나, 또는 표 하나.
 #[derive(Debug, Clone, Copy)]
 struct Atom {
     start: usize,
@@ -299,6 +315,36 @@ fn atoms(markdown: &str) -> Vec<Atom> {
             continue;
         }
 
+        if is_table_row(line) {
+            // `|`로 시작하는 연속된 줄들. 구분선 줄이 있을 때만 표로 묶는다 — 없으면 GFM이
+            // 표로 읽지 않으므로 평범한 줄들로 둔다.
+            let mut cursor = index;
+            let mut has_separator = false;
+            while cursor < lines.len() {
+                let row = &markdown[lines[cursor].0..lines[cursor].1];
+                if !is_table_row(row) {
+                    break;
+                }
+                has_separator |= is_table_separator(row);
+                cursor += 1;
+            }
+
+            if has_separator {
+                atoms.push(Atom {
+                    start,
+                    end: lines[cursor - 1].1,
+                    line: number,
+                    blank: false,
+                    // 표 한 줄은 Notion에서 적어도 한 block element가 된다 — 코드 펜스와 달리
+                    // 1로 줄여 세지 않고, 나누기 전처럼 줄 수 그대로 센다 (보수적인 쪽).
+                    block_units: cursor - index,
+                    kind: AtomKind::Table,
+                });
+                index = cursor;
+                continue;
+            }
+        }
+
         let blank = line.trim().is_empty();
         atoms.push(Atom {
             start,
@@ -361,6 +407,21 @@ fn line_ranges(markdown: &str) -> Vec<(usize, usize)> {
 /// 단위는 chunk가 하나 커질 뿐이지만, 잘못 나눈 펜스는 문서를 바꾼다.
 fn is_fence(line: &str) -> bool {
     line.trim_start().starts_with("```")
+}
+
+/// 표의 줄인가 — `|`로 시작하는 줄이다.
+fn is_table_row(line: &str) -> bool {
+    line.trim_start().starts_with('|')
+}
+
+/// 표의 구분선 줄인가 — `| --- | :-: |`처럼 `|` · `-` · `:` · 공백만 있고 `-`가 있는 줄이다.
+fn is_table_separator(line: &str) -> bool {
+    let row = line.trim();
+    is_table_row(row)
+        && row.contains('-')
+        && row
+            .chars()
+            .all(|c| matches!(c, '|' | '-' | ':' | ' ' | '\t'))
 }
 
 #[cfg(test)]
@@ -637,9 +698,117 @@ mod tests {
         }
     }
 
+    /// `rows`줄짜리 GFM 표 — 머리글 · 구분선 · 본문 줄들. 끝에 개행은 없다.
+    fn table(tag: usize, rows: usize) -> String {
+        let mut table = format!("| 표 {tag} | 담당 | 기한 |\n| --- | :-: | ---: |");
+        for row in 0..rows {
+            table.push_str(&format!("\n| {tag}-{row} 항목 | 담당자 | 12/{row} |"));
+        }
+        table
+    }
+
+    /// `table`이 정확히 한 chunk 안에 통째로 있고, 어떤 chunk도 그 표의 일부만 갖지 않는다.
+    fn assert_table_is_whole(chunks: &[&str], table: &str) {
+        let holders = chunks.iter().filter(|chunk| chunk.contains(table)).count();
+        assert_eq!(holders, 1, "표를 통째로 가진 chunk가 하나가 아니다");
+
+        let first_row = table.lines().next().expect("머리글이 있다");
+        let last_row = table.lines().last().expect("마지막 줄이 있다");
+        for chunk in chunks {
+            let has_first = chunk.contains(first_row);
+            let has_last = chunk.contains(last_row);
+            assert_eq!(has_first, has_last, "표가 두 chunk에 갈렸다");
+        }
+    }
+
+    #[test]
+    fn a_table_near_a_split_boundary_is_never_split() {
+        // 빈 줄 없는 긴 문단 안에 표가 있어 줄 경계로 내려가 나누는 경우와, 앞뒤에 문단이 많은
+        // 경우를 함께 만든다. 앞 줄 수를 바꿔 가며 block unit 경계(300)가 표 머리글 앞 · 가운데 ·
+        // 뒤 어디에나 오게 한다 — 그중 일부는 표를 무시하면 반드시 표 가운데서 나뉘는 자리다.
+        let mut boundary_right_before_a_table = false;
+
+        for lead in 270..=CHUNK_MAX_BLOCK_UNITS {
+            let tables = [table(0, 20), table(1, 40)];
+
+            let mut blocks: Vec<String> = (0..50)
+                .map(|index| format!("### 앞 구간 {index}\n표 앞의 문단이다."))
+                .collect();
+
+            // 문단 하나: lead줄의 목록 → 표 → 목록. 혼자 block unit 예산을 넘는다.
+            let mut paragraph = String::new();
+            for index in 0..lead {
+                paragraph.push_str(&format!("- 앞 항목 {index}\n"));
+            }
+            paragraph.push_str(&tables[0]);
+            for index in 0..100 {
+                paragraph.push_str(&format!("\n- 뒤 항목 {index}"));
+            }
+            blocks.push(paragraph);
+
+            blocks.extend((0..300).map(|index| format!("### 중간 구간 {index}\n문단이다.")));
+            blocks.push(tables[1].clone());
+            blocks.extend((0..300).map(|index| format!("### 뒷 구간 {index}\n표 뒤의 문단이다.")));
+
+            let markdown = document(&blocks);
+            let chunks = split_markdown(&markdown).expect("나눌 수 있는 문서다");
+
+            assert!(chunks.len() > 2, "나뉘지 않았다 (lead {lead})");
+            assert_eq!(chunks.concat(), markdown, "재조립이 원문과 다르다 (lead {lead})");
+            assert_within_budgets(&chunks);
+
+            for table in &tables {
+                assert_table_is_whole(&chunks, table);
+            }
+
+            boundary_right_before_a_table |=
+                chunks.iter().any(|chunk| chunk.starts_with("| 표 0 "));
+        }
+
+        // 경계가 실제로 표 바로 앞까지 밀려 온 경우가 있어야 이 테스트가 무언가를 검사한다.
+        assert!(boundary_right_before_a_table, "표 근처에서 나뉜 경우가 없다");
+    }
+
+    #[test]
+    fn a_table_longer_than_the_budget_is_refused_instead_of_cut() {
+        let mut big = String::from("| 내용 |\n| --- |");
+        for _ in 0..250 {
+            big.push_str(&format!("\n| {} |", "가".repeat(100))); // 한 줄이 300바이트를 넘는다
+        }
+
+        let markdown = document(&["# 제목".to_owned(), big]);
+        let error = split_markdown(&markdown).expect_err("표는 나누지 않는다");
+
+        assert_eq!(error.kind, AtomKind::Table);
+        assert_eq!(error.line, 3, "표 머리글은 세 번째 줄이다");
+        assert!(error.bytes > CHUNK_MAX_BYTES);
+        assert!(error.to_string().contains("표가"), "{error}");
+    }
+
+    #[test]
+    fn a_table_with_more_rows_than_the_unit_budget_is_refused_without_a_false_byte_claim() {
+        let markdown = document(&["# 제목".to_owned(), table(0, CHUNK_MAX_BLOCK_UNITS)]);
+        let error = split_markdown(&markdown).expect_err("표는 나누지 않는다");
+
+        assert_eq!(error.kind, AtomKind::Table);
+        assert!(error.bytes <= CHUNK_MAX_BYTES);
+        let shown = error.to_string();
+        assert!(shown.contains("block unit"), "{shown}");
+        assert!(!shown.contains("바이트"), "바이트 예산을 넘지 않았는데 그렇게 말한다: {shown}");
+    }
+
+    #[test]
+    fn pipe_lines_without_a_separator_row_stay_plain_lines() {
+        let markdown = "| 이것은 표가 아니다\n| 구분선이 없다\n";
+        let atoms = atoms(markdown);
+
+        assert_eq!(atoms.len(), 2);
+        assert!(atoms.iter().all(|atom| atom.kind == AtomKind::Line));
+    }
+
     #[test]
     fn atoms_cover_the_whole_document_in_order() {
-        let markdown = "# 제목\n\n```text\n펜스\n\n안\n```\n\n마지막";
+        let markdown = "# 제목\n\n```text\n펜스\n\n안\n```\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n마지막";
         let atoms = atoms(markdown);
 
         let mut offset = 0;

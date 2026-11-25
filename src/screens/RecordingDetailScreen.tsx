@@ -53,6 +53,7 @@ import {
   aiNoteTrouble,
   type AiNoteTabView,
   type AiNoteTrouble,
+  type NoteGroup,
   type NoteSection,
   type NoteView,
 } from './aiNoteView';
@@ -1819,9 +1820,64 @@ function NoteSectionBlock({ section }: { section: NoteSection }) {
           ))}
         </ul>
       )}
+      {section.kind === 'grouped' &&
+        section.groups.map((group, groupIndex) => (
+          <NoteGroupBlock
+            key={`${section.title}-${groupIndex}`}
+            group={group}
+            keyPrefix={`${section.title}-${groupIndex}`}
+          />
+        ))}
       {/* 비어 있는 것은 실제 결과다. 오류로 그리지 않는다 (ADR-0008 §7.3). */}
       {section.emptyText !== null && <p className="hint">{section.emptyText}</p>}
     </section>
+  );
+}
+
+/**
+ * `grouped` 섹션의 묶음 하나 — 소제목 · 글머리표 · 선택 비교표.
+ *
+ * 표는 **구조로 온 표만** 그린다 ({@link NoteGroup.table}). 항목 문자열은 `| a | b |`처럼
+ * 보여도 글머리표 한 줄 그대로다 — 이 컴포넌트는 문자열을 해석하지 않는다.
+ */
+function NoteGroupBlock({ group, keyPrefix }: { group: NoteGroup; keyPrefix: string }) {
+  return (
+    <div className="note__group">
+      <p className="note__group-heading">{group.heading}</p>
+      {group.items.length > 0 && (
+        <ul className="note__items">
+          {group.items.map((item, index) => (
+            <li key={`${keyPrefix}-${index}`} className="note__item">
+              {item}
+            </li>
+          ))}
+        </ul>
+      )}
+      {group.table !== undefined && (
+        <div className="note__table-wrap">
+          <table className="note__table">
+            <thead>
+              <tr>
+                {group.table.columns.map((column, index) => (
+                  <th key={`${keyPrefix}-col-${index}`} scope="col">
+                    {column}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {group.table.rows.map((row, rowIndex) => (
+                <tr key={`${keyPrefix}-row-${rowIndex}`}>
+                  {row.map((cell, cellIndex) => (
+                    <td key={`${keyPrefix}-cell-${rowIndex}-${cellIndex}`}>{cell}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
   );
 }
 

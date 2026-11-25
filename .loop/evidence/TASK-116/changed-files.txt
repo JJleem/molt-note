@@ -1,0 +1,19 @@
+TASK-116 changed files (test-only; no product code touched):
+  A src-tauri/tests/meeting_table_notion_e2e.rs
+
+Path exercised (same functions sync::run::document_of / sync::run::send call; no DB, provider, or network):
+  MeetingNoteV2 -> encode_content -> decode_content
+  -> export::markdown::render(&ExportDocument, include_transcript in {true,false})
+  -> notion::chunk::split_markdown
+
+Checks:
+  - every GFM table (25 group tables + 1 table extracted from a string item) appears whole in exactly one chunk;
+    every `|` run in every chunk has a header + separator row and a consistent column count
+  - tables are surrounded by blank lines (not inside bullets)
+  - no `- ` bullet line contains table syntax (incl. a pre-flattened `| a | b | |---|` item)
+  - no [HH:MM:SS] pattern in the markdown or in any chunk
+  - chunks.concat() == markdown, chunks within byte/unit budgets, >1 chunk, 40 lead variants x 2 transcript options,
+    and at least one chunk boundary falls right before a table
+  - a note without tables (legacy JSON without a `table` key) renders to a fixed expected string for both
+    transcript options and splits into exactly that single chunk
+Product bugs found: none.

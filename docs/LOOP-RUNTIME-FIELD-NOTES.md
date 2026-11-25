@@ -3326,3 +3326,57 @@ Tests  2 failed | 699 passed (701)
 ### Status
 
 **OPEN** — 1회. OBS-030과 함께, 이번 Plan에서 Planner의 `stop_condition` 선택이 두 번 문제가 됐다.
+
+---
+
+## OBS-033 — `execute-plan --timeout`은 Task별이 아니라 Plan 실행 전체에 걸렸고, 끊긴 REVIEW Task를 `execute-plan`이 다시 집지 않았다
+
+- **Date**: 2026-11-25
+- **Phase / Goal**: Phase 5.12 (`phase-prompt/05.12-clean-minutes-and-capture-cause.md`)
+- **Plan ID**: `PLAN-20261125T033136Z` · **Plan executions**: `PLANEXEC-20261125T040813Z` (LIMIT_REACHED) → `PLANEXEC-20261125T040824Z` (아무것도 실행 안 함)
+- **Task**: `TASK-116` · `EXEC-20261125T040356Z-TASK-116` → `EXEC-20261125T040833Z-TASK-116` (DONE)
+- **Command**: `loopctl execute-plan PLAN-20261125T033136Z --timeout 1800`
+
+### 관측된 사실
+
+운영자는 `--timeout 1800`을 **Worker 하나의 timeout**으로 생각하고 줬다 (OBS-028 · 029의 1800s와 같은 뜻으로).
+결과:
+
+```text
+Plan Result: LIMIT_REACHED · stop_reason TASK_STOPPED
+  TASK-116 stopped with LIMIT_REACHED (ORCHESTRATION_TIMEOUT)
+  detail: "no gate report for the latest run"
+Duration: 33m 22s        ← 앞 8 Task가 모두 DONE (각 1~6분)
+```
+
+TASK-116의 Worker는 4분 17초 만에 REVIEW로 끝났고, Gate를 돌기 전에 Plan 전체 시간이 1800s를 넘었다.
+
+그 뒤 `execute-plan`을 timeout 없이 다시 불렀다:
+
+```text
+no task is ready; outstanding: TASK-116 (REVIEW)
+Tasks executed this run: (none)
+```
+
+**재실행이 남은 Task부터 이어가지 않았다** — REVIEW 상태는 READY가 아니라서다. `loopctl execute TASK-116`이
+Gate → Verifier를 돌려 39초 만에 DONE이 됐다.
+
+### 기대한 동작
+
+- `execute-plan --timeout`의 범위가 도움말에 보인다 (현재 `--timeout`만 나열된다).
+- "re-running `execute-plan` resumes from the remaining tasks"라는 안내가 REVIEW Task에도 성립하거나,
+  그 경우 안내가 `execute <TASK>`를 가리킨다.
+
+### Impact
+
+- 수동 fallback 1회. 비용·시간 손실은 작다 (Worker 결과가 보존됐다).
+- 안내 문구가 실제 동작과 달라 운영자가 한 번 헛돌았다.
+
+### Possible improvement (미검증)
+
+1. 도움말·CLI 출력에 timeout의 범위(Plan 전체)를 적는다. Task별 timeout은 별도 옵션으로.
+2. `execute-plan` 재실행이 REVIEW Task를 Gate부터 이어간다 — 또는 정지 안내가 `execute <TASK>`를 말한다.
+
+### Status
+
+**OPEN** — 1회. 운영자 쪽 교훈: `execute-plan`에 `--timeout`을 주지 않는다.

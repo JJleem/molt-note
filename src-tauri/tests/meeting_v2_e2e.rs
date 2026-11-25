@@ -74,7 +74,8 @@ fn large_v2_fixture() -> MeetingNoteV2 {
                 title: "Q4 제품 로드맵 점검 및 마일스톤 확인".to_owned(),
                 groups: vec![
                     TopicGroup {
-                        heading: "일정 확정".to_owned(),
+                        table: None,
+                        heading:"일정 확정".to_owned(),
                         items: vec![
                             "MVP 출시를 9월 30일로 확정했다. 지난 주 논의에서 10월 중순으로 밀릴 수 있다는 우려가 있었으나, 백엔드 API 리팩토링이 예정보다 일주일 빨리 끝나면서 여유가 생겼다. 스프린트 계획을 재조정하여 남은 6주 동안 2주 단위 3개 스프린트를 진행한다.".to_owned(),
                             "베타 테스트는 10월 15일부터 2주간 진행하며, 초대 대상은 기존 고객 중 활성 사용자 100명으로 한다. 정하늘 매니저가 선정 기준을 이번 주 금요일까지 공유한다. 선정 기준은 MAU(월간 활성 사용), 사용 기능 다양성, 과거 피드백 이력을 기반으로 한다.".to_owned(),
@@ -83,7 +84,8 @@ fn large_v2_fixture() -> MeetingNoteV2 {
                         ],
                     },
                     TopicGroup {
-                        heading: "리소스 배분".to_owned(),
+                        table: None,
+                        heading:"리소스 배분".to_owned(),
                         items: vec![
                             "프론트엔드 최민수 개발자가 디자인 시스템 전환과 성능 최적화를 병행하기 어렵다는 의견을 냈다. 김철수 PM이 디자인 시스템 전환의 우선순위를 낮추고 성능 최적화에 집중하도록 조율했다. 성능 최적화가 사용자 경험에 직접적인 영향을 주므로 출시 전에 반드시 완료해야 한다는 데 합의했다.".to_owned(),
                             "외주 디자이너 1명을 10월 한 달간 투입하여 디자인 시스템 마이그레이션 가이드 작성을 지원하기로 했다. 이영희 리드가 외주 업체 3곳의 포트폴리오를 검토 중이며, 이번 주 내로 선정한다. 예산은 Q4 운영비에서 충당한다.".to_owned(),
@@ -91,7 +93,8 @@ fn large_v2_fixture() -> MeetingNoteV2 {
                         ],
                     },
                     TopicGroup {
-                        heading: "리스크 관리".to_owned(),
+                        table: None,
+                        heading:"리스크 관리".to_owned(),
                         items: vec![
                             "10월 연휴(추석)로 인해 실질 작업일이 예상보다 3일 적다. 이를 감안하여 스프린트 2의 스토리 포인트를 10% 줄이기로 했다. 연휴 전에 코드 프리즈를 하고, 연휴 후에는 통합 테스트에 집중한다.".to_owned(),
                             "외부 API 연동 파트너 중 1곳이 자체 API 버전 업그레이드를 11월에 예고했다. 호환성 문제가 발생할 수 있으므로, 박지민 개발자가 사전에 변경 사항을 확인하고 대응 계획을 세운다.".to_owned(),
@@ -103,7 +106,8 @@ fn large_v2_fixture() -> MeetingNoteV2 {
                 title: "디자인 시스템 v2 전환 현황 및 타이포그래피 표준화".to_owned(),
                 groups: vec![
                     TopicGroup {
-                        heading: "토큰 표준화 현황".to_owned(),
+                        table: None,
+                        heading:"토큰 표준화 현황".to_owned(),
                         items: vec![
                             "디자인 토큰 표준화가 예상보다 복잡하여 2주 추가가 필요하다. 색상 토큰은 완료되었으나 타이포그래피와 스페이싱 토큰이 남아 있다. 색상 토큰은 라이트/다크 모드 각각 48개로, 시맨틱 네이밍 규칙을 적용했다. 타이포그래피는 본문/제목/캡션/라벨 4단계 × 4가지 굵기로 설계 중이며, 반응형 크기 조절 로직도 포함된다.".to_owned(),
                             "컴포넌트 라이브러리의 Storybook 문서화가 60% 완료되었다. 나머지 40%는 외주 디자이너 투입 후 2주 내 완료 예정이다. 현재 문서화된 컴포넌트는 Button, Input, Card, Modal, Toast, Navigation 등 24개이며, 미완료 컴포넌트는 Table, Chart, Calendar, DatePicker 등 16개이다.".to_owned(),
@@ -111,7 +115,8 @@ fn large_v2_fixture() -> MeetingNoteV2 {
                         ],
                     },
                     TopicGroup {
-                        heading: "마이그레이션 계획".to_owned(),
+                        table: None,
+                        heading:"마이그레이션 계획".to_owned(),
                         items: vec![
                             "기존 컴포넌트에서 신규 디자인 토큰으로의 전환은 화면별로 진행한다. 우선순위는 사용 빈도 순이며, 대시보드 → 설정 → 상세 화면 → 보고서 → 관리자 화면 순서다. 각 화면의 전환에는 디자인 검수와 QA를 포함하여 평균 3일이 소요될 것으로 예상한다.".to_owned(),
                             "마이그레이션 중 기존 디자인과 신규 디자인이 공존하는 기간이 최대 3주이며, 그 동안의 시각적 불일치는 감수하기로 했다. 다만, 고객 문의가 예상되므로 공지사항을 미리 준비한다. 공지 문안은 김철수 PM이 작성한다.".to_owned(),
@@ -119,7 +124,8 @@ fn large_v2_fixture() -> MeetingNoteV2 {
                         ],
                     },
                     TopicGroup {
-                        heading: "접근성 고려사항".to_owned(),
+                        table: None,
+                        heading:"접근성 고려사항".to_owned(),
                         items: vec![
                             "신규 디자인 시스템이 WCAG 2.1 AA 수준을 충족하는지 확인이 필요하다. 특히 색상 대비, 키보드 내비게이션, 스크린 리더 호환성을 집중 점검한다. 정하늘 매니저가 접근성 체크리스트를 마이그레이션 가이드에 추가한다.".to_owned(),
                             "다크 모드 적용 시 텍스트 가독성과 색상 대비 비율이 달라지므로, 다크 모드 전용 색상 토큰을 별도로 정의한다. 이영희 리드가 담당하며, 자동 대비 검사 도구(Axe 또는 Lighthouse)를 CI에 통합하는 것도 검토한다.".to_owned(),
@@ -131,7 +137,8 @@ fn large_v2_fixture() -> MeetingNoteV2 {
                 title: "백엔드 API 리팩토링 결과 리뷰 및 성능 분석".to_owned(),
                 groups: vec![
                     TopicGroup {
-                        heading: "성과 지표".to_owned(),
+                        table: None,
+                        heading:"성과 지표".to_owned(),
                         items: vec![
                             "REST → GraphQL 전환이 계획대로 완료되었다. 스테이징 환경 배포 후 2주간의 안정성 모니터링에서 에러율 0.02%를 기록했다. 모니터링 대시보드(Grafana)에서 P95 응답 시간, 에러율, 스루풋을 실시간으로 추적하고 있으며, 알림 임계값도 설정 완료했다.".to_owned(),
                             "응답 시간이 평균 30% 개선되었고, 특히 대시보드 초기 로드가 2.1초에서 1.4초로 줄었다. 번들 사이즈도 15% 감소했다. GraphQL의 필드 선택 기능 덕분에 불필요한 데이터 전송이 줄었고, 네트워크 바이트 전송량이 40% 감소한 것으로 측정되었다.".to_owned(),
@@ -139,7 +146,8 @@ fn large_v2_fixture() -> MeetingNoteV2 {
                         ],
                     },
                     TopicGroup {
-                        heading: "남은 작업과 폐기 일정".to_owned(),
+                        table: None,
+                        heading:"남은 작업과 폐기 일정".to_owned(),
                         items: vec![
                             "레거시 REST 엔드포인트는 11월 말까지 유지한 후 폐기한다. 외부 연동 파트너 3곳에 마이그레이션 가이드를 이미 공유했다. 파트너별 전환 완료 예정일은 A사 11/10, B사 11/15, C사 11/20이며, 각 파트너의 테스트 환경에서 검증 완료 후 본번 전환한다.".to_owned(),
                             "GraphQL subscription을 활용한 실시간 알림 기능은 11월 스프린트에서 구현할 예정이다. WebSocket과 SSE 중 WebSocket을 선택했으며, 재연결 전략(exponential backoff + jitter)과 메시지 스키마를 먼저 설계한다. 박지민 개발자가 설계 문서를 12월 1일까지 공유한다.".to_owned(),
@@ -147,7 +155,8 @@ fn large_v2_fixture() -> MeetingNoteV2 {
                         ],
                     },
                     TopicGroup {
-                        heading: "우려 사항 및 기술 부채".to_owned(),
+                        table: None,
+                        heading:"우려 사항 및 기술 부채".to_owned(),
                         items: vec![
                             "N+1 쿼리 문제가 일부 resolver에서 발견되었다. DataLoader 패턴 적용이 필요하며, 박지민 개발자가 이번 주 내로 수정할 예정이다. 영향 받는 resolver는 User→Posts, Post→Comments, Comment→Author 3곳이다.".to_owned(),
                             "GraphQL 스키마 버전 관리 전략이 아직 정해지지 않았다. deprecated 필드의 유지 기간, 클라이언트 버전별 스키마 호환성 정책을 11월 초까지 확정한다. 김철수 PM이 논의를 주도한다.".to_owned(),
@@ -159,7 +168,8 @@ fn large_v2_fixture() -> MeetingNoteV2 {
                 title: "QA 자동화 전략 및 커버리지 목표 수립".to_owned(),
                 groups: vec![
                     TopicGroup {
-                        heading: "현황 분석".to_owned(),
+                        table: None,
+                        heading:"현황 분석".to_owned(),
                         items: vec![
                             "현재 자동화 테스트 커버리지는 72%이며, 주로 단위 테스트에 집중되어 있다. E2E 테스트는 15개 시나리오만 자동화되어 있고, 나머지 43개는 수동이다. 수동 테스트 1회 실행에 QA 인력 2명 × 3일이 소요되어 릴리스 주기를 늦추는 주요 병목이다.".to_owned(),
                             "Playwright 도입을 검토 중이며, Cypress에서의 마이그레이션 비용을 정하늘 매니저가 평가 중이다. Playwright의 장점은 크로스 브라우저 테스트(Chrome, Firefox, Safari)를 단일 API로 지원하고, 자동 대기(auto-wait) 기능으로 테스트 안정성이 높다는 점이다. 단점은 팀의 학습 곡선과 기존 테스트 코드 재작성 비용이다.".to_owned(),
@@ -167,7 +177,8 @@ fn large_v2_fixture() -> MeetingNoteV2 {
                         ],
                     },
                     TopicGroup {
-                        heading: "목표 및 일정".to_owned(),
+                        table: None,
+                        heading:"목표 및 일정".to_owned(),
                         items: vec![
                             "12월 말까지 전체 커버리지 90% 달성. 특히 결제 플로우와 사용자 가입 플로우의 E2E 자동화를 우선 진행한다. 결제 플로우는 카드 결제, 계좌 이체, 쿠폰 적용 3가지 시나리오를 포함하며, 가입 플로우는 이메일, 소셜(구글/카카오/애플) 4가지 경로를 포함한다.".to_owned(),
                             "회귀 테스트 실행 시간을 현재 45분에서 20분 이내로 단축한다. 병렬 실행과 테스트 분할 전략을 적용할 예정이다. CI 파이프라인에서 테스트를 4개 샤드로 나누어 병렬 실행하고, 느린 테스트는 별도 야간 스위트로 분리한다.".to_owned(),
@@ -180,7 +191,8 @@ fn large_v2_fixture() -> MeetingNoteV2 {
                 title: "고객 피드백(VOC) 분석 및 우선순위 결정".to_owned(),
                 groups: vec![
                     TopicGroup {
-                        heading: "분석 결과 요약".to_owned(),
+                        table: None,
+                        heading:"분석 결과 요약".to_owned(),
                         items: vec![
                             "지난 달 수집된 VOC 153건 중 기능 요청이 67건(44%), 버그 리포트가 42건(27%), UX 개선 요청이 31건(20%), 기타 13건(9%)이었다. 수집 채널별로는 인앱 피드백 82건, 고객센터 전화 35건, 이메일 21건, SNS 멘션 15건이었다.".to_owned(),
                             "가장 많이 요청된 기능은 다크 모드(23건), 대시보드 커스터마이징(18건), 모바일 앱 오프라인 모드(15건) 순이었다. 다크 모드는 3개월 연속 1위를 차지하고 있어 즉각적인 대응이 필요하다. 대시보드 커스터마이징은 위젯 재배치와 데이터 소스 선택 기능을 포함한다.".to_owned(),
@@ -188,7 +200,8 @@ fn large_v2_fixture() -> MeetingNoteV2 {
                         ],
                     },
                     TopicGroup {
-                        heading: "우선순위 선정 기준".to_owned(),
+                        table: None,
+                        heading:"우선순위 선정 기준".to_owned(),
                         items: vec![
                             "고객 영향도(1~5)와 구현 난이도(1~5) 매트릭스를 기반으로 상위 20건을 선정했다. 영향도 5 × 난이도 1인 항목(예: 로딩 속도 개선)이 최우선이고, 영향도 5 × 난이도 5인 항목(예: 오프라인 모드)은 장기 로드맵으로 분류했다.".to_owned(),
                             "심각도 1 버그 3건은 이번 주 핫픽스로 처리하고, 나머지는 11월 스프린트 백로그에 추가한다. 핫픽스는 별도 릴리스 브랜치에서 진행하며, 프로덕션 배포 후 1시간 모니터링을 필수로 한다.".to_owned(),
@@ -201,7 +214,8 @@ fn large_v2_fixture() -> MeetingNoteV2 {
                 title: "인프라 및 DevOps 현안 논의".to_owned(),
                 groups: vec![
                     TopicGroup {
-                        heading: "클라우드 이관 결정".to_owned(),
+                        table: None,
+                        heading:"클라우드 이관 결정".to_owned(),
                         items: vec![
                             "AWS → GCP 이관을 내년 1분기로 연기한다. Q4에는 제품 개발에 리소스를 집중하고, 이관은 안정기에 진행하는 것이 리스크가 적다는 판단이다. 이관 시에는 데이터베이스(RDS→CloudSQL), 스토리지(S3→GCS), 컴퓨트(EC2/ECS→GKE), CDN(CloudFront→Cloud CDN) 순서로 진행할 계획이다.".to_owned(),
                             "현재 AWS 비용이 월 850만원이며, GCP 이관 시 예상 비용은 월 620만원이다. 연간 2,760만원 절감 효과가 있으나, 이관 자체에 3개월과 추가 인력이 필요하다. 이관 기간 동안 두 클라우드를 동시에 운영해야 하므로 일시적으로 비용이 증가한다(예상 월 1,200만원).".to_owned(),
@@ -209,7 +223,8 @@ fn large_v2_fixture() -> MeetingNoteV2 {
                         ],
                     },
                     TopicGroup {
-                        heading: "CI/CD 파이프라인 개선".to_owned(),
+                        table: None,
+                        heading:"CI/CD 파이프라인 개선".to_owned(),
                         items: vec![
                             "빌드 시간이 현재 평균 12분이며, 캐싱 전략 개선으로 8분으로 단축할 수 있을 것으로 보인다. Docker 레이어 캐싱, npm ci 캐싱, 빌드 아티팩트 재사용이 주요 개선 포인트다. 박지민 개발자가 이번 주 내로 적용한다.".to_owned(),
                             "스테이징 환경과 프로덕션 환경의 설정 차이로 인한 배포 실패가 이번 달 2건 발생했다. 환경 설정을 코드화(IaC)하여 일치시키는 작업을 다음 스프린트에 포함한다. Terraform 또는 Pulumi 중 선택하며, 박지민 개발자가 두 도구를 비교하여 11월 중 결정한다.".to_owned(),
@@ -217,7 +232,8 @@ fn large_v2_fixture() -> MeetingNoteV2 {
                         ],
                     },
                     TopicGroup {
-                        heading: "모니터링 및 알림".to_owned(),
+                        table: None,
+                        heading:"모니터링 및 알림".to_owned(),
                         items: vec![
                             "현재 Grafana + Prometheus 기반 모니터링을 사용 중이다. 알림 채널은 Slack과 PagerDuty를 병행하며, 심각도에 따라 대응 수준을 차등화한다. P1은 PagerDuty(즉시 호출), P2는 Slack + 이메일, P3는 Slack만.".to_owned(),
                             "APM(Application Performance Monitoring) 도입을 검토한다. Datadog, New Relic, Elastic APM 중 하나를 선택하여 트레이싱과 분산 로그를 통합 관리한다. 특히 GraphQL 전환 후 쿼리별 성능 추적이 중요해졌다.".to_owned(),

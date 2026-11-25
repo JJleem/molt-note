@@ -125,8 +125,8 @@ pub use export::Exporter;
 pub use notes::NoteGenerator;
 pub use notion::{NotionSendStatus, NotionSender};
 pub use payload::{
-    AiNotePayload, AiNoteStatusPayload, AiProviderStatusPayload, CaptureReportPayload,
-    ExportedAiRequestPayload, ExportedFilePayload, HandoffTextPayload, InputDevicePayload,
+    AiNotePayload, AiNoteStatusPayload, AiProviderStatusPayload, CaptureIncidentPayload,
+    CaptureReportPayload, ExportedAiRequestPayload, ExportedFilePayload, HandoffTextPayload, InputDevicePayload,
     InputLevelPayload, MissingAudioPayload, NewRecording, NotionConnectionPayload,
     AiCredentialStatusPayload, NotionSendStatusPayload, NotionSyncPayload,
     NotionTokenStatusPayload, PortionPayload,
@@ -939,14 +939,30 @@ pub fn finish_recording(
         start_automatic_transcription(storage, transcriber, &recording.id);
     }
 
-    if let Some(warning) = &capture.warning {
+    if let Some(event) = capture_warning_event(&capture) {
         if let Some(dir) = log_dir {
-            crate::log::write_event(dir, &format!("finish_recording: 캡처 경고 — {warning}"));
+            crate::log::write_event(dir, &event);
         }
     }
 
     let warning = capture.warning.clone();
     Ok(StoppedRecordingPayload { recording, capture, warning })
+}
+
+/// 캡처 경고를 이벤트 로그 한 줄로. 경고가 없으면 없음이다.
+///
+/// 원인 분류는 [`CaptureIncidentPayload`]의 **값에서** 온다 — 경고 문장을 뜯어 추측하지
+/// 않는다. 담기는 것은 경고 문장 · 원인 · 실패 종류 · 경과 시간 · 장치의 기술적 표현뿐이며
+/// **오디오 · 전사 내용은 들어가지 않는다** (INV-6).
+pub fn capture_warning_event(capture: &CaptureReportPayload) -> Option<String> {
+    let warning = capture.warning.as_ref()?;
+    Some(match &capture.incident {
+        Some(incident) => format!(
+            "finish_recording: 캡처 경고 — {warning} [{}]",
+            incident.log_fields()
+        ),
+        None => format!("finish_recording: 캡처 경고 — {warning}"),
+    })
 }
 
 

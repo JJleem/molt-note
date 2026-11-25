@@ -38,7 +38,9 @@ use objc2_core_audio::{
 };
 use objc2_core_audio_types::{AudioBufferList, AudioTimeStamp};
 
-use super::capture::{CaptureFormat, OpenCapture, SampleSink, SampleSource};
+use super::capture::{
+    CaptureFormat, CaptureIncident, IncidentCause, OpenCapture, SampleSink, SampleSource,
+};
 use super::meeting_mix::{fold_to_stereo, OUTPUT_CHANNELS};
 use crate::domain::{Failure, FailureKind};
 use crate::platform::system_audio::{self, MeetingInput};
@@ -131,7 +133,7 @@ struct Stopper {
 unsafe impl Send for Stopper {}
 
 impl Stopper {
-    fn stop(self) -> Result<(), Failure> {
+    fn stop(self) -> Result<(), CaptureIncident> {
         let device_id = self.input.device_id();
 
         // **순서가 규칙이다**: 멈추고 → 떼어내고 → 그다음에야 context를 거둔다.
@@ -147,12 +149,17 @@ impl Stopper {
         drop(self.input);
 
         if dropped > 0 {
-            return Err(Failure::retryable(
-                FailureKind::AudioDevice,
-                "녹음 중에 일부 소리를 파일에 넘기지 못했다.",
-            )
-            .with_detail(format!("dropped_frames={dropped}"))
-            .with_source_data_at_risk());
+            // 보내지 못한 것은 큐가 찼다는 뜻이다. 언제였는지는 세지 않으므로 경과 시간은 모른다.
+            return Err(CaptureIncident {
+                cause: IncidentCause::QueueOverflow,
+                elapsed_secs: None,
+                failure: Failure::retryable(
+                    FailureKind::AudioDevice,
+                    "녹음 중에 일부 소리를 파일에 넘기지 못했다.",
+                )
+                .with_detail(format!("dropped_frames={dropped}"))
+                .with_source_data_at_risk(),
+            });
         }
         Ok(())
     }

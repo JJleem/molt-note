@@ -1,0 +1,53 @@
+# End-to-end test: a table note through Markdown and Notion chunking
+# Runtime이 PLAN-20261125T033136Z 승인 시점에 생성했다 (proposal P9). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-116
+status: DONE
+
+request: |-
+  Add an end-to-end test under tests/ (or the existing Rust integration tests in src-tauri), with no real provider calls or network. Build a v2 Meeting note that contains a table, plus enough topics for chunking. Run it through Markdown export (the path Notion sending uses, including the transcript-inclusion options) and split_markdown, then check: every table is wholly inside one chunk, no bullet line contains table syntax, the output contains no [HH:MM:SS] pattern, and a note without a table produces output identical to before. Do not change product code; if a product bug turns up, report it as a failure.
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-109
+  - TASK-110
+  - TASK-112
+
+stop_condition:
+  gates: [build, lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 2
+
+acceptance_criteria:
+  - id: P9-AC1
+    description: |-
+      The end-to-end test checks table integrity across the markdown → split_markdown path and the absence of broken tables, and makes no real provider or network calls.
+    verification:
+      type: verifier
+      instruction: |-
+        Check that only test files changed.
+  - id: P9-AC2
+    description: |-
+      Tests pass.
+    verification:
+      type: gate
+      ref: test
+  - id: P9-AC3
+    description: |-
+      Build passes.
+    verification:
+      type: gate
+      ref: build
+  - id: P9-AC4
+    description: |-
+      Lint passes.
+    verification:
+      type: gate
+      ref: lint
+
+evidence: []
+
+failure_memo: []

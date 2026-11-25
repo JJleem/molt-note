@@ -388,7 +388,7 @@ mod tests {
     fn the_declared_prompt_versions_are_untouched() {
         // 이 경로는 promptVersion을 만들지도 저장하지도 않지만 (§6.4), 상수를 고치면 이미
         // 저장된 provenance가 거짓이 된다 — 값이 그대로인지 여기서도 본다.
-        assert_eq!(PROMPT_VERSION_MEETING, "v1.meeting.54529c96");
+        assert_eq!(PROMPT_VERSION_MEETING, "v1.meeting.b2f3ba75");
         assert_eq!(PROMPT_VERSION_STUDY, "v1.study.2cfad6a0");
         assert_eq!(PROMPT_VERSION_SUMMARY, "v1.summary.beca7e6c");
     }

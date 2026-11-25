@@ -1,0 +1,33 @@
+# Update docs/MEETING-NOTE-FORMAT.md
+# Runtime이 PLAN-20261125T033136Z 승인 시점에 생성했다 (proposal P6). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-113
+status: DONE
+
+request: |-
+  Docs-only task — do not touch source or tests. In docs/MEETING-NOTE-FORMAT.md: (1) change every sentence that tells the writer to record transcript times (around lines 94, 120, 122) into instructions that refer to what was being discussed; (2) state where comparison tables go (the group's table field, rendered as a separate table under the topic, not inside a bullet); (3) add 'do not write transcript times' to the list of things not to do. Keep the rest of the format.
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-112
+
+stop_condition:
+  gates: []
+  requires_verifier: true
+  max_consecutive_failures: 2
+
+acceptance_criteria:
+  - id: P6-AC1
+    description: |-
+      The document has no instruction to record times, it describes where tables go, and 'do not write times' is listed among the things not to do.
+    verification:
+      type: verifier
+      instruction: |-
+        Check that the document matches the P5 prompt changes and that git diff shows only this document changed.
+
+evidence: []
+
+failure_memo: []

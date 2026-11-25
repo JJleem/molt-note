@@ -1603,6 +1603,44 @@ p.loading {
   padding: var(--space-1) 0 0;
 }
 
+/* 주제별 섹션의 묶음 — 굵은 소제목 · 글머리표 · 선택 비교표. */
+.note__group {
+  margin-top: var(--space-3);
+}
+
+.note__group-heading {
+  margin: 0;
+  font-weight: var(--weight-strong);
+  color: var(--text);
+}
+
+/* 열이 많아도 본문 폭을 밀어내지 않게 가로로 넘긴다. */
+.note__table-wrap {
+  margin-top: var(--space-2);
+  overflow-x: auto;
+}
+
+.note__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--type-secondary);
+  line-height: var(--line-tight);
+}
+
+.note__table th,
+.note__table td {
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--hairline);
+  text-align: left;
+  vertical-align: top;
+}
+
+.note__table th {
+  background: var(--surface-sidebar);
+  font-weight: var(--weight-strong);
+  color: var(--text);
+}
+
 /* 이 노트가 무엇으로 언제 어떤 Transcript에서 만들어졌는가 (§7.3). 본문보다 조용하다. */
 
 .note__provenance {

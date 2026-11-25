@@ -1,0 +1,50 @@
+# Show tables on the app screen
+# Runtime이 PLAN-20261125T033136Z 승인 시점에 생성했다 (proposal P4). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-111
+status: DONE
+
+request: |-
+  Make the V2 Meeting section model in src/screens/aiNoteView.ts carry a group's table, and have the React component that renders AI Note sections (e.g. in RecordingDetailScreen) draw it as an HTML <table> with a thead and tbody. Style it with the existing App.css tokens. Groups without a table render as before. Add a string-item defense like the Markdown one if needed (do not draw a one-line pipe string as a table). Tests (Vitest, under the existing test location): a V2 note with a table yields a section with the table columns and rows; a note without a table yields the same sections as before.
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-108
+
+stop_condition:
+  gates: [build, lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 3
+
+acceptance_criteria:
+  - id: P4-AC1
+    description: |-
+      The aiNoteView section model passes the table through, and the component renders it as a <table>.
+    verification:
+      type: verifier
+      instruction: |-
+        Check aiNoteView.ts and the rendering component code and tests.
+  - id: P4-AC2
+    description: |-
+      Section output for a note without a table is unchanged (there is a test).
+    verification:
+      type: verifier
+  - id: P4-AC3
+    description: |-
+      Tests pass.
+    verification:
+      type: gate
+      ref: test
+  - id: P4-AC4
+    description: |-
+      Build passes.
+    verification:
+      type: gate
+      ref: build
+
+evidence: []
+
+failure_memo: []

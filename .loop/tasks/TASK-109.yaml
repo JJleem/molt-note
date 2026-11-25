@@ -1,0 +1,55 @@
+# Markdown renderer: table block and defense against broken one-line tables
+# Runtime이 PLAN-20261125T033136Z 승인 시점에 생성했다 (proposal P2). 계획 서술은 여기 남기지 않는다.
+
+id: TASK-109
+status: DONE
+
+request: |-
+  Change render_topic in src-tauri/src/export/markdown.rs. (1) If a group has a table, emit it as a GFM table block (header row, separator row, data rows) with a blank line before and after, outside any bullet; put it after the group's items. (2) In cells, escape `|` as `\|` and turn line breaks (\n, \r\n) into a space or `<br>` so the table does not break. Pad short rows to the column count; columns beyond the header width may be dropped or the header extended. An empty table (no columns) is not emitted. (3) Defense: if a string item contains table syntax (e.g. a line starting with `|`, or a separator like `|---|`), do not produce a one-line table such as `- | a | b | |---|`. Either convert lines that form a table into a table block, or neutralize the pipes — the worker picks one, but the output must contain no bullet line holding table syntax. (4) Notes without a table field (existing v2 and v1) render exactly as before. Tests: (b) the Markdown of a v2 note with a table contains a GFM table surrounded by blank lines, and no line starting with '- ' contains '|---'; (c) cells with `|` and line breaks keep the column count intact in every row; (e) a regression test that the existing output without tables is unchanged; plus the defense case.
+
+execution:
+  role: impl
+
+# 선행 Task. 전부 DONE이 되기 전까지 이 Task는 READY가 되지 않는다.
+depends_on:
+  - TASK-108
+
+stop_condition:
+  gates: [build, lint, test]
+  requires_verifier: true
+  max_consecutive_failures: 3
+
+acceptance_criteria:
+  - id: P2-AC1
+    description: |-
+      The Markdown of a v2 note with a table contains a GFM table block surrounded by blank lines, and no bullet line contains table syntax.
+    verification:
+      type: verifier
+      instruction: |-
+        Check the test that covers the render_topic table output and the bullet-line check.
+  - id: P2-AC2
+    description: |-
+      A `|` or line break in a cell does not change the column count of any row (there is a test).
+    verification:
+      type: verifier
+  - id: P2-AC3
+    description: |-
+      Table syntax inside a string item does not produce a one-line table, and Markdown without a table field is unchanged (there are tests).
+    verification:
+      type: verifier
+  - id: P2-AC4
+    description: |-
+      Tests pass.
+    verification:
+      type: gate
+      ref: test
+  - id: P2-AC5
+    description: |-
+      Lint passes.
+    verification:
+      type: gate
+      ref: lint
+
+evidence: []
+
+failure_memo: []
